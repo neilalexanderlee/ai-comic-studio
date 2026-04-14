@@ -108,15 +108,7 @@ pnpm dev
 使用本地代码构建镜像，确保运行的是你自己的代码：
 
 ```bash
-docker compose up -d --build
-```
-
-### Docker Compose
-
-项目已自带 `docker-compose.yml`，直接运行即可：
-
-```bash
-docker compose up -d
+docker compose up --build
 ```
 
 ### 数据持久化
@@ -142,7 +134,10 @@ docker stop ai-comic-builder
 docker rm ai-comic-builder
 
 # 重新构建（如代码有更新）
-docker compose up -d --build
+docker compose up --build
+
+# 如果代码没有更新，直接启动现有容器
+docker compose up
 ```
 
 ## 生成流水线
