@@ -1,0 +1,12 @@
+services:
+  ai-comic-builder:
+    build:
+      context: .
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
+    ports:
+      - "127.0.0.1:3007:3007"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    restart: unless-stopped

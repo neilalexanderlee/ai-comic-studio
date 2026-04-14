@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN use_project_prompts INTEGER NOT NULL DEFAULT 0;

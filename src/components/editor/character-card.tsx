@@ -1,0 +1,252 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { useTranslations } from "next-intl";
+import { uploadUrl } from "@/lib/utils/upload-url";
+import { useModelStore, type ModelRef } from "@/stores/model-store";
+import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2 } from "lucide-react";
+import { InlineModelPicker } from "@/components/editor/model-selector";
+import { apiFetch } from "@/lib/api-fetch";
+import { useModelGuard } from "@/hooks/use-model-guard";
+import { toast } from "sonner";
+import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
+
+interface CharacterCardProps {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  visualHint: string | null;
+  referenceImage: string | null;
+  onUpdate: () => void;
+  batchGenerating?: boolean;
+  scope?: string;
+  onPromote?: () => void;
+  onDelete?: () => void;
+  episodeName?: string;
+}
+
+export function CharacterCard({
+  id,
+  projectId,
+  name,
+  description,
+  visualHint,
+  referenceImage,
+  onUpdate,
+  batchGenerating,
+  scope,
+  onPromote,
+  onDelete,
+  episodeName,
+}: CharacterCardProps) {
+  const t = useTranslations();
+  const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const providers = useModelStore((s) => s.providers);
+  const defaultImageModel = useModelStore((s) => s.defaultImageModel);
+  const [imageModelRef, setImageModelRef] = useState<ModelRef | null>(() => defaultImageModel);
+  const [editName, setEditName] = useState(name);
+  const [editDesc, setEditDesc] = useState(description);
+  const [editVisualHint, setEditVisualHint] = useState(visualHint ?? "");
+
+  // Sync local state when props change (e.g. after re-extraction)
+  useEffect(() => { setEditName(name); }, [name]);
+  useEffect(() => { setEditDesc(description); }, [description]);
+  useEffect(() => { setEditVisualHint(visualHint ?? ""); }, [visualHint]);
+  const [generating, setGenerating] = useState(false);
+  const [lightbox, setLightbox] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const imageGuard = useModelGuard("image");
+  const isGenerating = generating || (!!batchGenerating && !referenceImage);
+
+  function resolveImageRef(ref: ModelRef | null) {
+    if (!ref) return null;
+    const provider = providers.find((p) => p.id === ref.providerId);
+    if (!provider) return null;
+    return {
+      providerId: provider.id,
+      protocol: provider.protocol,
+      baseUrl: provider.baseUrl,
+      apiKey: provider.apiKey || "",
+      secretKey: provider.secretKey,
+      modelId: ref.modelId,
+    };
+  }
+
+  async function handleSave() {
+    await apiFetch(`/api/projects/${projectId}/characters/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editName, description: editDesc, visualHint: editVisualHint }),
+    });
+    onUpdate();
+  }
+
+  async function handleGenerateImage() {
+    if (!imageGuard()) return;
+    setGenerating(true);
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_character_image",
+          payload: { characterId: id },
+          modelConfig: { ...getModelConfig(), image: resolveImageRef(imageModelRef) },
+        }),
+      });
+      await response.json();
+    } catch (err) {
+      console.error("Character image error:", err);
+      toast.error(t("common.generationFailed"));
+    }
+    setGenerating(false);
+    onUpdate();
+  }
+
+  return (
+    <div className="group overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-all duration-300 hover:border-[--border-hover] hover:shadow-lg hover:shadow-black/5">
+      {/* Avatar area */}
+      <div className="relative flex items-center justify-center bg-gradient-to-b from-[--surface] to-white p-8">
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white opacity-0 transition-all hover:bg-red-600 group-hover:opacity-100"
+            title={t("common.delete")}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {referenceImage ? (
+          <div className="w-full aspect-video overflow-hidden rounded-xl cursor-pointer" onClick={() => setLightbox(true)}>
+            <img
+              src={uploadUrl(referenceImage)}
+              alt={name}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        ) : isGenerating ? (
+          <div className="w-full aspect-video rounded-xl animate-shimmer" />
+        ) : (
+          <div className="flex w-full aspect-video items-center justify-center rounded-xl bg-gradient-to-br from-primary/15 to-accent/10 text-3xl font-bold text-primary">
+            {name.charAt(0).toUpperCase()}
+          </div>
+        )}
+      </div>
+
+      {/* Scope badge */}
+      {scope && (
+        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+              scope === "main"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-purple-100 text-purple-700"
+            }`}
+          >
+            {scope === "main" ? t("episode.mainCharacter") : t("episode.guestCharacter")}
+          </span>
+          {episodeName && (
+            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
+              {episodeName}
+            </span>
+          )}
+          {scope === "guest" && onPromote && (
+            <button
+              onClick={onPromote}
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+            >
+              <ArrowUpCircle className="h-3 w-3" />
+              {t("episode.promoteToMain")}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Info */}
+      <div className="space-y-3 p-4">
+        <Input
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          onBlur={handleSave}
+          className="h-9 font-display font-semibold text-base"
+        />
+        <Textarea
+          value={editDesc}
+          onChange={(e) => setEditDesc(e.target.value)}
+          onBlur={handleSave}
+          placeholder={t("character.description")}
+          className="h-32 resize-none text-sm"
+        />
+        <Input
+          value={editVisualHint}
+          onChange={(e) => setEditVisualHint(e.target.value)}
+          onBlur={handleSave}
+          placeholder={t("character.visualHint")}
+          className="h-8 text-xs text-muted-foreground"
+        />
+        <div className="space-y-2">
+            <InlineModelPicker capability="image" value={imageModelRef} onChange={setImageModelRef} />
+            <div className="flex gap-2">
+              <Button
+                onClick={handleGenerateImage}
+                disabled={isGenerating}
+                className="flex-1"
+                size="sm"
+              >
+                {isGenerating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                {isGenerating ? t("common.generating") : t("character.generateImage")}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0 px-2.5"
+                title="Copy image prompt"
+                onClick={async () => {
+                  const prompt = buildCharacterTurnaroundPrompt(editDesc || editName, editName);
+                  await navigator.clipboard.writeText(prompt);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }}
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-green-500" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5" />
+                )}
+              </Button>
+            </div>
+          </div>
+      </div>
+
+      {referenceImage && (
+        <Dialog open={lightbox} onOpenChange={setLightbox}>
+          <DialogContent className="!max-w-[90vw] !w-[90vw] border-0 bg-transparent p-0 shadow-none" showCloseButton={false}>
+            <DialogTitle className="sr-only">{name}</DialogTitle>
+            <div className="relative inline-block w-full">
+              <img
+                src={uploadUrl(referenceImage)}
+                alt={name}
+                className="w-full max-h-[85vh] object-contain rounded-xl"
+              />
+              <button
+                onClick={() => setLightbox(false)}
+                className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
+              >
+                <span className="text-sm leading-none">✕</span>
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}

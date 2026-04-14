@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Character Card Design Options</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Noto Sans SC', system-ui, sans-serif;
+    background: #f5f3f0;
+    color: #1a1a1a;
+    padding: 40px;
+  }
+  h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+  h2 { font-size: 20px; font-weight: 600; margin-bottom: 20px; color: #666; }
+  .section { margin-bottom: 60px; }
+  .section-title {
+    font-size: 14px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #e8553a;
+    margin-bottom: 24px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e8553a;
+    display: inline-block;
+  }
+
+  /* ========== OPTION A: Compact Table Row ========== */
+  .option-a .grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: white;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid #e8e6e3;
+  }
+  .option-a .row {
+    display: grid;
+    grid-template-columns: 44px 140px 1fr 80px 100px;
+    align-items: center;
+    padding: 10px 16px;
+    gap: 12px;
+    background: white;
+    transition: background 0.15s;
+    cursor: pointer;
+  }
+  .option-a .row:hover { background: #faf8f6; }
+  .option-a .row .avatar {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px;
+    color: white;
+    flex-shrink: 0;
+  }
+  .option-a .row .name {
+    font-size: 13px; font-weight: 600; color: #1a1a1a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .option-a .row .desc {
+    font-size: 11px; color: #999;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .option-a .row .freq {
+    font-size: 11px; color: #bbb;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .option-a .row .freq strong { color: #1a1a1a; font-size: 16px; font-weight: 700; }
+  .option-a .badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 3px 10px; border-radius: 20px;
+    font-size: 10px; font-weight: 600;
+    cursor: pointer; transition: all 0.2s;
+    border: 1.5px solid transparent;
+  }
+  .option-a .badge.main { background: #dbeafe; color: #1d4ed8; border-color: #93c5fd; }
+  .option-a .badge.main:hover { background: #bfdbfe; }
+  .option-a .badge.guest { background: #f3e8ff; color: #7c3aed; border-color: #c4b5fd; }
+  .option-a .badge.guest:hover { background: #e9d5ff; }
+
+  /* ========== OPTION B: Visual Cards with Avatar + Accent Strip ========== */
+  .option-b .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .option-b .card {
+    background: white;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid #e8e6e3;
+    transition: all 0.25s;
+    cursor: pointer;
+    position: relative;
+  }
+  .option-b .card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    border-color: #d0cec9;
+  }
+  .option-b .card .strip {
+    height: 4px;
+    width: 100%;
+  }
+  .option-b .card .strip.main { background: linear-gradient(90deg, #3b82f6, #60a5fa); }
+  .option-b .card .strip.guest { background: linear-gradient(90deg, #8b5cf6, #a78bfa); }
+  .option-b .card .body { padding: 14px; }
+  .option-b .card .top {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .option-b .card .avatar {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 16px;
+    color: white; flex-shrink: 0;
+  }
+  .option-b .card .info { flex: 1; min-width: 0; }
+  .option-b .card .name {
+    font-size: 13px; font-weight: 700; color: #1a1a1a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .option-b .card .meta {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px; color: #aaa; margin-top: 2px;
+  }
+  .option-b .card .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: #ddd; }
+  .option-b .card .visual-hint {
+    display: inline-block;
+    padding: 2px 8px; border-radius: 6px;
+    font-size: 10px; font-weight: 500;
+    background: #f5f3f0; color: #888;
+    margin-bottom: 8px;
+  }
+  .option-b .card .desc {
+    font-size: 11px; color: #888; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .option-b .card .badge-float {
+    position: absolute; top: 12px; right: 12px;
+    padding: 2px 8px; border-radius: 10px;
+    font-size: 9px; font-weight: 700;
+    letter-spacing: 0.5px;
+  }
+  .option-b .badge-float.main { background: #dbeafe; color: #2563eb; }
+  .option-b .badge-float.guest { background: #f3e8ff; color: #7c3aed; }
+
+  /* ========== OPTION C: Horizontal Compact Cards with Progress Bar ========== */
+  .option-c .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 8px;
+  }
+  .option-c .card {
+    display: flex; align-items: stretch;
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #e8e6e3;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+  .option-c .card:hover {
+    background: #fdfcfb;
+    border-color: #d0cec9;
+  }
+  .option-c .card .side {
+    width: 4px; flex-shrink: 0;
+  }
+  .option-c .card .side.main { background: #3b82f6; }
+  .option-c .card .side.guest { background: #a78bfa; }
+  .option-c .card .content {
+    flex: 1; padding: 10px 14px;
+    display: flex; align-items: center; gap: 12px;
+    min-width: 0;
+  }
+  .option-c .card .avatar {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+    color: white; flex-shrink: 0;
+  }
+  .option-c .card .text { flex: 1; min-width: 0; }
+  .option-c .card .name-row {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .option-c .card .name {
+    font-size: 13px; font-weight: 600; color: #1a1a1a;
+  }
+  .option-c .card .hint {
+    font-size: 10px; color: #aaa;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .option-c .card .desc {
+    font-size: 11px; color: #999; margin-top: 2px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .option-c .card .freq-bar {
+    width: 60px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .option-c .card .freq-num {
+    font-size: 14px; font-weight: 700; color: #1a1a1a;
+  }
+  .option-c .card .bar-track {
+    width: 100%; height: 3px; border-radius: 2px; background: #f0eeeb;
+    overflow: hidden;
+  }
+  .option-c .card .bar-fill {
+    height: 100%; border-radius: 2px;
+    transition: width 0.3s;
+  }
+  .option-c .card .bar-fill.main { background: #3b82f6; }
+  .option-c .card .bar-fill.guest { background: #a78bfa; }
+  .option-c .card .badge-sm {
+    padding: 2px 6px; border-radius: 6px;
+    font-size: 9px; font-weight: 600;
+  }
+  .option-c .badge-sm.main { background: #eff6ff; color: #2563eb; }
+  .option-c .badge-sm.guest { background: #faf5ff; color: #7c3aed; }
+</style>
+</head>
+<body>
+
+<h1>角色卡片设计方案</h1>
+<h2>Import Pipeline — 角色确认步骤</h2>
+
+<!-- ===== OPTION A ===== -->
+<div class="section">
+  <div class="section-title">方案 A — 紧凑表格行</div>
+  <p style="font-size:12px;color:#999;margin-bottom:16px;">信息密度最高，适合大量角色快速浏览。一眼看到名字、出现次数、描述。</p>
+  <div class="option-a">
+    <div class="grid">
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#c0392b,#e74c3c);">朱</div>
+        <div class="name">朱由检（崇祯）</div>
+        <div class="desc">电影级写实历史正剧风格，85mm镜头微距特写——【体态】二十多岁男性，身形消瘦，肤色苍白...</div>
+        <div class="freq"><strong>51</strong><br>次</div>
+        <div><span class="badge main" onclick="this.classList.toggle('main');this.classList.toggle('guest');this.textContent=this.textContent==='主角'?'配角':'主角'">主角</span></div>
+      </div>
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#8e44ad,#9b59b6);">骆</div>
+        <div class="name">骆养性</div>
+        <div class="desc">电影级写实历史正剧风格，明代晚期背景，无滤镜，85mm镜头特写——【体态】中年男性...</div>
+        <div class="freq"><strong>39</strong><br>次</div>
+        <div><span class="badge main">主角</span></div>
+      </div>
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#2c3e50,#34495e);">王</div>
+        <div class="name">王承恩</div>
+        <div class="desc">电影级写实历史正剧风格，85mm镜头微距特写，无滤镜真实质感——【体态】四十多岁中年太监...</div>
+        <div class="freq"><strong>35</strong><br>次</div>
+        <div><span class="badge main">主角</span></div>
+      </div>
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#16a085,#1abc9c);">刘</div>
+        <div class="name">刘朝</div>
+        <div class="desc">电影级写实历史正剧风格，明代晚期背景，无滤镜，85mm镜头特写——【体态】中年男性...</div>
+        <div class="freq"><strong>29</strong><br>次</div>
+        <div><span class="badge main">主角</span></div>
+      </div>
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#d35400,#e67e22);">曹</div>
+        <div class="name">曹化淳</div>
+        <div class="desc">电影级写实历史正剧风格，85mm镜头微距特写——【体态】五十余岁，身形微胖...</div>
+        <div class="freq"><strong>3</strong><br>次</div>
+        <div><span class="badge guest">配角</span></div>
+      </div>
+      <div class="row">
+        <div class="avatar" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);">高</div>
+        <div class="name">高起潜</div>
+        <div class="desc">电影级写实历史正剧风格——【体态】中年太监，面白无须，身形瘦削...</div>
+        <div class="freq"><strong>2</strong><br>次</div>
+        <div><span class="badge guest">配角</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== OPTION B ===== -->
+<div class="section">
+  <div class="section-title">方案 B — 视觉卡片</div>
+  <p style="font-size:12px;color:#999;margin-bottom:16px;">视觉层次丰富，顶部彩条区分主配角，悬停有微动效。适合角色较少时细看。</p>
+  <div class="option-b">
+    <div class="grid">
+      <div class="card">
+        <div class="strip main"></div>
+        <div class="body">
+          <div class="top">
+            <div class="avatar" style="background:linear-gradient(135deg,#c0392b,#e74c3c);">朱</div>
+            <div class="info">
+              <div class="name">朱由检（崇祯）</div>
+              <div class="meta"><span>出现 51 次</span><span class="dot"></span><span>龙袍金冠</span></div>
+            </div>
+          </div>
+          <div class="visual-hint">深青色交领常服 · 阴沉消瘦</div>
+          <div class="desc">电影级写实历史正剧风格，85mm镜头微距特写——二十多岁男性，身形消瘦，肤色苍白中透着病态的暗黄...</div>
+          <span class="badge-float main">主角</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="strip main"></div>
+        <div class="body">
+          <div class="top">
+            <div class="avatar" style="background:linear-gradient(135deg,#8e44ad,#9b59b6);">骆</div>
+            <div class="info">
+              <div class="name">骆养性</div>
+              <div class="meta"><span>出现 39 次</span><span class="dot"></span><span>大红直身佩刀</span></div>
+            </div>
+          </div>
+          <div class="visual-hint">大红色直身便服 · 冷峻肃杀</div>
+          <div class="desc">电影级写实历史正剧风格——中年男性，身形魁梧健硕，国字脸，留着修剪整齐的黑色短须...</div>
+          <span class="badge-float main">主角</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="strip main"></div>
+        <div class="body">
+          <div class="top">
+            <div class="avatar" style="background:linear-gradient(135deg,#2c3e50,#34495e);">王</div>
+            <div class="info">
+              <div class="name">王承恩</div>
+              <div class="meta"><span>出现 35 次</span><span class="dot"></span><span>暗砖红色贴里</span></div>
+            </div>
+          </div>
+          <div class="visual-hint">暗砖红太监服 · 微弓着腰</div>
+          <div class="desc">电影级写实历史正剧风格——四十多岁中年太监，面部圆润松弛，肤色惨白，额头布满汗珠...</div>
+          <span class="badge-float main">主角</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="strip guest"></div>
+        <div class="body">
+          <div class="top">
+            <div class="avatar" style="background:linear-gradient(135deg,#d35400,#e67e22);">曹</div>
+            <div class="info">
+              <div class="name">曹化淳</div>
+              <div class="meta"><span>出现 3 次</span><span class="dot"></span><span>深紫太监服</span></div>
+            </div>
+          </div>
+          <div class="visual-hint">深紫色太监服 · 老态龙钟</div>
+          <div class="desc">电影级写实历史正剧风格——五十余岁，身形微胖，面容苍老，穿深紫色太监常服...</div>
+          <span class="badge-float guest">配角</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="strip guest"></div>
+        <div class="body">
+          <div class="top">
+            <div class="avatar" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);">高</div>
+            <div class="info">
+              <div class="name">高起潜</div>
+              <div class="meta"><span>出现 2 次</span><span class="dot"></span><span>灰褐太监服</span></div>
+            </div>
+          </div>
+          <div class="visual-hint">灰褐色太监服 · 面白瘦削</div>
+          <div class="desc">电影级写实历史正剧风格——中年太监，面白无须，身形瘦削，穿灰褐色下等太监服饰...</div>
+          <span class="badge-float guest">配角</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== OPTION C ===== -->
+<div class="section">
+  <div class="section-title">方案 C — 横向紧凑卡片 + 频率条</div>
+  <p style="font-size:12px;color:#999;margin-bottom:16px;">介于表格和卡片之间，左侧彩条标识主配角，右侧频率柱形可视化。适合中等数量角色。</p>
+  <div class="option-c">
+    <div class="grid">
+      <div class="card">
+        <div class="side main"></div>
+        <div class="content">
+          <div class="avatar" style="background:linear-gradient(135deg,#c0392b,#e74c3c);">朱</div>
+          <div class="text">
+            <div class="name-row">
+              <span class="name">朱由检（崇祯）</span>
+              <span class="badge-sm main">主角</span>
+            </div>
+            <div class="hint">深青色交领常服 · 阴沉消瘦 · 龙椅摩挲</div>
+            <div class="desc">电影级写实历史正剧风格，85mm镜头微距特写——二十多岁男性，身形消瘦...</div>
+          </div>
+          <div class="freq-bar">
+            <div class="freq-num">51</div>
+            <div class="bar-track"><div class="bar-fill main" style="width:100%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="side main"></div>
+        <div class="content">
+          <div class="avatar" style="background:linear-gradient(135deg,#8e44ad,#9b59b6);">骆</div>
+          <div class="text">
+            <div class="name-row">
+              <span class="name">骆养性</span>
+              <span class="badge-sm main">主角</span>
+            </div>
+            <div class="hint">大红色直身便服 · 冷峻肃杀 · 佩绣春刀</div>
+            <div class="desc">电影级写实历史正剧风格——中年男性，身形魁梧健硕，国字脸...</div>
+          </div>
+          <div class="freq-bar">
+            <div class="freq-num">39</div>
+            <div class="bar-track"><div class="bar-fill main" style="width:76%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="side main"></div>
+        <div class="content">
+          <div class="avatar" style="background:linear-gradient(135deg,#2c3e50,#34495e);">王</div>
+          <div class="text">
+            <div class="name-row">
+              <span class="name">王承恩</span>
+              <span class="badge-sm main">主角</span>
+            </div>
+            <div class="hint">暗砖红太监贴里 · 弓腰碎步</div>
+            <div class="desc">电影级写实历史正剧风格——四十多岁中年太监，面部圆润松弛...</div>
+          </div>
+          <div class="freq-bar">
+            <div class="freq-num">35</div>
+            <div class="bar-track"><div class="bar-fill main" style="width:69%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="side guest"></div>
+        <div class="content">
+          <div class="avatar" style="background:linear-gradient(135deg,#d35400,#e67e22);">曹</div>
+          <div class="text">
+            <div class="name-row">
+              <span class="name">曹化淳</span>
+              <span class="badge-sm guest">配角</span>
+            </div>
+            <div class="hint">深紫色太监服 · 老态龙钟</div>
+            <div class="desc">电影级写实历史正剧风格——五十余岁，身形微胖，面容苍老...</div>
+          </div>
+          <div class="freq-bar">
+            <div class="freq-num">3</div>
+            <div class="bar-track"><div class="bar-fill guest" style="width:6%"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="side guest"></div>
+        <div class="content">
+          <div class="avatar" style="background:linear-gradient(135deg,#7f8c8d,#95a5a6);">高</div>
+          <div class="text">
+            <div class="name-row">
+              <span class="name">高起潜</span>
+              <span class="badge-sm guest">配角</span>
+            </div>
+            <div class="hint">灰褐色太监服 · 面白瘦削</div>
+            <div class="desc">电影级写实历史正剧风格——中年太监，面白无须，身形瘦削...</div>
+          </div>
+          <div class="freq-bar">
+            <div class="freq-num">2</div>
+            <div class="bar-track"><div class="bar-fill guest" style="width:4%"></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
