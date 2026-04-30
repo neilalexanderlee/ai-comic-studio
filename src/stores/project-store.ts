@@ -6,6 +6,8 @@ interface Character {
   name: string;
   description: string;
   referenceImage: string | null;
+  beautyImage?: string | null;
+  combatImage?: string | null;
   visualHint?: string | null;
   scope?: string;
   episodeId?: string | null;

@@ -3,6 +3,7 @@ import { characters } from "@/lib/db/schema";
 import { resolveImageProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
+import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { eq } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
 
@@ -19,7 +20,8 @@ export async function handleCharacterImage(task: Task) {
   }
 
   const ai = resolveImageProvider(payload.modelConfig);
-  const prompt = buildCharacterTurnaroundPrompt(character.description || character.name, character.name);
+  const slotContents = await resolveSlotContents("character_image", { userId: "", projectId: character.projectId });
+  const prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
 
   const imagePath = await ai.generateImage(prompt, {
     size: "2560x1440",

@@ -164,6 +164,8 @@ export default function EpisodeCharactersPage() {
               description={char.description}
               visualHint={char.visualHint ?? null}
               referenceImage={char.referenceImage}
+              beautyImage={char.beautyImage}
+              combatImage={char.combatImage}
               onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
               batchGenerating={generatingImages}
               scope={char.scope}

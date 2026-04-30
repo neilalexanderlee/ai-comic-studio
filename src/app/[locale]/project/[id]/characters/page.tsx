@@ -15,6 +15,8 @@ interface Character {
   description: string;
   visualHint: string | null;
   referenceImage: string | null;
+  beautyImage: string | null;
+  combatImage: string | null;
   scope: string;
   episodeId: string | null;
 }
@@ -160,6 +162,8 @@ export default function CharactersPage({
                 description={char.description}
                 visualHint={char.visualHint}
                 referenceImage={char.referenceImage}
+                beautyImage={char.beautyImage}
+                combatImage={char.combatImage}
                 scope={char.scope}
                 onUpdate={fetchData}
                 onDelete={() => handleDelete(char.id, char.name)}
@@ -203,6 +207,8 @@ export default function CharactersPage({
                         description={char.description}
                         visualHint={char.visualHint}
                         referenceImage={char.referenceImage}
+                        beautyImage={char.beautyImage}
+                        combatImage={char.combatImage}
                         scope={char.scope}
                         episodeName={`EP.${String(ep.sequence).padStart(2, "0")} ${ep.title}`}
                         onUpdate={fetchData}

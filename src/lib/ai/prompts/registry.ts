@@ -1207,6 +1207,123 @@ const refVideoPromptDef: PromptDefinition = {
   },
 };
 
+// ─── 4b. beauty_image ──────────────────────────────────
+
+const BEAUTY_IMAGE_ROLE = `你是一位顶级的2D动画与插画角色设定师。你的任务是根据角色描述，生成一张专门用于“日常文戏”的高质量定妆图。`;
+const BEAUTY_IMAGE_RULES = `=== 核心规则 ===
+- 绝对不要给角色佩戴或持有任何武器（如剑、枪、魔法杖等）。如果角色设定中包含专属武器，请确保在此图中武器处于【收刀入鞘、背在身后、或挂在腰间】的非战斗状态。
+- 画面重点展示角色的面部特征、日常表情、服饰细节和日常体态。
+- 不要生成多个视角，只需要一张正面或半侧面的精美半身/全身特写。`;
+
+const beautyImageDef: PromptDefinition = {
+  key: "beauty_image",
+  nameKey: "promptTemplates.prompts.beautyImage",
+  descriptionKey: "promptTemplates.prompts.beautyImageDesc",
+  category: "character",
+  slots: [
+    slot("role_definition", BEAUTY_IMAGE_ROLE, true),
+    slot("style_matching", CHAR_IMAGE_STYLE_MATCHING, true),
+    slot("beauty_rules", BEAUTY_IMAGE_RULES, true),
+    slot("face_detail", CHAR_IMAGE_FACE_DETAIL, true),
+    slot("lighting_rendering", CHAR_IMAGE_LIGHTING_RENDERING, true),
+  ],
+  buildFullPrompt(sc, params) {
+    const s = this.slots;
+    const r = (k: string) => resolve(sc, s, k);
+    const characterName = (params?.characterName as string) ?? undefined;
+    const description = (params?.description as string) ?? "";
+    return [
+      r("role_definition"),
+      "",
+      r("style_matching"),
+      "",
+      `=== 角色描述 ===`,
+      `${characterName ? `名字: ${characterName}\n` : ""}${description}`,
+      "",
+      r("beauty_rules"),
+      "",
+      r("face_detail"),
+      "",
+      r("lighting_rendering"),
+    ].join("\n");
+  },
+};
+
+// ─── 4c. combat_image ──────────────────────────────────
+
+const COMBAT_IMAGE_ROLE = `你是一位顶级的2D动画与动作戏原画师。你的任务是根据角色描述，生成一张专门用于“战斗打戏”的高质量武装定妆图。`;
+const COMBAT_IMAGE_RULES = `=== 核心规则 ===
+- 画面必须展示角色处于紧张的战斗状态、拔出专属武器（如有）、或施展魔法/特效的瞬间。
+- 重点展现武器设计、发光特效、战斗动作和凶狠/专注的表情。
+- 不要生成多个视角，只需要一张充满张力的战斗特写或全身动态图。`;
+
+const combatImageDef: PromptDefinition = {
+  key: "combat_image",
+  nameKey: "promptTemplates.prompts.combatImage",
+  descriptionKey: "promptTemplates.prompts.combatImageDesc",
+  category: "character",
+  slots: [
+    slot("role_definition", COMBAT_IMAGE_ROLE, true),
+    slot("style_matching", CHAR_IMAGE_STYLE_MATCHING, true),
+    slot("combat_rules", COMBAT_IMAGE_RULES, true),
+    slot("weapons_equipment", CHAR_IMAGE_WEAPONS_EQUIPMENT, true),
+    slot("lighting_rendering", CHAR_IMAGE_LIGHTING_RENDERING, true),
+  ],
+  buildFullPrompt(sc, params) {
+    const s = this.slots;
+    const r = (k: string) => resolve(sc, s, k);
+    const characterName = (params?.characterName as string) ?? undefined;
+    const description = (params?.description as string) ?? "";
+    return [
+      r("role_definition"),
+      "",
+      r("style_matching"),
+      "",
+      `=== 角色描述 ===`,
+      `${characterName ? `名字: ${characterName}\n` : ""}${description}`,
+      "",
+      r("combat_rules"),
+      "",
+      r("weapons_equipment"),
+      "",
+      r("lighting_rendering"),
+    ].join("\n");
+  },
+};
+
+// ─── 4d. character_state_router ────────────────────────
+
+const ROUTER_ROLE = `You are an AI scene analyzer. Your job is to determine the state of a character based on the scene description.`;
+const ROUTER_CRITERIA = `=== Decision Criteria ===
+Are they currently fighting, holding a weapon, or preparing for battle?
+Reply ONLY with the exact word 'combat' or 'casual'. No other text is allowed.`;
+
+const characterStateRouterDef: PromptDefinition = {
+  key: "character_state_router",
+  nameKey: "promptTemplates.prompts.characterStateRouter",
+  descriptionKey: "promptTemplates.prompts.characterStateRouterDesc",
+  category: "character",
+  slots: [
+    slot("role_definition", ROUTER_ROLE, true),
+    slot("decision_criteria", ROUTER_CRITERIA, true),
+  ],
+  buildFullPrompt(sc, params) {
+    const s = this.slots;
+    const r = (k: string) => resolve(sc, s, k);
+    const sceneDesc = (params?.sceneDesc as string) ?? "";
+    const characterName = (params?.characterName as string) ?? "";
+    return [
+      r("role_definition"),
+      "",
+      r("decision_criteria"),
+      "",
+      `=== Current Context ===`,
+      `Character Name: "${characterName}"`,
+      `Scene Description: ${sceneDesc}`,
+    ].join("\n");
+  },
+};
+
 // ── Registry ─────────────────────────────────────────────
 
 export const PROMPT_REGISTRY: PromptDefinition[] = [
@@ -1216,6 +1333,9 @@ export const PROMPT_REGISTRY: PromptDefinition[] = [
   characterExtractDef,
   importCharacterExtractDef,
   characterImageDef,
+  beautyImageDef,
+  combatImageDef,
+  characterStateRouterDef,
   shotSplitDef,
   frameGenerateFirstDef,
   frameGenerateLastDef,

@@ -25,7 +25,8 @@ import { buildSceneFramePrompt } from "@/lib/ai/prompts/scene-frame-generate";
 import { resolveImageProvider, resolveVideoProvider, resolveAIProvider } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
-import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
+import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
+import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
 
@@ -138,11 +139,11 @@ export async function POST(
   }
 
   if (action === "single_character_image") {
-    return handleSingleCharacterImage(payload, resolvedModelConfig);
+    return handleSingleCharacterImage(projectId, userId, payload, resolvedModelConfig);
   }
 
   if (action === "batch_character_image") {
-    return handleBatchCharacterImage(projectId, resolvedModelConfig, episodeId);
+    return handleBatchCharacterImage(projectId, userId, resolvedModelConfig, episodeId);
   }
 
   if (action === "shot_split") {
@@ -459,10 +460,16 @@ async function handleCharacterExtract(
 // --- single_character_image: generate turnaround image for one character ---
 
 async function handleSingleCharacterImage(
+  projectId: string,
+  userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig
 ) {
   const characterId = payload?.characterId as string;
+  const targetSlot = (payload?.targetSlot as string) || "referenceImage";
+  const count = (payload?.count as number) || 1;
+  const autoSave = payload?.autoSave !== false;
+
   if (!characterId) {
     return NextResponse.json({ error: "No characterId provided" }, { status: 400 });
   }
@@ -480,20 +487,47 @@ async function handleSingleCharacterImage(
     return NextResponse.json({ error: "Character not found" }, { status: 404 });
   }
 
+  // Resolve prompt dynamically based on targetSlot
+  let promptKey = "character_image";
+  if (targetSlot === "beautyImage") promptKey = "beauty_image";
+  if (targetSlot === "combatImage") promptKey = "combat_image";
+
+  const slotContents = await resolveSlotContents(promptKey, { userId, projectId });
+  
+  let prompt: string;
+  if (targetSlot === "beautyImage") {
+    prompt = buildBeautyImagePrompt(slotContents, character.name, character.description || "");
+  } else if (targetSlot === "combatImage") {
+    prompt = buildCombatImagePrompt(slotContents, character.name, character.description || "");
+  } else {
+    prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
+  }
+
   const ai = resolveImageProvider(modelConfig);
-  const prompt = buildCharacterTurnaroundPrompt(character.description || character.name, character.name);
 
   try {
-    const imagePath = await ai.generateImage(prompt, {
-      size: "2560x1440",
-      aspectRatio: "16:9",
-      quality: "hd",
-    });
-    await db
-      .update(characters)
-      .set({ referenceImage: imagePath })
-      .where(eq(characters.id, characterId));
-    return NextResponse.json({ characterId, imagePath, status: "ok" });
+    const promises = Array.from({ length: count }).map(() =>
+      ai.generateImage(prompt, {
+        size: "2560x1440",
+        aspectRatio: "16:9",
+        quality: "hd",
+      })
+    );
+
+    const imagePaths = await Promise.all(promises);
+
+    // Auto-save only if generating exactly 1 and autoSave is true
+    if (autoSave && imagePaths.length === 1) {
+      const updateData: any = {};
+      updateData[targetSlot] = imagePaths[0];
+      await db
+        .update(characters)
+        .set(updateData)
+        .where(eq(characters.id, characterId));
+      return NextResponse.json({ characterId, imagePath: imagePaths[0], imagePaths, status: "ok" });
+    }
+
+    return NextResponse.json({ characterId, imagePaths, status: "ok" });
   } catch (err) {
     console.error(`[SingleCharacterImage] Error for ${character.name}:`, err);
     return NextResponse.json({ characterId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
@@ -504,6 +538,7 @@ async function handleSingleCharacterImage(
 
 async function handleBatchCharacterImage(
   projectId: string,
+  userId: string,
   modelConfig?: ModelConfig,
   episodeId?: string
 ) {
@@ -527,7 +562,7 @@ async function handleBatchCharacterImage(
     allCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
   }
 
-  const needImages = allCharacters.filter((c) => !c.referenceImage);
+  const needImages = allCharacters.filter((c) => !c.beautyImage);
   if (needImages.length === 0) {
     return NextResponse.json({ results: [], message: "All characters already have images" });
   }
@@ -537,7 +572,8 @@ async function handleBatchCharacterImage(
   const results = await Promise.all(
     needImages.map(async (character) => {
       try {
-        const prompt = buildCharacterTurnaroundPrompt(character.description || character.name, character.name);
+        const slotContents = await resolveSlotContents("character_image", { userId, projectId });
+        const prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
         const imagePath = await ai.generateImage(prompt, {
           size: "2560x1440",
           aspectRatio: "16:9",
@@ -545,7 +581,7 @@ async function handleBatchCharacterImage(
         });
         await db
           .update(characters)
-          .set({ referenceImage: imagePath })
+          .set({ beautyImage: imagePath })
           .where(eq(characters.id, character.id));
         return { characterId: character.id, name: character.name, imagePath, status: "ok" };
       } catch (err) {
@@ -986,10 +1022,6 @@ async function handleBatchFrameGenerate(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const charsWithImages = frameCharacters.filter((c) => c.referenceImage);
-  const charRefImages = charsWithImages.map((c) => c.referenceImage!) ;
-  const charRefLabels = charsWithImages.map((c) => c.name);
-
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const results: Array<{ shotId: string; sequence: number; status: string; firstFrame?: string; lastFrame?: string; error?: string }> = [];
 
@@ -1032,6 +1064,16 @@ async function handleBatchFrameGenerate(
         firstFramePath = copiedFirstFrame;
       } else if (i === 0 || !previousLastFrame) {
         // First shot or broken chain: generate first frame
+        const resolvedChars = await resolveCharacterImages(
+          shot.prompt || "",
+          frameCharacters,
+          modelConfig?.text,
+          userId,
+          projectId
+        );
+        const charRefImages = resolvedChars.map((c) => c.imagePath);
+        const charRefLabels = resolvedChars.map((c) => c.name);
+
         const firstPrompt = buildFirstFramePrompt({
           sceneDescription: shot.prompt || "",
           startFrameDesc: shot.startFrameDesc || shot.prompt || "",
@@ -1050,6 +1092,16 @@ async function handleBatchFrameGenerate(
       }
 
       // Generate last frame for this shot
+      const resolvedChars = await resolveCharacterImages(
+        shot.prompt || "",
+        frameCharacters,
+        modelConfig?.text,
+        userId,
+        projectId
+      );
+      const charRefImages = resolvedChars.map((c) => c.imagePath);
+      const charRefLabels = resolvedChars.map((c) => c.name);
+
       const lastPrompt = buildLastFramePrompt({
         sceneDescription: shot.prompt || "",
         endFrameDesc: shot.endFrameDesc || shot.prompt || "",
@@ -1140,9 +1192,14 @@ async function handleSingleFrameGenerate(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
-  const charRefImages = projectCharacters
-    .map((c) => c.referenceImage)
-    .filter(Boolean) as string[];
+  const resolvedChars = await resolveCharacterImages(
+    shot.prompt || "",
+    projectCharacters,
+    modelConfig?.text,
+    userId,
+    projectId
+  );
+  const charRefImages = resolvedChars.map((c) => c.imagePath);
 
   // Find previous shot's last frame for continuity — same version only (if shot has a version)
   const [previousShot] = shot.versionId
@@ -1496,9 +1553,13 @@ async function handleSingleSceneFrame(
     .from(characters)
     .where(eq(characters.projectId, shot.projectId));
 
-  const charRefs = projectCharacters
-    .filter((c) => !!c.referenceImage)
-    .map((c) => ({ name: c.name, imagePath: c.referenceImage as string }));
+  const charRefs = await resolveCharacterImages(
+    shot.prompt || "",
+    projectCharacters,
+    modelConfig?.text,
+    userId,
+    projectId
+  );
 
   if (charRefs.length === 0) {
     return NextResponse.json(
@@ -1588,18 +1649,6 @@ async function handleBatchSceneFrame(
 
   const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
 
-  const charRefs = projectCharacters
-    .filter((c) => !!c.referenceImage)
-    .map((c) => ({ name: c.name, imagePath: c.referenceImage as string }));
-
-  if (charRefs.length === 0) {
-    return NextResponse.json(
-      { error: "No character reference images available." },
-      { status: 400 }
-    );
-  }
-
-  const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
   const characterDescriptions = projectCharacters
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
@@ -1623,6 +1672,15 @@ async function handleBatchSceneFrame(
 
   for (const shot of eligible) {
     try {
+      const charRefs = await resolveCharacterImages(
+        shot.prompt || "",
+        projectCharacters,
+        modelConfig?.text,
+        userId,
+        projectId
+      );
+      const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
+
       const sceneFramePrompt = buildSceneFramePrompt({
         sceneDescription: shot.prompt || "",
         charRefMapping,
@@ -1688,9 +1746,13 @@ async function handleSingleReferenceVideo(
     .where(eq(characters.projectId, shot.projectId));
 
   // Toonflow pattern: collect all character reference images
-  const charRefs = projectCharacters
-    .filter((c) => !!c.referenceImage)
-    .map((c) => ({ name: c.name, imagePath: c.referenceImage as string }));
+  const charRefs = await resolveCharacterImages(
+    shot.prompt || "",
+    projectCharacters,
+    modelConfig?.text,
+    userId,
+    projectId
+  );
 
   if (charRefs.length === 0) {
     return NextResponse.json(
@@ -1872,21 +1934,6 @@ async function handleBatchReferenceVideo(
 
   const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
 
-  // Toonflow pattern: collect all character reference images
-  const charRefs = projectCharacters
-    .filter((c) => !!c.referenceImage)
-    .map((c) => ({ name: c.name, imagePath: c.referenceImage as string }));
-
-  if (charRefs.length === 0) {
-    return NextResponse.json(
-      { error: "No character reference images available." },
-      { status: 400 }
-    );
-  }
-
-  // Build Toonflow name→image mapping (same for all shots — characters are consistent)
-  const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
-
   const characterDescriptions = projectCharacters
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
@@ -1933,6 +1980,15 @@ async function handleBatchReferenceVideo(
         });
 
         // Step 1: Generate scene reference frame (Toonflow-style)
+        const charRefs = await resolveCharacterImages(
+          shot.prompt || "",
+          projectCharacters,
+          modelConfig?.text,
+          userId,
+          projectId
+        );
+        const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
+        
         const batchRefSlots = await resolveSlotContents("scene_frame_generate", { userId, projectId });
         const sceneFramePrompt = buildSceneFramePrompt({
           sceneDescription: shot.prompt || "",

@@ -9,6 +9,7 @@ import {
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { eq, and, lt, desc } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
+import { resolveCharacterImages } from "@/lib/ai/character-router";
 
 export async function handleFrameGenerate(task: Task) {
   const payload = task.payload as {
@@ -58,6 +59,16 @@ export async function handleFrameGenerate(task: Task) {
     .set({ status: "generating" })
     .where(eq(shots.id, payload.shotId));
 
+  // Intelligently resolve character images based on the scene description
+  const resolvedChars = await resolveCharacterImages(
+    shot.prompt || "",
+    projectCharacters,
+    payload.modelConfig?.text,
+    userId,
+    projectId
+  );
+  const charRefImages = resolvedChars.map(c => c.imagePath);
+
   // Generate first frame using startFrameDesc
   const firstFramePrompt = buildFirstFramePrompt({
     sceneDescription: shot.prompt || "",
@@ -68,9 +79,7 @@ export async function handleFrameGenerate(task: Task) {
   });
   const firstFramePath = await ai.generateImage(firstFramePrompt, {
     quality: "hd",
-    referenceImages: projectCharacters
-      .map((c) => c.referenceImage)
-      .filter(Boolean) as string[],
+    referenceImages: charRefImages,
   });
 
   // Generate last frame using endFrameDesc
@@ -81,9 +90,6 @@ export async function handleFrameGenerate(task: Task) {
     firstFramePath,
     slotContents: frameLastSlots,
   });
-  const charRefImages = projectCharacters
-    .map((c) => c.referenceImage)
-    .filter(Boolean) as string[];
   const lastFramePath = await ai.generateImage(lastFramePrompt, {
     quality: "hd",
     referenceImages: [firstFramePath, ...charRefImages],

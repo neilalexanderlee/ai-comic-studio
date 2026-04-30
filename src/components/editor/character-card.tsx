@@ -8,12 +8,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2 } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2, Upload } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
-import { buildCharacterTurnaroundPrompt } from "@/lib/ai/prompts/character-image";
 
 interface CharacterCardProps {
   id: string;
@@ -22,6 +21,8 @@ interface CharacterCardProps {
   description: string;
   visualHint: string | null;
   referenceImage: string | null;
+  beautyImage?: string | null;
+  combatImage?: string | null;
   onUpdate: () => void;
   batchGenerating?: boolean;
   scope?: string;
@@ -37,6 +38,8 @@ export function CharacterCard({
   description,
   visualHint,
   referenceImage,
+  beautyImage,
+  combatImage,
   onUpdate,
   batchGenerating,
   scope,
@@ -58,9 +61,19 @@ export function CharacterCard({
   useEffect(() => { setEditDesc(description); }, [description]);
   useEffect(() => { setEditVisualHint(visualHint ?? ""); }, [visualHint]);
   const [generating, setGenerating] = useState(false);
-  const [lightbox, setLightbox] = useState(false);
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const imageGuard = useModelGuard("image");
+
+  // Gacha State
+  const [gachaOpen, setGachaOpen] = useState(false);
+  const [gachaSlot, setGachaSlot] = useState<"beautyImage" | "combatImage" | "referenceImage" | null>(null);
+  const [gachaCount, setGachaCount] = useState(4);
+  const [gachaPaths, setGachaPaths] = useState<string[]>([]);
+  const [isGachaGenerating, setIsGachaGenerating] = useState(false);
+
+  // Default generation uses referenceImage currently
   const isGenerating = generating || (!!batchGenerating && !referenceImage);
 
   function resolveImageRef(ref: ModelRef | null) {
@@ -86,56 +99,155 @@ export function CharacterCard({
     onUpdate();
   }
 
-  async function handleGenerateImage() {
-    if (!imageGuard()) return;
-    setGenerating(true);
+  async function handleUpload(field: string, file: File) {
+    if (!file) return;
+    setUploadingField(field);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("field", field);
+    
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) throw new Error("Upload failed");
+      toast.success(t("common.saved"));
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+      toast.error(t("common.saveFailed") || "Upload failed");
+    } finally {
+      setUploadingField(null);
+    }
+  }
+
+  async function handleGachaGenerate() {
+    if (!gachaSlot || !imageGuard()) return;
+    setIsGachaGenerating(true);
+    setGachaPaths([]);
     try {
       const response = await apiFetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "single_character_image",
-          payload: { characterId: id },
+          payload: { characterId: id, targetSlot: gachaSlot, count: gachaCount, autoSave: false },
           modelConfig: { ...getModelConfig(), image: resolveImageRef(imageModelRef) },
         }),
       });
-      await response.json();
+      const data = await response.json();
+      if (data.imagePaths) {
+        setGachaPaths(data.imagePaths);
+      } else {
+        toast.error(data.error || "Generation failed");
+      }
     } catch (err) {
-      console.error("Character image error:", err);
+      console.error("Gacha generate error:", err);
       toast.error(t("common.generationFailed"));
     }
-    setGenerating(false);
-    onUpdate();
+    setIsGachaGenerating(false);
+  }
+
+  async function saveGachaImage(path: string) {
+    if (!gachaSlot) return;
+    try {
+      const updateData: any = {};
+      updateData[gachaSlot] = path;
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updateData),
+      });
+      if (!response.ok) throw new Error("Save failed");
+      toast.success(t("common.saved"));
+      setGachaOpen(false);
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+      toast.error(t("common.saveFailed"));
+    }
+  }
+
+  function renderSlot(field: "beautyImage" | "combatImage" | "referenceImage", titleKey: string, src: string | null | undefined) {
+    const isGeneratingThis = isGenerating && field === "referenceImage";
+    const isUploadingThis = uploadingField === field;
+
+    return (
+      <div className="relative flex-shrink-0 w-[140px] snap-center group/slot flex flex-col gap-1">
+        <div 
+          className="text-[11px] font-semibold text-center text-[--text-secondary] bg-white/50 rounded-full py-1 border border-[--border-subtle] cursor-help"
+          title={t(`character.${titleKey}Tooltip`)}
+        >
+          {t(`character.${titleKey}`)}
+        </div>
+        <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[--surface] border border-[--border-subtle] transition-shadow hover:shadow-md">
+          {src ? (
+            <img 
+              src={uploadUrl(src)} 
+              alt={name} 
+              className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover/slot:scale-105" 
+              onClick={() => setLightboxImage(src)} 
+            />
+          ) : isGeneratingThis || isUploadingThis ? (
+            <div className="w-full h-full animate-shimmer" />
+          ) : (
+            <div className="flex w-full h-full items-center justify-center text-4xl font-bold text-primary/20">
+              {name.charAt(0).toUpperCase()}
+            </div>
+          )}
+          
+          {/* Sparkles button */}
+          <button
+            onClick={() => {
+              setGachaSlot(field);
+              setGachaPaths([]);
+              setGachaOpen(true);
+            }}
+            className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-all hover:bg-black/70 group-hover/slot:opacity-100 shadow-sm"
+            title={t("character.generateImage")}
+          >
+            <Sparkles className="h-3 w-3" />
+          </button>
+
+          {/* Upload Overlay */}
+          <label className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
+            src 
+              ? 'bg-black/40 text-white opacity-0 group-hover/slot:opacity-100' 
+              : 'bg-transparent text-[--text-muted] opacity-0 group-hover/slot:opacity-100 group-hover/slot:bg-black/5 hover:!text-[--text-primary]'
+          }`}>
+            <Upload className="h-5 w-5 mb-1" />
+            <span className="text-[10px] font-medium">{t("character.uploadImage")}</span>
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleUpload(field, file);
+              e.target.value = ''; // reset
+            }} />
+          </label>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-all duration-300 hover:border-[--border-hover] hover:shadow-lg hover:shadow-black/5">
-      {/* Avatar area */}
-      <div className="relative flex items-center justify-center bg-gradient-to-b from-[--surface] to-white p-8">
+    <div className="group overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-all duration-300 hover:border-[--border-hover] hover:shadow-lg hover:shadow-black/5 flex flex-col">
+      {/* Images Area */}
+      <div className="relative bg-gradient-to-b from-[--surface] to-white/50 pt-4 pb-2 border-b border-[--border-subtle]">
         {onDelete && (
           <button
             onClick={onDelete}
-            className="absolute right-2 top-2 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white opacity-0 transition-all hover:bg-red-600 group-hover:opacity-100"
+            className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-red-500/80 text-white opacity-0 transition-all hover:bg-red-600 group-hover:opacity-100 shadow-sm"
             title={t("common.delete")}
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         )}
-        {referenceImage ? (
-          <div className="w-full aspect-video overflow-hidden rounded-xl cursor-pointer" onClick={() => setLightbox(true)}>
-            <img
-              src={uploadUrl(referenceImage)}
-              alt={name}
-              className="w-full h-full object-cover"
-            />
-          </div>
-        ) : isGenerating ? (
-          <div className="w-full aspect-video rounded-xl animate-shimmer" />
-        ) : (
-          <div className="flex w-full aspect-video items-center justify-center rounded-xl bg-gradient-to-br from-primary/15 to-accent/10 text-3xl font-bold text-primary">
-            {name.charAt(0).toUpperCase()}
-          </div>
-        )}
+        
+        <div className="flex gap-3 overflow-x-auto px-4 pb-4 snap-x snap-mandatory scrollbar-hide">
+          {renderSlot("beautyImage", "beautyShot", beautyImage)}
+          {renderSlot("combatImage", "combatShot", combatImage)}
+          {renderSlot("referenceImage", "turnaround", referenceImage)}
+        </div>
       </div>
 
       {/* Scope badge */}
@@ -191,58 +303,84 @@ export function CharacterCard({
         />
         <div className="space-y-2">
             <InlineModelPicker capability="image" value={imageModelRef} onChange={setImageModelRef} />
-            <div className="flex gap-2">
-              <Button
-                onClick={handleGenerateImage}
-                disabled={isGenerating}
-                className="flex-1"
-                size="sm"
-              >
-                {isGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )}
-                {isGenerating ? t("common.generating") : t("character.generateImage")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 px-2.5"
-                title="Copy image prompt"
-                onClick={async () => {
-                  const prompt = buildCharacterTurnaroundPrompt(editDesc || editName, editName);
-                  await navigator.clipboard.writeText(prompt);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                }}
-              >
-                {copied ? (
-                  <Check className="h-3.5 w-3.5 text-green-500" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5" />
-                )}
-              </Button>
-            </div>
-          </div>
+        </div>
       </div>
 
-      {referenceImage && (
-        <Dialog open={lightbox} onOpenChange={setLightbox}>
+      {lightboxImage && (
+        <Dialog open={!!lightboxImage} onOpenChange={(open) => !open && setLightboxImage(null)}>
           <DialogContent className="!max-w-[90vw] !w-[90vw] border-0 bg-transparent p-0 shadow-none" showCloseButton={false}>
             <DialogTitle className="sr-only">{name}</DialogTitle>
             <div className="relative inline-block w-full">
               <img
-                src={uploadUrl(referenceImage)}
+                src={uploadUrl(lightboxImage)}
                 alt={name}
                 className="w-full max-h-[85vh] object-contain rounded-xl"
               />
               <button
-                onClick={() => setLightbox(false)}
+                onClick={() => setLightboxImage(null)}
                 className="absolute top-2 right-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70 transition-colors"
               >
                 <span className="text-sm leading-none">✕</span>
               </button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Gacha Modal */}
+      {gachaOpen && (
+        <Dialog open={gachaOpen} onOpenChange={setGachaOpen}>
+          <DialogContent className="sm:max-w-[600px]">
+            <DialogTitle>
+              {t("character.generateImage")} - {gachaSlot === "beautyImage" ? t("character.beautyShot") : gachaSlot === "combatImage" ? t("character.combatShot") : t("character.turnaround")}
+            </DialogTitle>
+            <div className="space-y-4 pt-4">
+              <div className="flex items-center gap-4">
+                <span className="text-sm font-medium">生成数量:</span>
+                <div className="flex gap-2">
+                  {[1, 2, 4].map((n) => (
+                    <Button
+                      key={n}
+                      size="sm"
+                      variant={gachaCount === n ? "default" : "outline"}
+                      onClick={() => setGachaCount(n)}
+                      disabled={isGachaGenerating}
+                    >
+                      {n} 张
+                    </Button>
+                  ))}
+                </div>
+                <Button 
+                  onClick={handleGachaGenerate} 
+                  disabled={isGachaGenerating}
+                  className="ml-auto"
+                >
+                  {isGachaGenerating ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t("common.generating")}</>
+                  ) : (
+                    <><Sparkles className="mr-2 h-4 w-4" /> 批量抽卡</>
+                  )}
+                </Button>
+              </div>
+
+              {gachaPaths.length > 0 && (
+                <div className="grid grid-cols-2 gap-4 mt-6">
+                  {gachaPaths.map((path, idx) => (
+                    <div 
+                      key={idx} 
+                      className="group relative aspect-[3/4] rounded-xl overflow-hidden border border-[--border-subtle] cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
+                      onClick={() => saveGachaImage(path)}
+                    >
+                      <img src={uploadUrl(path)} alt="Generated" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
+                        <div className="opacity-0 group-hover:opacity-100 bg-black/60 text-white text-sm px-3 py-1.5 rounded-full font-medium shadow-sm transition-opacity">
+                          使用此图
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </DialogContent>
         </Dialog>
