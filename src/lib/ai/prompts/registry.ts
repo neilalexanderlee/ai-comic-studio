@@ -556,6 +556,14 @@ const CHAR_IMAGE_CONSISTENCY_RULES = `=== 四视角一致性 ===
 - 四个视角头顶对齐、腰部对齐
 - 所有视角保持一致的表情和性格气质`;
 
+const CHAR_IMAGE_WEAPONS_EQUIPMENT = `=== 武器与装备（如有）===
+- 以与角色相同的画风渲染所有武器、铠甲和装备
+- 展示适合画风的材质细节：写实风要有使用痕迹，动漫/卡通风要有干净的风格化线条
+- 所有装备必须与角色身体比例协调`;
+
+const CHAR_IMAGE_FINAL_OUTPUT_STANDARD = `=== 最终输出标准 ===
+专业角色设计参考设定图。在所选画风内达到最高质量。零AI瑕疵，视图之间零不一致。这是唯一的权威参考——所有后续生成的画面必须精确再现此角色的此风格。`;
+
 // The name_label slot is locked because it is dynamically generated from the character name
 const CHAR_IMAGE_NAME_LABEL = `=== 角色名标签 ===
 {{NAME_LABEL_PLACEHOLDER}}`;
@@ -568,10 +576,12 @@ const characterImageDef: PromptDefinition = {
   slots: [
     slot("style_matching", CHAR_IMAGE_STYLE_MATCHING, true),
     slot("face_detail", CHAR_IMAGE_FACE_DETAIL, true),
+    slot("weapons_equipment", CHAR_IMAGE_WEAPONS_EQUIPMENT, true),
     slot("four_view_layout", CHAR_IMAGE_FOUR_VIEW_LAYOUT, true),
     slot("lighting_rendering", CHAR_IMAGE_LIGHTING_RENDERING, true),
     slot("consistency_rules", CHAR_IMAGE_CONSISTENCY_RULES, true),
     slot("name_label", CHAR_IMAGE_NAME_LABEL, false),
+    slot("final_output_standard", CHAR_IMAGE_FINAL_OUTPUT_STANDARD, true),
   ],
   buildFullPrompt(sc, params) {
     const s = this.slots;
@@ -597,10 +607,7 @@ const characterImageDef: PromptDefinition = {
       "",
       r("face_detail"),
       "",
-      `=== 武器与装备（如有）===`,
-      `- 以与角色相同的画风渲染所有武器、铠甲和装备`,
-      `- 展示适合画风的材质细节：写实风要有使用痕迹，动漫/卡通风要有干净的风格化线条`,
-      `- 所有装备必须与角色身体比例协调`,
+      r("weapons_equipment"),
       "",
       r("four_view_layout"),
       "",
@@ -610,8 +617,7 @@ const characterImageDef: PromptDefinition = {
       "",
       nameLabelText,
       "",
-      `=== 最终输出标准 ===`,
-      `专业角色设计参考设定图。在所选画风内达到最高质量。零AI瑕疵，视图之间零不一致。这是唯一的权威参考——所有后续生成的画面必须精确再现此角色的此风格。`,
+      r("final_output_standard"),
     ].join("\n");
   },
 };

@@ -1,7 +1,6 @@
 "use client";
 
 import { PromptEditor } from "@/components/prompt-templates/prompt-editor";
-import { LanguageSwitcher } from "@/components/language-switcher";
 import { useTranslations } from "next-intl";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, Wand2 } from "lucide-react";
@@ -48,7 +47,6 @@ export default function PromptSettingsPage() {
             </div>
           </div>
         </div>
-        <LanguageSwitcher />
       </header>
 
       <main className="flex flex-1 flex-col overflow-hidden bg-[--surface] p-4 lg:p-6">

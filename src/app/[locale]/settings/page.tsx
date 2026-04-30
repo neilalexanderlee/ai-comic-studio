@@ -5,7 +5,6 @@ import { ProviderSection } from "@/components/settings/provider-section";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2 } from "lucide-react";
-import { LanguageSwitcher } from "@/components/language-switcher";
 import Link from "next/link";
 
 export default function SettingsPage() {
@@ -32,7 +31,6 @@ export default function SettingsPage() {
             </span>
           </div>
         </div>
-        <LanguageSwitcher />
       </header>
 
       <main className="flex-1 bg-[--surface] p-4 lg:p-6">

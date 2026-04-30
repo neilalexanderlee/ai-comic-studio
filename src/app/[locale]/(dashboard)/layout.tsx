@@ -1,5 +1,4 @@
 import { getTranslations } from "next-intl/server";
-import { LanguageSwitcher } from "@/components/language-switcher";
 import { LogoIcon } from "@/components/logo";
 import Link from "next/link";
 import { Settings, Wand2 } from "lucide-react";
@@ -36,7 +35,6 @@ export default async function DashboardLayout({
           >
             <Settings className="h-4 w-4" />
           </Link>
-          <LanguageSwitcher />
         </div>
       </header>
       <main className="flex-1 bg-[--surface] p-6 lg:p-8">{children}</main>
