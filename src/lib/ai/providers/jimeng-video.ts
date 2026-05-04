@@ -2,8 +2,10 @@
  * JimengVideoProvider
  *
  * 接入即梦AI视频生成接口（火山引擎 Visual API）。
- * 参考文档：https://www.volcengine.com/docs/85621/1791184
- * 版本：视频生成 3.0 720P · 图生视频 · 首尾帧
+ * 参考文档：
+ *   - 720P：https://www.volcengine.com/docs/85621/1791184
+ *   - 1080P：https://www.volcengine.com/docs/85621/1792711
+ * 版本：视频生成 3.0（720P / 1080P）· 图生视频 · 首尾帧
  *
  * 认证：火山引擎 AccessKey / SecretKey（AK/SK）。
  * 接口流程：
@@ -11,8 +13,12 @@
  *   2. CVSync2AsyncGetResult   轮询任务状态，获取 video_urls
  *
  * model 参数对应 req_key，即调用的模型端点。常用值：
- *   - jimeng_i2v_v30   图生视频 3.0 720P（首尾帧 / 首帧）
- *   请以实际开放平台文档为准。
+ *   - jimeng_i2v_v30          图生视频 3.0 720P（首尾帧 / 首帧，单 req_key）
+ *   - jimeng_i2v_v30_1080     图生/文生 3.0 1080P（本客户端按入参自动映射官方 req_key，见 resolveJimengVideoReqKey）
+ *   - jimeng_t2v_v30_1080p    文生视频 3.0 1080P（仅无参考图时）
+ *   - jimeng_i2v_first_v30_1080       图生 1080P · 仅首帧
+ *   - jimeng_i2v_first_tail_v30_1080 图生 1080P · 首尾帧
+ *   请以火山引擎文档为准。
  *
  * 支持的生成模式（对应 VideoGenerateParams）：
  *   - KeyframeVideoParams (firstFrame + lastFrame)：首尾帧模式
@@ -47,6 +53,26 @@ function toImageInput(imagePathOrUrl: string): string {
     return imagePathOrUrl;
   }
   return toBase64DataUrl(imagePathOrUrl);
+}
+
+/**
+ * 1080P 文档中按能力拆分多个 req_key；用统一别名便于在设置里只选一个「1080P」模型。
+ * @see https://www.volcengine.com/docs/85621/1792711
+ */
+export function resolveJimengVideoReqKey(
+  configuredModel: string,
+  imageCount: number
+): string {
+  if (configuredModel !== "jimeng_i2v_v30_1080") {
+    return configuredModel;
+  }
+  if (imageCount === 0) {
+    return "jimeng_t2v_v30_1080p";
+  }
+  if (imageCount === 1) {
+    return "jimeng_i2v_first_v30_1080";
+  }
+  return "jimeng_i2v_first_tail_v30_1080";
 }
 
 export class JimengVideoProvider implements VideoProvider {
@@ -98,8 +124,10 @@ export class JimengVideoProvider implements VideoProvider {
       imageUrls.push(toImageInput(params.initialImage));
     }
 
+    const reqKey = resolveJimengVideoReqKey(this.model, imageUrls.length);
+
     const submitBody: Record<string, unknown> = {
-      req_key: this.model,
+      req_key: reqKey,
       prompt: params.prompt,
       aspect_ratio: params.ratio || "16:9",
       duration: params.duration || 5,
@@ -110,14 +138,15 @@ export class JimengVideoProvider implements VideoProvider {
     }
 
     console.log(
-      `[JimengVideo] Submitting task: req_key=${this.model}, ` +
-        `images=${imageUrls.length}, ratio=${submitBody.aspect_ratio}, duration=${submitBody.duration}`
+      `[JimengVideo] Submitting task: req_key=${reqKey}` +
+        (reqKey !== this.model ? ` (from model=${this.model})` : "") +
+        `, images=${imageUrls.length}, ratio=${submitBody.aspect_ratio}, duration=${submitBody.duration}`
     );
 
     const taskId = await this.submitTask(submitBody);
     console.log(`[JimengVideo] Task submitted: ${taskId}`);
 
-    const videoUrl = await this.pollForResult(taskId);
+    const videoUrl = await this.pollForResult(taskId, reqKey);
 
     // 下载并保存到本地
     const videoRes = await fetch(videoUrl);
@@ -161,10 +190,10 @@ export class JimengVideoProvider implements VideoProvider {
     }
   }
 
-  private async pollForResult(taskId: string): Promise<string> {
+  private async pollForResult(taskId: string, reqKey: string): Promise<string> {
     const action = "CVSync2AsyncGetResult";
     const maxAttempts = 120; // 最多等 10 分钟（120 × 5s）
-    const body = { req_key: this.model, task_id: taskId };
+    const body = { req_key: reqKey, task_id: taskId };
 
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
