@@ -93,23 +93,14 @@ export async function POST(request: Request) {
     }
 
     // ── 即梦AI 视频生成（火山引擎 Visual API）──────────────────────────
-    // model 字段对应 req_key；720P 与 1080P 文档：
-    // https://www.volcengine.com/docs/85621/1791184
+    // 720P 单 req_key 覆盖图生（含首尾帧）：https://www.volcengine.com/docs/85621/1792710
+    // 1080P 官方按模式多个 req_key，客户端用 jimeng_i2v_v30_1080 自动映射：
     // https://www.volcengine.com/docs/85621/1792711
     if (body.protocol === "jimeng-video") {
       return NextResponse.json({
         models: [
-          { id: "jimeng_i2v_v30", name: "Jimeng Video 3.0 720P (Image-to-Video)" },
-          {
-            id: "jimeng_i2v_v30_1080",
-            name: "Jimeng Video 3.0 1080P (text / first / first+last frame)",
-          },
-          { id: "jimeng_t2v_v30_1080p", name: "Jimeng Video 3.0 1080P (Text-to-Video only)" },
-          { id: "jimeng_i2v_first_v30_1080", name: "Jimeng Video 3.0 1080P (first frame only)" },
-          {
-            id: "jimeng_i2v_first_tail_v30_1080",
-            name: "Jimeng Video 3.0 1080P (first + last frame)",
-          },
+          { id: "jimeng_i2v_v30", name: "Jimeng Video 3.0 720P" },
+          { id: "jimeng_i2v_v30_1080", name: "Jimeng Video 3.0 1080P" },
         ],
       });
     }

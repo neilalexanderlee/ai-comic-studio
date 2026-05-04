@@ -3,8 +3,8 @@
  *
  * 接入即梦AI视频生成接口（火山引擎 Visual API）。
  * 参考文档：
- *   - 720P：https://www.volcengine.com/docs/85621/1791184
- *   - 1080P：https://www.volcengine.com/docs/85621/1792711
+ *   - 720P（含首帧 / 首尾帧等，单一 req_key）：https://www.volcengine.com/docs/85621/1792710
+ *   - 1080P（官方按模式拆分 req_key）：https://www.volcengine.com/docs/85621/1792711
  * 版本：视频生成 3.0（720P / 1080P）· 图生视频 · 首尾帧
  *
  * 认证：火山引擎 AccessKey / SecretKey（AK/SK）。
@@ -12,13 +12,10 @@
  *   1. CVSync2AsyncSubmitTask  提交异步任务，获取 task_id
  *   2. CVSync2AsyncGetResult   轮询任务状态，获取 video_urls
  *
- * model 参数对应 req_key，即调用的模型端点。常用值：
- *   - jimeng_i2v_v30          图生视频 3.0 720P（首尾帧 / 首帧，单 req_key）
- *   - jimeng_i2v_v30_1080     图生/文生 3.0 1080P（本客户端按入参自动映射官方 req_key，见 resolveJimengVideoReqKey）
- *   - jimeng_t2v_v30_1080p    文生视频 3.0 1080P（仅无参考图时）
- *   - jimeng_i2v_first_v30_1080       图生 1080P · 仅首帧
- *   - jimeng_i2v_first_tail_v30_1080 图生 1080P · 首尾帧
- *   请以火山引擎文档为准。
+ * model 参数对应 req_key（或本库别名）。设置里只暴露两项即可：
+ *   - jimeng_i2v_v30       720P，官方 `jimeng_i2v_v30` 即支持首帧与首尾帧等（见 720P 总文档）
+ *   - jimeng_i2v_v30_1080  1080P 别名：无图 / 一图 / 两图时分别映射为文生、首帧、首尾帧对应 req_key（见 resolveJimengVideoReqKey）
+ * 若需直连官方字符串，仍可把 model 配成如 `jimeng_i2v_first_v30_1080` 等。
  *
  * 支持的生成模式（对应 VideoGenerateParams）：
  *   - KeyframeVideoParams (firstFrame + lastFrame)：首尾帧模式
@@ -56,7 +53,8 @@ function toImageInput(imagePathOrUrl: string): string {
 }
 
 /**
- * 1080P 文档中按能力拆分多个 req_key；用统一别名便于在设置里只选一个「1080P」模型。
+ * 1080P 在火山文档里按「文生 / 首帧 / 首尾帧」使用不同 req_key；720P 则可用单一 `jimeng_i2v_v30`。
+ * 这里用别名 `jimeng_i2v_v30_1080` 在提交前按图片数量自动选对官方 key，避免在 UI 里列一长串。
  * @see https://www.volcengine.com/docs/85621/1792711
  */
 export function resolveJimengVideoReqKey(

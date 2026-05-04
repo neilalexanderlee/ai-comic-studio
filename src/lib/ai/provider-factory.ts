@@ -99,7 +99,7 @@ export function createVideoProvider(config: ProviderConfig, uploadDir?: string):
       });
     case "jimeng-video":
       // 即梦AI 视频生成（火山引擎 Visual API，AK/SK 认证）
-      // 720P：https://www.volcengine.com/docs/85621/1791184
+      // 720P：https://www.volcengine.com/docs/85621/1792710
       // 1080P：https://www.volcengine.com/docs/85621/1792711
       return new JimengVideoProvider({
         apiKey: config.apiKey,
