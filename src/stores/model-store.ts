@@ -2,7 +2,17 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { ulid } from "ulid";
 
-export type Protocol = "openai" | "gemini" | "seedance" | "kling";
+export type Protocol =
+  | "openai"
+  | "gemini"
+  | "seedance"
+  | "kling"
+  /** 即梦AI 图片生成（火山引擎 Visual API，AK/SK 认证） */
+  | "jimeng"
+  /** 即梦AI 视频生成（火山引擎 Visual API，AK/SK 认证） */
+  | "jimeng-video"
+  /** 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容） */
+  | "doubao";
 export type Capability = "text" | "image" | "video";
 
 export interface Model {

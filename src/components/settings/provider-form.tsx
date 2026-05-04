@@ -20,6 +20,9 @@ const DEFAULT_BASE_URLS: Record<Protocol, string> = {
   gemini: "https://generativelanguage.googleapis.com",
   seedance: "https://ark.cn-beijing.volces.com",
   kling: "https://api.klingai.com",
+  jimeng: "https://visual.volcengineapi.com",
+  "jimeng-video": "https://visual.volcengineapi.com",
+  doubao: "https://ark.cn-beijing.volces.com",
 };
 
 function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {
@@ -34,13 +37,16 @@ function getProtocolOptions(capability: Capability): { value: Protocol; label: s
       { value: "openai", label: "OpenAI" },
       { value: "gemini", label: "Gemini" },
       { value: "kling", label: "Kling" },
+      { value: "doubao", label: "Doubao (Seedream)" },
+      { value: "jimeng", label: "Jimeng (即梦)" },
     ];
   }
   // video
   return [
-    { value: "seedance", label: "Seedance" },
+    { value: "seedance", label: "Doubao (Seedance)" },
     { value: "gemini", label: "Gemini (Veo)" },
     { value: "kling", label: "Kling" },
+    { value: "jimeng-video", label: "Jimeng (即梦)" },
   ];
 }
 
@@ -63,6 +69,11 @@ export function ProviderForm({ provider }: ProviderFormProps) {
   const [secretLoading, setSecretLoading] = useState(false);
   const [secretSaving, setSecretSaving] = useState(false);
 
+  /** 需要 AK/SK 双密钥的协议 */
+  const needsSecretKey =
+    provider.protocol === "kling" ||
+    provider.protocol === "jimeng" ||
+    provider.protocol === "jimeng-video";
   const isKling = provider.protocol === "kling";
 
   useEffect(() => {
@@ -95,12 +106,12 @@ export function ProviderForm({ provider }: ProviderFormProps) {
   }, [provider.id]);
 
   async function handleSaveSecret() {
-    if (!apiKeyInput.trim() && provider.protocol !== "kling") {
+    if (!apiKeyInput.trim() && !needsSecretKey) {
       toast.error("API Key is required");
       return;
     }
-    if (provider.protocol === "kling" && (!apiKeyInput.trim() || !secretKeyInput.trim())) {
-      toast.error("Kling requires Access Key and Secret Key");
+    if (needsSecretKey && (!apiKeyInput.trim() || !secretKeyInput.trim())) {
+      toast.error("This protocol requires Access Key and Secret Key");
       return;
     }
     setSecretSaving(true);
@@ -197,8 +208,8 @@ export function ProviderForm({ provider }: ProviderFormProps) {
         </div>
       </div>
 
-      {/* Row 2: Base URL + API Key (or AK+SK stacked for Kling) */}
-      {isKling ? (
+      {/* Row 2: Base URL + API Key (or AK+SK stacked for Kling/Jimeng) */}
+      {needsSecretKey ? (
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label className="text-xs">Base URL</Label>
@@ -311,7 +322,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
             disabled={
               fetching ||
               secretLoading ||
-              (!apiKeyInput.trim() && provider.protocol !== "kling")
+              (!apiKeyInput.trim() && !needsSecretKey)
             }
           >
             {fetching ? (

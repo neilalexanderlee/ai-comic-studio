@@ -39,6 +39,11 @@ export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams) &
   prompt: string;
   duration: number;
   ratio: string;
+  /**
+   * 视频分辨率（Seedance 2.0 新增参数）。
+   * 支持值：「480p」「720p」「1080p」「2K」，默认由模型决定。
+   */
+  resolution?: string;
   /** Character/style reference images for consistency (e.g. Veo 3.1 referenceImages) */
   referenceImages?: string[];
 };
