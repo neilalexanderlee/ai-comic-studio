@@ -11,6 +11,11 @@ RULES:
    - Add structural notes: scene transitions, emotional beats, visual highlights
    - The downstream AI will have NO access to the source material — everything it needs must be in this field
    - Minimum 1000 words per episode. Longer is better. Include direct quotes from the source.
+6. The "script" field should preserve the episode's actual source text as faithfully as possible:
+   - If the source already looks like a screenplay or storyboard, keep the original scene and shot wording intact
+   - Prefer verbatim extraction over rewriting
+   - Include scene markers, dialogue labels, and shot labels when they exist in the source
+   - Do NOT summarize this field unless the source chunk is clearly not episodic script material
 
 CRITICAL LANGUAGE RULE: ALL output fields (title, description, keywords, script) MUST be in the SAME LANGUAGE as the source material. Chinese input → Chinese output. English input → English output.
 
@@ -21,6 +26,7 @@ OUTPUT FORMAT — JSON array only, no markdown fences, no commentary:
     "description": "Brief plot summary for this episode",
     "keywords": "keyword1, keyword2, keyword3",
     "idea": "1) List all characters in this episode with roles. 2) COPY the key paragraphs and dialogues from the source text verbatim — preserve original wording, do not summarize. 3) Add scene transition notes and emotional beat markers. Minimum 1000 words. The downstream screenplay generator has NO access to the source — this field is its only reference.",
+    "script": "Episode body text preserved from the source. If the source already contains screenplay/storyboard formatting, keep it as close to the original wording and structure as possible.",
     "characters": ["character name 1", "character name 2"]
   }
 ]

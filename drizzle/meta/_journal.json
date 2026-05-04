@@ -113,6 +113,13 @@
       "when": 1775000000000,
       "tag": "0015_add_use_project_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1777732000000,
+      "tag": "0016_add_character_assets",
+      "breakpoints": true
     }
   ]
 }

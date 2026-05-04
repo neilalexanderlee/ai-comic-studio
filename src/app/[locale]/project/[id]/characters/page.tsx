@@ -14,9 +14,13 @@ interface Character {
   name: string;
   description: string;
   visualHint: string | null;
-  referenceImage: string | null;
-  beautyImage: string | null;
-  combatImage: string | null;
+  assets: {
+    id: string;
+    imagePath: string | null;
+    tag: string;
+    assetType: "morph" | "blueprint";
+    isDefault: number;
+  }[];
   scope: string;
   episodeId: string | null;
 }
@@ -161,10 +165,7 @@ export default function CharactersPage({
                 name={char.name}
                 description={char.description}
                 visualHint={char.visualHint}
-                referenceImage={char.referenceImage}
-                beautyImage={char.beautyImage}
-                combatImage={char.combatImage}
-                scope={char.scope}
+                assets={char.assets}
                 onUpdate={fetchData}
                 onDelete={() => handleDelete(char.id, char.name)}
               />
@@ -206,10 +207,7 @@ export default function CharactersPage({
                         name={char.name}
                         description={char.description}
                         visualHint={char.visualHint}
-                        referenceImage={char.referenceImage}
-                        beautyImage={char.beautyImage}
-                        combatImage={char.combatImage}
-                        scope={char.scope}
+                        assets={char.assets}
                         episodeName={`EP.${String(ep.sequence).padStart(2, "0")} ${ep.title}`}
                         onUpdate={fetchData}
                         onPromote={() => handlePromote(char.id)}

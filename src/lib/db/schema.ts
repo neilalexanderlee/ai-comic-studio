@@ -77,6 +77,22 @@ export const episodeCharacters = sqliteTable("episode_characters", {
     .references(() => characters.id, { onDelete: "cascade" }),
 });
 
+export const characterAssets = sqliteTable("character_assets", {
+  id: text("id").primaryKey(),
+  characterId: text("character_id")
+    .notNull()
+    .references(() => characters.id, { onDelete: "cascade" }),
+  imagePath: text("image_path").notNull(),
+  tag: text("tag").notNull().default("日常"),
+  isDefault: integer("is_default").notNull().default(0),
+  assetType: text("asset_type", { enum: ["morph", "blueprint"] })
+    .notNull()
+    .default("morph"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const storyboardVersions = sqliteTable("storyboard_versions", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -123,6 +139,7 @@ export const shots = sqliteTable("shots", {
   })
     .notNull()
     .default("pending"),
+  warnings: text("warnings"),
 });
 
 export const dialogues = sqliteTable("dialogues", {

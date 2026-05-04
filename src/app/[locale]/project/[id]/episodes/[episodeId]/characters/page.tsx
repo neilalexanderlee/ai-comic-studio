@@ -25,7 +25,7 @@ export default function EpisodeCharactersPage() {
   if (!project) return null;
 
   const hasCharactersWithoutImages = project.characters.some(
-    (c) => !c.referenceImage
+    (c) => (c.assets?.length ?? 0) === 0 || !c.assets?.some(a => a.imagePath)
   );
 
   async function handleExtractCharacters() {
@@ -163,9 +163,7 @@ export default function EpisodeCharactersPage() {
               name={char.name}
               description={char.description}
               visualHint={char.visualHint ?? null}
-              referenceImage={char.referenceImage}
-              beautyImage={char.beautyImage}
-              combatImage={char.combatImage}
+              assets={char.assets}
               onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
               batchGenerating={generatingImages}
               scope={char.scope}

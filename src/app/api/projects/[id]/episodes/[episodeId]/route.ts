@@ -5,6 +5,7 @@ import {
   episodes,
   shots,
   characters,
+  characterAssets,
   dialogues,
   storyboardVersions,
   episodeCharacters,
@@ -75,10 +76,20 @@ export async function GET(
 
   let epCharacters: typeof characters.$inferSelect[] = [];
   if (linkedCharIds.length > 0) {
-    epCharacters = await db
+    const charactersData = await db
       .select()
       .from(characters)
       .where(inArray(characters.id, linkedCharIds.map((r) => r.characterId)));
+    
+    epCharacters = await Promise.all(
+      charactersData.map(async (char) => {
+        const assets = await db
+          .select()
+          .from(characterAssets)
+          .where(eq(characterAssets.characterId, char.id));
+        return { ...char, assets };
+      })
+    );
   }
   // No links = no characters for this episode (user needs to run character extraction)
 

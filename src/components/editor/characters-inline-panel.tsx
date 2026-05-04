@@ -14,7 +14,13 @@ import Link from "next/link";
 interface Character {
   id: string;
   name: string;
-  referenceImage: string | null;
+  assets: {
+    id: string;
+    imagePath: string | null;
+    tag: string;
+    assetType: "morph" | "blueprint";
+    isDefault: number;
+  }[];
 }
 
 interface CharactersInlinePanelProps {
@@ -43,7 +49,8 @@ export function CharactersInlinePanel({
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
   const storageKey = `charPanel:${projectId}`;
-  const anyMissingRef = characters.some((c) => !c.referenceImage);
+  const getDisplayImage = (char: Character) => char.assets?.find(a => a.isDefault === 1)?.imagePath || char.assets?.find(a => a.imagePath)?.imagePath || null;
+  const anyMissingRef = characters.some((c) => !getDisplayImage(c));
 
   const [open, setOpen] = useState(false);
 
@@ -120,7 +127,7 @@ export function CharactersInlinePanel({
         </span>
         {needsAttention && (
           <span className="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-            {characters.filter((c) => !c.referenceImage).length}
+            {characters.filter((c) => !getDisplayImage(c)).length}
           </span>
         )}
         {open ? (
@@ -145,43 +152,43 @@ export function CharactersInlinePanel({
               return (
                 <div key={char.id} className="flex flex-col items-center gap-1">
                   {/* Thumbnail */}
-                  <div
-                    className={`relative h-20 w-20 overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${char.referenceImage ? "cursor-zoom-in" : ""}`}
-                    onClick={() => char.referenceImage && setPreviewSrc(uploadUrl(char.referenceImage))}
-                  >
-                    {char.referenceImage ? (
-                      <img
-                        src={uploadUrl(char.referenceImage)}
-                        alt={char.name}
-                        className="h-full w-full object-cover transition-opacity hover:opacity-80"
-                      />
-                    ) : isGenerating ? (
-                      <div className="flex h-full w-full items-center justify-center">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                      </div>
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center text-lg font-bold text-primary">
-                        {char.name.charAt(0).toUpperCase()}
-                      </div>
-                    )}
-                    {/* Status badge */}
-                    <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
-                      char.referenceImage ? "bg-emerald-500" : "bg-amber-500"
-                    }`} />
-                  </div>
-                  {/* Name */}
-                  <span className="max-w-[80px] truncate text-[11px] text-[--text-muted]">{char.name}</span>
-                  {/* Generate button (only when no image) */}
-                  {!char.referenceImage && (
-                    <button
-                      onClick={() => handleGenerate(char.id)}
-                      disabled={isGenerating || !!generatingId}
-                      className="flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-                    >
-                      {isGenerating ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Sparkles className="h-2.5 w-2.5" />}
-                      Gen
-                    </button>
+                <div
+                  className={`relative h-20 w-20 overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${getDisplayImage(char) ? "cursor-zoom-in" : ""}`}
+                  onClick={() => getDisplayImage(char) && setPreviewSrc(uploadUrl(getDisplayImage(char)!))}
+                >
+                  {getDisplayImage(char) ? (
+                    <img
+                      src={uploadUrl(getDisplayImage(char)!)}
+                      alt={char.name}
+                      className="h-full w-full object-cover transition-opacity hover:opacity-80"
+                    />
+                  ) : isGenerating ? (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-lg font-bold text-primary">
+                      {char.name.charAt(0).toUpperCase()}
+                    </div>
                   )}
+                  {/* Status badge */}
+                  <div className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white ${
+                    getDisplayImage(char) ? "bg-emerald-500" : "bg-amber-500"
+                  }`} />
+                </div>
+                {/* Name */}
+                <span className="max-w-[80px] truncate text-[11px] text-[--text-muted]">{char.name}</span>
+                {/* Generate button (only when no image) */}
+                {!getDisplayImage(char) && (
+                  <button
+                    onClick={() => handleGenerate(char.id)}
+                    disabled={isGenerating || !!generatingId}
+                    className="flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    {isGenerating ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Sparkles className="h-2.5 w-2.5" />}
+                    Gen
+                  </button>
+                )}
                 </div>
               );
             })}

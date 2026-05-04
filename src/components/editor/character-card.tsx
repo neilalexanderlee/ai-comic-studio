@@ -14,15 +14,21 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
 
+export interface CharacterAsset {
+  id: string;
+  imagePath: string | null;
+  tag: string;
+  assetType: "morph" | "blueprint";
+  isDefault: number;
+}
+
 interface CharacterCardProps {
   id: string;
   projectId: string;
   name: string;
   description: string;
   visualHint: string | null;
-  referenceImage: string | null;
-  beautyImage?: string | null;
-  combatImage?: string | null;
+  assets?: CharacterAsset[];
   onUpdate: () => void;
   batchGenerating?: boolean;
   scope?: string;
@@ -37,9 +43,7 @@ export function CharacterCard({
   name,
   description,
   visualHint,
-  referenceImage,
-  beautyImage,
-  combatImage,
+  assets = [],
   onUpdate,
   batchGenerating,
   scope,
@@ -68,13 +72,12 @@ export function CharacterCard({
 
   // Gacha State
   const [gachaOpen, setGachaOpen] = useState(false);
-  const [gachaSlot, setGachaSlot] = useState<"beautyImage" | "combatImage" | "referenceImage" | null>(null);
+  const [gachaAssetId, setGachaAssetId] = useState<string | null>(null);
   const [gachaCount, setGachaCount] = useState(4);
   const [gachaPaths, setGachaPaths] = useState<string[]>([]);
   const [isGachaGenerating, setIsGachaGenerating] = useState(false);
 
-  // Default generation uses referenceImage currently
-  const isGenerating = generating || (!!batchGenerating && !referenceImage);
+  const isGenerating = generating;
 
   function resolveImageRef(ref: ModelRef | null) {
     if (!ref) return null;
@@ -99,15 +102,14 @@ export function CharacterCard({
     onUpdate();
   }
 
-  async function handleUpload(field: string, file: File) {
+  async function handleUploadAsset(assetId: string, file: File) {
     if (!file) return;
-    setUploadingField(field);
+    setUploadingField(assetId);
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("field", field);
     
     try {
-      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/upload`, {
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/upload-asset?assetId=${assetId}`, {
         method: "POST",
         body: formData,
       });
@@ -116,14 +118,57 @@ export function CharacterCard({
       onUpdate();
     } catch (err) {
       console.error(err);
-      toast.error(t("common.saveFailed") || "Upload failed");
+      toast.error(t("common.saveFailed"));
     } finally {
       setUploadingField(null);
     }
   }
 
+  async function handleAddAsset(type: "morph" | "blueprint" = "morph") {
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag: type === "blueprint" ? "四视图" : "新形态", assetType: type }),
+      });
+      if (!response.ok) throw new Error("Add failed");
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+      toast.error("Failed to add asset");
+    }
+  }
+
+  async function handleUpdateAssetTag(assetId: string, tag: string) {
+    try {
+      await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tag }),
+      });
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleDeleteAsset(assetId: string) {
+    if (!confirm("确定删除此形态吗？")) return;
+    try {
+      await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
+        method: "DELETE",
+      });
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   async function handleGachaGenerate() {
-    if (!gachaSlot || !imageGuard()) return;
+    if (!gachaAssetId || !imageGuard()) return;
+    const targetAsset = assets.find(a => a.id === gachaAssetId);
+    if (!targetAsset) return;
+
     setIsGachaGenerating(true);
     setGachaPaths([]);
     try {
@@ -132,7 +177,13 @@ export function CharacterCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "single_character_image",
-          payload: { characterId: id, targetSlot: gachaSlot, count: gachaCount, autoSave: false },
+          payload: { 
+            characterId: id, 
+            assetId: targetAsset.id, // Pass assetId for auto-save support
+            targetSlot: targetAsset.tag, 
+            count: gachaCount, 
+            autoSave: false 
+          },
           modelConfig: { ...getModelConfig(), image: resolveImageRef(imageModelRef) },
         }),
       });
@@ -150,14 +201,12 @@ export function CharacterCard({
   }
 
   async function saveGachaImage(path: string) {
-    if (!gachaSlot) return;
+    if (!gachaAssetId) return;
     try {
-      const updateData: any = {};
-      updateData[gachaSlot] = path;
-      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}`, {
+      const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${gachaAssetId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updateData),
+        body: JSON.stringify({ imagePath: path }),
       });
       if (!response.ok) throw new Error("Save failed");
       toast.success(t("common.saved"));
@@ -169,27 +218,29 @@ export function CharacterCard({
     }
   }
 
-  function renderSlot(field: "beautyImage" | "combatImage" | "referenceImage", titleKey: string, src: string | null | undefined) {
-    const isGeneratingThis = isGenerating && field === "referenceImage";
-    const isUploadingThis = uploadingField === field;
+  function renderAssetSlot(asset: CharacterAsset) {
+    const isUploadingThis = uploadingField === asset.id;
 
     return (
-      <div className="relative flex-shrink-0 w-[140px] snap-center group/slot flex flex-col gap-1">
-        <div 
-          className="text-[11px] font-semibold text-center text-[--text-secondary] bg-white/50 rounded-full py-1 border border-[--border-subtle] cursor-help"
-          title={t(`character.${titleKey}Tooltip`)}
-        >
-          {t(`character.${titleKey}`)}
-        </div>
+      <div key={asset.id} className="relative flex-shrink-0 w-[140px] snap-center group/slot flex flex-col gap-1">
+        <input 
+          className="text-[11px] font-semibold text-center text-[--text-secondary] bg-white/50 rounded-full py-0.5 border border-[--border-subtle] focus:bg-white outline-none transition-colors"
+          value={asset.tag}
+          onChange={(e) => {
+              // Local state update would be better for UX, but for now we update assets through props/onUpdate
+              // Or we could have a localAssets state.
+          }}
+          onBlur={(e) => handleUpdateAssetTag(asset.id, e.target.value)}
+        />
         <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[--surface] border border-[--border-subtle] transition-shadow hover:shadow-md">
-          {src ? (
+          {asset.imagePath ? (
             <img 
-              src={uploadUrl(src)} 
+              src={uploadUrl(asset.imagePath)} 
               alt={name} 
               className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover/slot:scale-105" 
-              onClick={() => setLightboxImage(src)} 
+              onClick={() => setLightboxImage(asset.imagePath)} 
             />
-          ) : isGeneratingThis || isUploadingThis ? (
+          ) : isUploadingThis ? (
             <div className="w-full h-full animate-shimmer" />
           ) : (
             <div className="flex w-full h-full items-center justify-center text-4xl font-bold text-primary/20">
@@ -200,19 +251,26 @@ export function CharacterCard({
           {/* Sparkles button */}
           <button
             onClick={() => {
-              setGachaSlot(field);
+              setGachaAssetId(asset.id);
               setGachaPaths([]);
               setGachaOpen(true);
             }}
             className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-all hover:bg-black/70 group-hover/slot:opacity-100 shadow-sm"
-            title={t("character.generateImage")}
           >
             <Sparkles className="h-3 w-3" />
           </button>
 
+          {/* Delete Asset Button */}
+          <button
+            onClick={() => handleDeleteAsset(asset.id)}
+            className="absolute left-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-red-500/80 text-white opacity-0 transition-all hover:bg-red-600 group-hover/slot:opacity-100 shadow-sm"
+          >
+            <Trash2 className="h-2.5 w-2.5" />
+          </button>
+
           {/* Upload Overlay */}
           <label className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            src 
+            asset.imagePath 
               ? 'bg-black/40 text-white opacity-0 group-hover/slot:opacity-100' 
               : 'bg-transparent text-[--text-muted] opacity-0 group-hover/slot:opacity-100 group-hover/slot:bg-black/5 hover:!text-[--text-primary]'
           }`}>
@@ -220,7 +278,7 @@ export function CharacterCard({
             <span className="text-[10px] font-medium">{t("character.uploadImage")}</span>
             <input type="file" accept="image/*" className="hidden" onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) handleUpload(field, file);
+              if (file) handleUploadAsset(asset.id, file);
               e.target.value = ''; // reset
             }} />
           </label>
@@ -243,10 +301,19 @@ export function CharacterCard({
           </button>
         )}
         
-        <div className="flex gap-3 overflow-x-auto px-4 pb-4 snap-x snap-mandatory scrollbar-hide">
-          {renderSlot("beautyImage", "beautyShot", beautyImage)}
-          {renderSlot("combatImage", "combatShot", combatImage)}
-          {renderSlot("referenceImage", "turnaround", referenceImage)}
+        <div className="flex gap-3 overflow-x-auto px-4 pb-4 snap-x snap-mandatory scrollbar-hide items-start">
+          {assets.map(asset => renderAssetSlot(asset))}
+          
+          {/* Add Asset Button */}
+          <button 
+            onClick={() => handleAddAsset()}
+            className="flex-shrink-0 w-[140px] aspect-[3/4] rounded-xl border-2 border-dashed border-[--border-subtle] flex flex-col items-center justify-center gap-2 text-[--text-muted] hover:text-primary hover:border-primary transition-all group/add self-end mb-1"
+          >
+            <div className="w-10 h-10 rounded-full bg-[--surface] flex items-center justify-center group-hover/add:bg-primary/10 transition-colors">
+              <Upload className="h-5 w-5" />
+            </div>
+            <span className="text-xs font-medium">添加形态</span>
+          </button>
         </div>
       </div>
 
@@ -332,7 +399,7 @@ export function CharacterCard({
         <Dialog open={gachaOpen} onOpenChange={setGachaOpen}>
           <DialogContent className="sm:max-w-[600px]">
             <DialogTitle>
-              {t("character.generateImage")} - {gachaSlot === "beautyImage" ? t("character.beautyShot") : gachaSlot === "combatImage" ? t("character.combatShot") : t("character.turnaround")}
+              {t("character.generateImage")} - {assets.find(a => a.id === gachaAssetId)?.tag}
             </DialogTitle>
             <div className="space-y-4 pt-4">
               <div className="flex items-center gap-4">

@@ -1,8 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore } from "@/stores/model-store";
@@ -26,6 +32,7 @@ import {
   XCircle,
   Upload,
   Trash2,
+  ClipboardCopy,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 
@@ -61,6 +68,7 @@ interface ShotCardProps {
   batchGeneratingFrames?: boolean;
   batchGeneratingVideoPrompts?: boolean;
   batchGeneratingVideos?: boolean;
+  warnings?: string | null;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -86,10 +94,6 @@ function StepRow({
   isNext?: boolean;
 }) {
   const [open, setOpen] = useState(defaultOpen || isNext);
-
-  useEffect(() => {
-    if (isNext) setOpen(true);
-  }, [isNext]);
 
   return (
     <div className={`rounded-xl border transition-colors ${
@@ -152,6 +156,7 @@ export function ShotCard({
   batchGeneratingFrames = false,
   batchGeneratingVideoPrompts = false,
   batchGeneratingVideos = false,
+  warnings,
 }: ShotCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -183,6 +188,16 @@ export function ShotCard({
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [framePromptOpen, setFramePromptOpen] = useState(false);
+  const [framePromptLoading, setFramePromptLoading] = useState(false);
+  const [framePromptCopied, setFramePromptCopied] = useState<"first" | "last" | null>(null);
+  const [framePromptData, setFramePromptData] = useState<{
+    reusePreviousLastFrame: boolean;
+    firstPrompt: string;
+    lastPrompt: string;
+    startFrameDesc: string;
+    endFrameDesc: string;
+  } | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const uploadFieldRef = useRef<string | null>(null);
@@ -358,6 +373,37 @@ export function ShotCard({
     setTimeout(() => setCopied(false), 2000);
   }
 
+  async function handleOpenFramePromptDialog() {
+    setFramePromptLoading(true);
+    setFramePromptOpen(true);
+
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "frame_prompt_preview",
+          payload: { shotId: id },
+        }),
+      });
+      const data = await res.json();
+      setFramePromptData(data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+      setFramePromptOpen(false);
+    } finally {
+      setFramePromptLoading(false);
+    }
+  }
+
+  async function handleCopyFramePrompt(kind: "first" | "last") {
+    if (!framePromptData) return;
+    const text = kind === "first" ? framePromptData.firstPrompt : framePromptData.lastPrompt;
+    await navigator.clipboard.writeText(text);
+    setFramePromptCopied(kind);
+    setTimeout(() => setFramePromptCopied(null), 1800);
+  }
+
   const frameAssets = generationMode === "reference"
     ? [{ src: sceneRefFrame, label: t("shot.sceneRefFrame"), type: "image" as const }]
     : [
@@ -366,8 +412,6 @@ export function ShotCard({
       ];
 
   // Progress dots: how many steps done out of 4
-  const stepsDone = [hasText, hasFrame, hasVideoPrompt, hasVideo].filter(Boolean).length;
-
   if (isCompact) {
     return (
       <div
@@ -508,6 +552,17 @@ export function ShotCard({
           </button>
         </div>
       </div>
+
+      {/* Warnings */}
+      {warnings && (
+        <div className="mx-4 mt-1 mb-2 flex items-start gap-2 rounded-lg bg-amber-50/70 px-3 py-2 border border-amber-100">
+          <Sparkles className="h-3.5 w-3.5 text-amber-500 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-[11px] font-semibold text-amber-800">资产不全提醒</p>
+            <p className="text-[10.5px] leading-relaxed text-amber-700/90">{warnings}</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Pipeline Steps ── */}
       <div className="space-y-2 border-t border-[--border-subtle] px-4 pb-3 pt-3">
@@ -684,6 +739,17 @@ export function ShotCard({
               : hasFrame ? t("shot.regenerateFrames") : t("project.generateFrames")
             }
           </Button>
+          {generationMode !== "reference" && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={handleOpenFramePromptDialog}
+              disabled={generatingFrames || generatingSceneFrame || generatingVideo || batchGeneratingFrames}
+            >
+              <ClipboardCopy className="h-3 w-3" />
+              {t("shot.externalFrameHelper")}
+            </Button>
+          )}
         </StepRow>
 
         {/* Step 3: 视频提示词 */}
@@ -771,6 +837,54 @@ export function ShotCard({
         className="hidden"
         onChange={handleFileChange}
       />
+
+      <Dialog open={framePromptOpen} onOpenChange={setFramePromptOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{t("shot.externalFrameHelper")}</DialogTitle>
+          </DialogHeader>
+          {framePromptLoading ? (
+            <div className="flex min-h-[200px] items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+          ) : framePromptData ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 text-xs text-[--text-secondary]">
+                <div>{t("shot.externalFrameHelperHint")}</div>
+                {framePromptData.reusePreviousLastFrame && (
+                  <div className="mt-1 text-amber-700">{t("shot.reusePreviousLastFrame")}</div>
+                )}
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-blue-700">{t("shot.startFramePrompt")}</div>
+                    <Button size="xs" variant="outline" onClick={() => handleCopyFramePrompt("first")}>
+                      {framePromptCopied === "first" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      {framePromptCopied === "first" ? t("common.copied") : t("shot.copyPrompt")}
+                    </Button>
+                  </div>
+                  <div className="mb-2 text-[11px] text-[--text-muted]">{framePromptData.startFrameDesc}</div>
+                  <Textarea value={framePromptData.firstPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
+                </div>
+
+                <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-amber-700">{t("shot.endFramePrompt")}</div>
+                    <Button size="xs" variant="outline" onClick={() => handleCopyFramePrompt("last")}>
+                      {framePromptCopied === "last" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                      {framePromptCopied === "last" ? t("common.copied") : t("shot.copyPrompt")}
+                    </Button>
+                  </div>
+                  <div className="mb-2 text-[11px] text-[--text-muted]">{framePromptData.endFrameDesc}</div>
+                  <Textarea value={framePromptData.lastPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       {/* Preview lightbox */}
       {previewSrc && (

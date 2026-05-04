@@ -6,7 +6,8 @@
     "dev": "next dev -p 3007",
     "build": "next build",
     "start": "next start -p 3007",
-    "lint": "eslint"
+    "lint": "eslint",
+    "pdf:intro": "node scripts/print-intro-pdf.cjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",
@@ -14,6 +15,7 @@
     "@base-ui/react": "^1.2.0",
     "@google/genai": "^1.44.0",
     "@types/archiver": "^7.0.0",
+    "@volcengine/openapi": "^1.36.1",
     "ai": "^6.0.116",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.6.2",

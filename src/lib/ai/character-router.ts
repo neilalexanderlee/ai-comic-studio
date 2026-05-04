@@ -3,12 +3,13 @@ import { createLanguageModel } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
+import { db } from "@/lib/db";
+import { characterAssets } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 
 export type CharacterAssets = {
+  id: string;
   name: string;
-  combatImage?: string | null;
-  beautyImage?: string | null;
-  referenceImage?: string | null;
 };
 
 /**
@@ -19,36 +20,54 @@ export type CharacterAssets = {
 export async function determineCharacterState(
   sceneDesc: string,
   characterName: string,
+  availableTags: string[],
   textModelConfig: ProviderConfig | null | undefined,
   userId: string,
   projectId: string
-): Promise<"combat" | "casual"> {
-  if (!textModelConfig) return "casual"; 
+): Promise<{ tag: string; missing?: string }> {
+  if (!textModelConfig || availableTags.length === 0) {
+    return { tag: availableTags[0] || "日常" };
+  }
 
   try {
     const model = createLanguageModel(textModelConfig);
     
-    // Resolve customizable prompt from registry
     const promptKey = "character_state_router";
     const slotContents = await resolveSlotContents(promptKey, { userId, projectId });
     const def = getPromptDefinition(promptKey);
     
     if (!def) throw new Error("character_state_router definition not found");
     
-    const fullPrompt = def.buildFullPrompt(slotContents, { characterName, sceneDesc });
+    const fullPrompt = def.buildFullPrompt(slotContents, { 
+      characterName, 
+      sceneDesc,
+      tags: availableTags
+    });
 
     const result = await generateText({
       model,
       prompt: fullPrompt,
     });
 
-    const state = result.text.trim().toLowerCase();
-    // Use regex or includes to be safer if LLM adds punctuation
-    if (state.includes("combat")) return "combat";
-    return "casual";
+    const output = result.text.trim();
+    // Parse format: "Match: [Tag] (Missing: [Needed Tag])"
+    const matchMatch = output.match(/Match:\s*([^(\n\r]+)/);
+    const missingMatch = output.match(/\(Missing:\s*([^)]+)\)/);
+    
+    let matchedTag = matchMatch ? matchMatch[1].trim() : availableTags[0];
+    
+    // Ensure the matched tag is actually in the available list
+    if (!availableTags.includes(matchedTag)) {
+        matchedTag = availableTags[0];
+    }
+
+    return { 
+        tag: matchedTag,
+        missing: missingMatch ? missingMatch[1].trim() : undefined
+    };
   } catch (err) {
     console.error(`[CharacterRouter] Failed to determine state for ${characterName}:`, err);
-    return "casual";
+    return { tag: availableTags[0] || "日常" };
   }
 }
 
@@ -61,24 +80,54 @@ export async function resolveCharacterImages(
   textModelConfig: ProviderConfig | null | undefined,
   userId: string,
   projectId: string
-): Promise<{ name: string; imagePath: string }[]> {
-  const resolved: { name: string; imagePath: string }[] = [];
+): Promise<{ name: string; imagePath: string; missingState?: string }[]> {
+  const resolved: { name: string; imagePath: string; missingState?: string }[] = [];
 
   for (const c of characters) {
-    let finalPath: string | null | undefined = null;
+    // 1. Fetch all morph assets for this character
+    const assets = await db.select()
+        .from(characterAssets)
+        .where(and(
+            eq(characterAssets.characterId, c.id),
+            eq(characterAssets.assetType, "morph")
+        ));
 
-    if (c.combatImage && c.beautyImage) {
-      // Intelligent Routing needed because both exist
-      const state = await determineCharacterState(sceneDesc, c.name, textModelConfig, userId, projectId);
-      console.log(`[CharacterRouter] Character "${c.name}" state resolved as: ${state}`);
-      finalPath = state === "combat" ? c.combatImage : c.beautyImage;
+    const blueprintAssets = await db.select()
+        .from(characterAssets)
+        .where(and(
+            eq(characterAssets.characterId, c.id),
+            eq(characterAssets.assetType, "blueprint")
+        ));
+
+    const tags = assets.map(a => a.tag);
+    let finalPath: string | null = null;
+    let missing: string | undefined = undefined;
+
+    if (tags.length > 1) {
+      // Multiple options -> Ask AI
+      const result = await determineCharacterState(sceneDesc, c.name, tags, textModelConfig, userId, projectId);
+      const matchedAsset = assets.find(a => a.tag === result.tag);
+      finalPath = matchedAsset?.imagePath || assets[0]?.imagePath || null;
+      missing = result.missing;
+    } else if (tags.length === 1) {
+      // Only one morph -> Use it but still check for missing state if possible
+      finalPath = assets[0].imagePath;
+      // Optional: we could still call AI to see if it *thinks* it's missing something
+      // But for performance, if only one exists, we just use it.
     } else {
-      // Simple fallback logic if only one or none exist
-      finalPath = c.combatImage || c.beautyImage || c.referenceImage;
+      // No morphs -> Use blueprint
+      finalPath = blueprintAssets[0]?.imagePath || null;
     }
 
     if (finalPath) {
-      resolved.push({ name: c.name, imagePath: finalPath });
+      resolved.push({ 
+        name: c.name, 
+        imagePath: finalPath,
+        missingState: missing
+      });
+      if (missing) {
+          console.warn(`[CharacterRouter] Character "${c.name}" is missing visual state: ${missing} in scene: ${sceneDesc}`);
+      }
     }
   }
 

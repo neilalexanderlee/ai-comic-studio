@@ -18,6 +18,7 @@ interface SplitEpisode {
   description: string;
   keywords: string;
   idea: string;
+  script?: string;
   characters?: string[];
 }
 
@@ -110,7 +111,12 @@ export async function POST(
         }
       })
     );
-    allEpisodes = chunkResults.flat();
+    allEpisodes = chunkResults
+      .flat()
+      .map((episode) => ({
+        ...episode,
+        script: episode.script || episode.idea,
+      }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     await addImportLog(projectId, 3, "error", `分集失败: ${msg}`);

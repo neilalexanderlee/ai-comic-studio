@@ -13,6 +13,7 @@ interface EpisodeData {
   description: string;
   keywords: string;
   idea: string;
+  script?: string;
   characters?: string[];
 }
 
@@ -89,6 +90,7 @@ export async function POST(
         description: ep.description || "",
         keywords: ep.keywords || "",
         idea: ep.idea || "",
+        script: ep.script || ep.idea || "",
         sequence: seq++,
       })
       .returning();

@@ -3,8 +3,8 @@ import { streamText, generateText } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters } from "@/lib/db/schema";
-import { eq, asc, and, lt, gt, desc, or, isNull, inArray } from "drizzle-orm";
+import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets } from "@/lib/db/schema";
+import { eq, asc, and, lt, gt, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import path from "path";
 import { ulid } from "ulid";
@@ -29,6 +29,13 @@ import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImag
 import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
+import { extractShotsFromScript } from "@/lib/storyboard/extract-shot-script";
+import {
+  getShotCharacters,
+  persistStoryboardVersion,
+  type PersistableShot,
+} from "@/lib/storyboard/persist-storyboard-version";
+import { completeExtractedShots } from "@/lib/storyboard/complete-extracted-shots";
 
 export const maxDuration = 300;
 
@@ -44,17 +51,7 @@ function ratioToImageOpts(ratio?: string): { aspectRatio?: string; size?: string
 
 /** Fetch characters linked to an episode via episode_characters, or all project characters if no episode. */
 async function getEpisodeCharacters(projectId: string, epId?: string | null) {
-  if (epId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, epId));
-    if (linkedIds.length > 0) {
-      return db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)));
-    }
-    return [] as typeof characters.$inferSelect[];
-  }
-  return db.select().from(characters).where(eq(characters.projectId, projectId));
+  return getShotCharacters(projectId, epId);
 }
 
 /**
@@ -89,6 +86,18 @@ function extractErrorMessage(err: unknown): string {
     if (parsed?.error?.message) return parsed.error.message;
   } catch {}
   return err.message;
+}
+
+async function saveShotWarnings(shotId: string, resolvedChars: Array<{ name: string, missingState?: string | null }>) {
+  const missingStates = resolvedChars
+    .filter(c => c.missingState)
+    .map(c => `${c.name}: ${c.missingState}`);
+  
+  if (missingStates.length > 0) {
+    await db.update(shots).set({ warnings: missingStates.join("; ") }).where(eq(shots.id, shotId));
+  } else {
+    await db.update(shots).set({ warnings: null }).where(eq(shots.id, shotId));
+  }
 }
 
 interface ModelConfig {
@@ -147,11 +156,21 @@ export async function POST(
   }
 
   if (action === "shot_split") {
-    return handleShotSplitStream(projectId, userId, resolvedModelConfig, episodeId);
+    return handleShotSplitStream(projectId, userId, resolvedModelConfig, episodeId, {
+      forceAi: Boolean(payload?.forceAi),
+    });
+  }
+
+  if (action === "shot_extract_preview") {
+    return handleShotExtractPreview(projectId, episodeId);
   }
 
   if (action === "single_shot_rewrite") {
     return handleSingleShotRewrite(projectId, payload, resolvedModelConfig, episodeId);
+  }
+
+  if (action === "frame_prompt_preview") {
+    return handleFramePromptPreview(projectId, userId, payload, episodeId);
   }
 
   if (action === "batch_frame_generate") {
@@ -466,7 +485,8 @@ async function handleSingleCharacterImage(
   modelConfig?: ModelConfig
 ) {
   const characterId = payload?.characterId as string;
-  const targetSlot = (payload?.targetSlot as string) || "referenceImage";
+  const assetId = payload?.assetId as string; // Optional: target asset for saving
+  const targetTag = (payload?.targetSlot as string) || "日常"; // targetSlot is now the tag
   const count = (payload?.count as number) || 1;
   const autoSave = payload?.autoSave !== false;
 
@@ -487,18 +507,20 @@ async function handleSingleCharacterImage(
     return NextResponse.json({ error: "Character not found" }, { status: 404 });
   }
 
-  // Resolve prompt dynamically based on targetSlot
-  let promptKey = "character_image";
-  if (targetSlot === "beautyImage") promptKey = "beauty_image";
-  if (targetSlot === "combatImage") promptKey = "combat_image";
+  // Resolve prompt dynamically based on tag
+  let promptKey = "combat_image"; // Default to combat/morph
+  if (targetTag === "日常") promptKey = "beauty_image";
+  if (targetTag === "四视图") promptKey = "character_image";
 
   const slotContents = await resolveSlotContents(promptKey, { userId, projectId });
   
   let prompt: string;
-  if (targetSlot === "beautyImage") {
+  if (promptKey === "beauty_image") {
     prompt = buildBeautyImagePrompt(slotContents, character.name, character.description || "");
-  } else if (targetSlot === "combatImage") {
-    prompt = buildCombatImagePrompt(slotContents, character.name, character.description || "");
+  } else if (promptKey === "combat_image") {
+    // Pass the tag name as part of the description to give AI context
+    const enhancedDesc = `${character.description || ""}\n(State: ${targetTag})`;
+    prompt = buildCombatImagePrompt(slotContents, character.name, enhancedDesc);
   } else {
     prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
   }
@@ -516,14 +538,31 @@ async function handleSingleCharacterImage(
 
     const imagePaths = await Promise.all(promises);
 
-    // Auto-save only if generating exactly 1 and autoSave is true
+    // Auto-save logic
     if (autoSave && imagePaths.length === 1) {
-      const updateData: any = {};
-      updateData[targetSlot] = imagePaths[0];
-      await db
-        .update(characters)
-        .set(updateData)
-        .where(eq(characters.id, characterId));
+      if (assetId) {
+        // Save to specific asset
+        await db
+          .update(characterAssets)
+          .set({ imagePath: imagePaths[0] })
+          .where(eq(characterAssets.id, assetId));
+      } else {
+        // Find or create asset with tag
+        const [existing] = await db.select().from(characterAssets).where(
+          and(eq(characterAssets.characterId, characterId), eq(characterAssets.tag, targetTag))
+        );
+        if (existing) {
+          await db.update(characterAssets).set({ imagePath: imagePaths[0] }).where(eq(characterAssets.id, existing.id));
+        } else {
+          await db.insert(characterAssets).values({
+            id: ulid(),
+            characterId,
+            tag: targetTag,
+            imagePath: imagePaths[0],
+            assetType: targetTag === "四视图" ? "blueprint" : "morph"
+          });
+        }
+      }
       return NextResponse.json({ characterId, imagePath: imagePaths[0], imagePaths, status: "ok" });
     }
 
@@ -562,36 +601,59 @@ async function handleBatchCharacterImage(
     allCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
   }
 
-  const needImages = allCharacters.filter((c) => !c.beautyImage);
-  if (needImages.length === 0) {
-    return NextResponse.json({ results: [], message: "All characters already have images" });
-  }
-
-  const ai = resolveImageProvider(modelConfig);
-
   const results = await Promise.all(
-    needImages.map(async (character) => {
+    allCharacters.map(async (character) => {
       try {
+        const assets = await db.select().from(characterAssets).where(eq(characterAssets.characterId, character.id));
+        const hasMorph = assets.some(a => a.assetType === "morph");
+        
+        if (hasMorph) return null; // Already has images
+
+        const ai = resolveImageProvider(modelConfig);
         const slotContents = await resolveSlotContents("character_image", { userId, projectId });
-        const prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
-        const imagePath = await ai.generateImage(prompt, {
+        
+        // Generate Turnaround (Blueprint)
+        const blueprintPrompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
+        const blueprintPath = await ai.generateImage(blueprintPrompt, {
           size: "2560x1440",
           aspectRatio: "16:9",
           quality: "hd",
         });
-        await db
-          .update(characters)
-          .set({ beautyImage: imagePath })
-          .where(eq(characters.id, character.id));
-        return { characterId: character.id, name: character.name, imagePath, status: "ok" };
+
+        await db.insert(characterAssets).values({
+          id: ulid(),
+          characterId: character.id,
+          imagePath: blueprintPath,
+          tag: "四视图",
+          assetType: "blueprint"
+        });
+
+        // Generate Daily (Morph)
+        const dailyPrompt = buildBeautyImagePrompt(slotContents, character.name, character.description || "");
+        const dailyPath = await ai.generateImage(dailyPrompt, {
+          size: "2560x1440",
+          aspectRatio: "16:9",
+          quality: "hd",
+        });
+
+        await db.insert(characterAssets).values({
+          id: ulid(),
+          characterId: character.id,
+          imagePath: dailyPath,
+          tag: "日常",
+          assetType: "morph",
+          isDefault: 1
+        });
+
+        return { name: character.name, status: "ok" };
       } catch (err) {
         console.error(`[BatchCharacterImage] Error for ${character.name}:`, err);
-        return { characterId: character.id, name: character.name, status: "error", error: extractErrorMessage(err) };
+        return { name: character.name, status: "error", error: extractErrorMessage(err) };
       }
     })
   );
 
-  return NextResponse.json({ results });
+  return NextResponse.json({ results: results.filter(Boolean) });
 }
 
 // --- shot_split: stream shot splitting ---
@@ -600,24 +662,29 @@ async function handleShotSplitStream(
   projectId: string,
   userId: string,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  options?: { forceAi?: boolean }
 ) {
   let script: string | null = null;
-  let generationMode: string = "keyframe";
   if (episodeId) {
     const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
     if (!episode) {
       return NextResponse.json({ error: "Episode not found" }, { status: 404 });
     }
     script = episode.script ?? null;
-    generationMode = episode.generationMode ?? "keyframe";
   } else {
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
     if (!project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
     script = project.script ?? null;
-    generationMode = project.generationMode ?? "keyframe";
+  }
+
+  if (!script || !script.trim()) {
+    return NextResponse.json(
+      { error: "Script is empty. Please generate or import a script first." },
+      { status: 400 }
+    );
   }
 
   if (!modelConfig?.text) {
@@ -627,19 +694,7 @@ async function handleShotSplitStream(
     );
   }
 
-  // Fetch only characters linked to this episode
-  let shotCharacters: typeof characters.$inferSelect[];
-  if (episodeId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, episodeId));
-    shotCharacters = linkedIds.length > 0
-      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
-      : [];
-  } else {
-    shotCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
-  }
+  const shotCharacters = await getShotCharacters(projectId, episodeId);
 
   const characterDescriptions = shotCharacters
     .map((c) => `${c.name}: ${c.description}`)
@@ -654,13 +709,16 @@ async function handleShotSplitStream(
   const shotSplitSlots = await resolveSlotContents("shot_split", { userId, projectId });
   const shotSplitDef = getPromptDefinition("shot_split")!;
   const systemPrompt = shotSplitDef.buildFullPrompt(shotSplitSlots, { maxDuration: videoMaxDuration });
-  const jsonMode = { openai: { response_format: { type: "json_object" } } };
+  
+  // Use portable JSON mode if possible, fallback to plain text + extractJSON
+  const useJsonMode = modelConfig.text.protocol === "openai";
+  const jsonMode = useJsonMode ? { openai: { response_format: { type: "json_object" } } } : undefined;
 
   // Split screenplay into chunks by SCENE markers (~8 scenes per chunk)
   const fullScript = script || "";
   const sceneChunks = splitScriptByScenes(fullScript, 8);
   // Log scene detection details
-  const sceneRe = /^[\s*#]*(?:SCENE|场景)\s*\d+/i;
+  const sceneRe = /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场)/i;
   const sceneMatches = fullScript.split("\n").filter((l) => sceneRe.test(l.trim()));
   console.log(`[ShotSplit] Detected ${sceneMatches.length} scenes, split into ${sceneChunks.length} chunk(s) of ~8 scenes each`);
   sceneChunks.forEach((c, i) => {
@@ -680,7 +738,49 @@ async function handleShotSplitStream(
     cameraDirection?: string;
   };
 
+  const extracted = extractShotsFromScript(fullScript);
+  if (!options?.forceAi && extracted.detection.matched && extracted.shots.length > 0) {
+    const persistableShots: PersistableShot[] = await completeExtractedShots({
+      script: fullScript,
+      shots: extracted.shots,
+      characterDescriptions,
+      characterVisualHints,
+      generate: async (prompt) => {
+        const result = await generateText({
+          model,
+          prompt,
+          providerOptions: jsonMode,
+          temperature: 0.4,
+        });
+        return result.text;
+      },
+    });
+    const warnings =
+      extracted.warnings.length > 0 ? extracted.warnings : undefined;
+    persistableShots.forEach((shot) => {
+      shot.warnings = warnings;
+    });
+
+    const persisted = await persistStoryboardVersion({
+      projectId,
+      episodeId: episodeId ?? null,
+      shotCharacters,
+      shots: persistableShots,
+    });
+
+    console.log(
+      `[ShotSplit] Extracted ${persisted.shotCount} shots directly from structured script (score=${extracted.detection.score})`
+    );
+    return NextResponse.json({
+      shots: persisted.shotCount,
+      mode: "extracted",
+      warnings: extracted.warnings,
+      reasons: extracted.detection.reasons,
+    });
+  }
+
   // Process chunks concurrently
+  let lastError: string | null = null;
   const chunkResults = await Promise.all(
     sceneChunks.map(async (chunk, idx) => {
       const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints);
@@ -691,13 +791,32 @@ async function handleShotSplitStream(
           prompt,
           providerOptions: jsonMode,
         });
-        const parsed = JSON.parse(extractJSON(result.text));
+        
+        if (!result.text) {
+          throw new Error("AI returned empty response");
+        }
+
+        let parsed;
+        try {
+          const rawJson = extractJSON(result.text);
+          parsed = JSON.parse(rawJson);
+        } catch (parseErr) {
+          console.error(`[ShotSplit] Chunk ${idx + 1} parse error. Raw text:`, result.text);
+          throw new Error(`Failed to parse AI response as JSON: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+        }
+
         // Handle both array and {shots:[]} formats
         const shots = Array.isArray(parsed) ? parsed : (parsed.shots || []);
+        if (shots.length === 0) {
+          console.warn(`[ShotSplit] Chunk ${idx + 1} returned 0 shots. Raw response:`, result.text);
+        }
+        
         console.log(`[ShotSplit] Chunk ${idx + 1}/${sceneChunks.length}: ${shots.length} shots`);
         return shots as ParsedShot[];
       } catch (err) {
-        console.error(`[ShotSplit] Chunk ${idx + 1} failed:`, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[ShotSplit] Chunk ${idx + 1} failed:`, msg);
+        lastError = msg;
         return [] as ParsedShot[];
       }
     })
@@ -708,41 +827,17 @@ async function handleShotSplitStream(
   allShots.forEach((s, i) => { s.sequence = i + 1; });
 
   if (allShots.length === 0) {
-    return NextResponse.json({ error: "Failed to generate shots" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to generate shots. ${lastError || "Check script format (needs SCENE markers)."}` },
+      { status: 500 }
+    );
   }
 
-  // Create version record
-  const versionWhereClause = episodeId
-    ? and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId))
-    : eq(storyboardVersions.projectId, projectId);
-  const [maxVersionRow] = await db
-    .select({ maxNum: storyboardVersions.versionNum })
-    .from(storyboardVersions)
-    .where(versionWhereClause)
-    .orderBy(desc(storyboardVersions.versionNum))
-    .limit(1);
-  const nextVersionNum = (maxVersionRow?.maxNum ?? 0) + 1;
-  const today = new Date();
-  const dateStr = today.getUTCFullYear().toString() +
-    String(today.getUTCMonth() + 1).padStart(2, "0") +
-    String(today.getUTCDate()).padStart(2, "0");
-  const versionLabel = `${dateStr}-V${nextVersionNum}`;
-  const versionId = ulid();
-  await db.insert(storyboardVersions).values({
-    id: versionId,
+  await persistStoryboardVersion({
     projectId,
-    label: versionLabel,
-    versionNum: nextVersionNum,
-    createdAt: new Date(),
     episodeId: episodeId ?? null,
-  });
-
-  for (const shot of allShots) {
-    const shotId = ulid();
-    await db.insert(shots).values({
-      id: shotId,
-      projectId,
-      versionId,
+    shotCharacters,
+    shots: allShots.map((shot) => ({
       sequence: shot.sequence,
       prompt: shot.sceneDescription,
       startFrameDesc: shot.startFrame,
@@ -751,35 +846,67 @@ async function handleShotSplitStream(
       videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration,
-      episodeId: episodeId ?? null,
-    });
-
-    for (let i = 0; i < (shot.dialogues || []).length; i++) {
-      const dialogue = shot.dialogues[i];
-      const matchedChar = shotCharacters.find(
-        (c: typeof characters.$inferSelect) => c.name === dialogue.character
-      );
-      if (matchedChar) {
-        await db.insert(dialogues).values({
-          id: ulid(),
-          shotId,
-          characterId: matchedChar.id,
-          text: dialogue.text,
-          sequence: i,
-        });
-      }
-    }
-  }
+      dialogues: shot.dialogues,
+    })),
+  });
 
   console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks`);
   return NextResponse.json({ shots: allShots.length });
+}
+
+async function handleShotExtractPreview(projectId: string, episodeId?: string) {
+  let script: string | null = null;
+
+  if (episodeId) {
+    const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
+    if (!episode) {
+      return NextResponse.json({ error: "Episode not found" }, { status: 404 });
+    }
+    script = episode.script ?? null;
+  } else {
+    const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
+    if (!project) {
+      return NextResponse.json({ error: "Project not found" }, { status: 404 });
+    }
+    script = project.script ?? null;
+  }
+
+  if (!script || !script.trim()) {
+    return NextResponse.json(
+      { error: "Script is empty. Please generate or import a script first." },
+      { status: 400 }
+    );
+  }
+
+  const extracted = extractShotsFromScript(script);
+
+  return NextResponse.json({
+    mode: extracted.detection.matched ? "extracted" : "unstructured",
+    score: extracted.detection.score,
+    reasons: extracted.detection.reasons,
+    warnings: extracted.warnings,
+    shotCount: extracted.shots.length,
+    shots: extracted.shots.slice(0, 20).map((shot) => ({
+      sequence: shot.sequence,
+      sceneTitle: shot.sceneTitle ?? "",
+      duration: shot.duration ?? null,
+      dialogueCount: shot.dialogues.length,
+      prompt: shot.prompt,
+      startFrameDesc: shot.startFrameDesc ?? null,
+      endFrameDesc: shot.endFrameDesc ?? null,
+      motionScript: shot.motionScript ?? null,
+      cameraDirection: shot.cameraDirection ?? null,
+      completeness: shot.completeness,
+      dialogues: shot.dialogues,
+    })),
+  });
 }
 
 /** Split screenplay text into chunks by SCENE markers, ~maxScenes per chunk.
  *  Preserves the header (VISUAL STYLE + CHARACTERS) and prepends it to every chunk. */
 function splitScriptByScenes(script: string, maxScenes: number): string[] {
   // Match SCENE markers with optional markdown bold (**), whitespace, or other decorators
-  const scenePattern = /^[\s*#]*(?:SCENE|场景)\s*\d+/i;
+  const scenePattern = /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场)/i;
   const lines = script.split("\n");
 
   // Find scene boundary line indices
@@ -905,6 +1032,83 @@ IMPORTANT: Keep the same scene, characters, and narrative intent. Only rephrase 
     console.error(`[SingleShotRewrite] Error for shot ${shotId}:`, err);
     return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
   }
+}
+
+async function handleFramePromptPreview(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  episodeId?: string
+) {
+  const shotId = payload?.shotId as string | undefined;
+  if (!shotId) {
+    return NextResponse.json({ error: "No shotId provided" }, { status: 400 });
+  }
+
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot) {
+    return NextResponse.json({ error: "Shot not found" }, { status: 404 });
+  }
+
+  const shotEpisodeId = episodeId || shot.episodeId;
+  const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
+  const characterDescriptions = projectCharacters
+    .map((c) => `${c.name}: ${c.description}`)
+    .join("\n");
+
+  const [previousShot] = shot.versionId
+    ? await db
+        .select()
+        .from(shots)
+        .where(
+          and(
+            eq(shots.projectId, projectId),
+            eq(shots.versionId, shot.versionId),
+            lt(shots.sequence, shot.sequence)
+          )
+        )
+        .orderBy(desc(shots.sequence))
+        .limit(1)
+    : await db
+        .select()
+        .from(shots)
+        .where(and(eq(shots.projectId, projectId), lt(shots.sequence, shot.sequence)))
+        .orderBy(desc(shots.sequence))
+        .limit(1);
+
+  const frameFirstSlots = await resolveSlotContents("frame_generate_first", {
+    userId,
+    projectId,
+  });
+  const frameLastSlots = await resolveSlotContents("frame_generate_last", {
+    userId,
+    projectId,
+  });
+
+  const firstPrompt = buildFirstFramePrompt({
+    sceneDescription: shot.prompt || "",
+    startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+    characterDescriptions,
+    previousLastFrame: previousShot?.lastFrame || undefined,
+    slotContents: frameFirstSlots,
+  });
+
+  const lastPrompt = buildLastFramePrompt({
+    sceneDescription: shot.prompt || "",
+    endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+    characterDescriptions,
+    firstFramePath: shot.firstFrame || previousShot?.lastFrame || "first-frame-reference",
+    slotContents: frameLastSlots,
+  });
+
+  return NextResponse.json({
+    shotId,
+    reusePreviousLastFrame: Boolean(previousShot?.lastFrame),
+    firstPrompt,
+    lastPrompt,
+    startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+    endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+  });
 }
 
 // --- batch_frame_generate: sequential frame generation with continuity chain ---
@@ -1071,6 +1275,7 @@ async function handleBatchFrameGenerate(
           userId,
           projectId
         );
+        await saveShotWarnings(shot.id, resolvedChars);
         const charRefImages = resolvedChars.map((c) => c.imagePath);
         const charRefLabels = resolvedChars.map((c) => c.name);
 
@@ -1099,6 +1304,7 @@ async function handleBatchFrameGenerate(
         userId,
         projectId
       );
+      await saveShotWarnings(shot.id, resolvedChars);
       const charRefImages = resolvedChars.map((c) => c.imagePath);
       const charRefLabels = resolvedChars.map((c) => c.name);
 
@@ -1199,6 +1405,7 @@ async function handleSingleFrameGenerate(
     userId,
     projectId
   );
+  await saveShotWarnings(shotId, resolvedChars);
   const charRefImages = resolvedChars.map((c) => c.imagePath);
 
   // Find previous shot's last frame for continuity — same version only (if shot has a version)
@@ -1560,6 +1767,7 @@ async function handleSingleSceneFrame(
     userId,
     projectId
   );
+  await saveShotWarnings(shotId, charRefs);
 
   if (charRefs.length === 0) {
     return NextResponse.json(
@@ -1753,6 +1961,7 @@ async function handleSingleReferenceVideo(
     userId,
     projectId
   );
+  await saveShotWarnings(shotId, charRefs);
 
   if (charRefs.length === 0) {
     return NextResponse.json(
@@ -1987,6 +2196,7 @@ async function handleBatchReferenceVideo(
           userId,
           projectId
         );
+        await saveShotWarnings(shot.id, charRefs);
         const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
         
         const batchRefSlots = await resolveSlotContents("scene_frame_generate", { userId, projectId });

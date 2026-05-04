@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, episodes, shots, characters, episodeCharacters } from "@/lib/db/schema";
+import { projects, episodes, shots, characters, episodeCharacters, characterAssets } from "@/lib/db/schema";
 import { eq, asc, and, max, isNotNull, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
@@ -69,16 +69,17 @@ export async function GET(
 
       let charUrls: string[] = [];
       if (linkedCharIds.length > 0) {
-        const charImages = await db
-          .select({ referenceImage: characters.referenceImage })
-          .from(characters)
+        const charAssets = await db
+          .select({ imagePath: characterAssets.imagePath })
+          .from(characterAssets)
           .where(
             and(
-              inArray(characters.id, linkedCharIds.map((r) => r.characterId)),
-              isNotNull(characters.referenceImage)
+              inArray(characterAssets.characterId, linkedCharIds.map((r) => r.characterId)),
+              eq(characterAssets.isDefault, 1),
+              isNotNull(characterAssets.imagePath)
             )
           );
-        charUrls = charImages.map((c) => c.referenceImage!).filter(Boolean);
+        charUrls = charAssets.map((c) => c.imagePath!).filter(Boolean);
       }
 
       return { ...ep, previewImages: charUrls };

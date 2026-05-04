@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
+import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
 import { eq, asc, and, desc } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
@@ -38,10 +38,20 @@ export async function GET(
   const resolvedVersionId = versionId ?? allVersions[0]?.id;
 
   // Fetch related data
-  const projectCharacters = await db
+  const projectCharactersRaw = await db
     .select()
     .from(characters)
     .where(eq(characters.projectId, id));
+
+  const projectCharacters = await Promise.all(
+    projectCharactersRaw.map(async (char) => {
+      const assets = await db
+        .select()
+        .from(characterAssets)
+        .where(eq(characterAssets.characterId, char.id));
+      return { ...char, assets };
+    })
+  );
 
   const projectShots = resolvedVersionId
     ? await db

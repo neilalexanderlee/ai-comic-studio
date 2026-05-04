@@ -5,9 +5,13 @@ interface Character {
   id: string;
   name: string;
   description: string;
-  referenceImage: string | null;
-  beautyImage?: string | null;
-  combatImage?: string | null;
+  assets: {
+    id: string;
+    imagePath: string | null;
+    tag: string;
+    assetType: "morph" | "blueprint";
+    isDefault: number;
+  }[];
   visualHint?: string | null;
   scope?: string;
   episodeId?: string | null;
@@ -39,6 +43,7 @@ interface Shot {
   sceneRefFrame: string | null;
   videoPrompt: string | null;
   status: string;
+  warnings?: string | null;
   dialogues: Dialogue[];
 }
 

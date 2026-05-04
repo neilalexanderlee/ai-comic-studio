@@ -1295,8 +1295,11 @@ const combatImageDef: PromptDefinition = {
 
 const ROUTER_ROLE = `You are an AI scene analyzer. Your job is to determine the state of a character based on the scene description.`;
 const ROUTER_CRITERIA = `=== Decision Criteria ===
-Are they currently fighting, holding a weapon, or preparing for battle?
-Reply ONLY with the exact word 'combat' or 'casual'. No other text is allowed.`;
+Choose the most appropriate visual state (Tag) for the character from the [Available Tags] list based on the scene context.
+Format your output exactly as: "Match: [Tag]".
+If the character requires a specific visual state that is NOT in the [Available Tags] list (e.g. they are fighting but only 'Daily' is available), still output the best matching Tag, but append a (Missing: [Required State]) note.
+Example: "Match: Daily (Missing: Combat)" or "Match: Spear (Missing: Broken Armor)".
+Reply ONLY with the match result.`;
 
 const characterStateRouterDef: PromptDefinition = {
   key: "character_state_router",
@@ -1312,6 +1315,7 @@ const characterStateRouterDef: PromptDefinition = {
     const r = (k: string) => resolve(sc, s, k);
     const sceneDesc = (params?.sceneDesc as string) ?? "";
     const characterName = (params?.characterName as string) ?? "";
+    const tags = (params?.tags as string[]) ?? [];
     return [
       r("role_definition"),
       "",
@@ -1319,6 +1323,7 @@ const characterStateRouterDef: PromptDefinition = {
       "",
       `=== Current Context ===`,
       `Character Name: "${characterName}"`,
+      `Available Tags: ${tags.join(", ") || "None"}`,
       `Scene Description: ${sceneDesc}`,
     ].join("\n");
   },

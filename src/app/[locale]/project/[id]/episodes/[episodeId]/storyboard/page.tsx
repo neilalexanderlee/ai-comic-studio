@@ -18,7 +18,6 @@ import {
   Download,
   RefreshCw,
   Play,
-  Plus,
   LayoutGrid,
   List,
   ChevronDown,
@@ -33,6 +32,33 @@ import { CharactersInlinePanel } from "@/components/editor/characters-inline-pan
 import { ShotKanban } from "@/components/editor/shot-kanban";
 import { PromptEditButton } from "@/components/prompt-templates/prompt-edit-button";
 import Link from "next/link";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+type ShotExtractPreview = {
+  sequence: number;
+  sceneTitle: string;
+  duration: number | null;
+  dialogueCount: number;
+  prompt: string;
+  startFrameDesc: string | null;
+  endFrameDesc: string | null;
+  motionScript: string | null;
+  cameraDirection: string | null;
+  completeness: {
+    hasPrompt: boolean;
+    hasStartFrame: boolean;
+    hasEndFrame: boolean;
+    hasMotionScript: boolean;
+    hasCameraDirection: boolean;
+    hasDuration: boolean;
+  };
+  dialogues: Array<{ character: string; text: string; sequence: number }>;
+};
 
 export default function EpisodeStoryboardPage() {
   const t = useTranslations();
@@ -55,6 +81,16 @@ export default function EpisodeStoryboardPage() {
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [extractPreview, setExtractPreview] = useState<{
+    mode: string;
+    score: number;
+    reasons: string[];
+    warnings: string[];
+    shotCount: number;
+    shots: ShotExtractPreview[];
+  } | null>(null);
 
   const currentEpisodeId = useProjectStore((s) => s.currentEpisodeId);
   const episodeStoreEpisodes = useEpisodeStore((s) => s.episodes);
@@ -110,7 +146,7 @@ export default function EpisodeStoryboardPage() {
   const shotsWithFrameAny = project.shots.filter(
     (s) => s.sceneRefFrame || s.firstFrame || s.lastFrame
   ).length;
-  const charactersWithRefs = project.characters.filter((c) => c.referenceImage);
+  const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
   const hasReferenceImages = charactersWithRefs.length > 0;
 
   const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingVideoPrompts;
@@ -134,6 +170,10 @@ export default function EpisodeStoryboardPage() {
   }));
 
   async function handleGenerateShots() {
+    return handleGenerateShotsWithMode(false);
+  }
+
+  async function handleGenerateShotsWithMode(forceAi: boolean) {
     if (!project) return;
     if (!textGuard()) return;
     setGenerating(true);
@@ -144,6 +184,7 @@ export default function EpisodeStoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "shot_split",
+          payload: forceAi ? { forceAi: true } : undefined,
           modelConfig: getModelConfig(),
           episodeId: useProjectStore.getState().currentEpisodeId,
         }),
@@ -164,6 +205,31 @@ export default function EpisodeStoryboardPage() {
     setGenerating(false);
     setSelectedVersionId(null);
     await fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+  }
+
+  async function handlePreviewExtraction() {
+    if (!project) return;
+    setPreviewLoading(true);
+    setPreviewOpen(true);
+
+    try {
+      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "shot_extract_preview",
+          episodeId: useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+      const data = (await response.json()) as typeof extractPreview;
+      setExtractPreview(data);
+    } catch (err) {
+      console.error("Shot extract preview error:", err);
+      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+      setPreviewOpen(false);
+    } finally {
+      setPreviewLoading(false);
+    }
   }
 
   async function handleBatchGenerateFrames(overwrite = false) {
@@ -323,7 +389,7 @@ export default function EpisodeStoryboardPage() {
     if (!confirm(t("project.autoRunConfirm"))) return;
 
     const shots = project.shots;
-    const needsText = shots.some((s) => !s.prompt && !s.motionScript);
+    const needsText = shots.length === 0 || shots.some((s) => !s.prompt && !s.motionScript);
     const needsFrame = shots.some((s) =>
       generationMode === "reference" ? !s.sceneRefFrame : !s.firstFrame || !s.lastFrame
     );
@@ -420,6 +486,15 @@ export default function EpisodeStoryboardPage() {
               {t("project.downloadAll")}
             </Button>
           )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handlePreviewExtraction}
+            disabled={anyGenerating}
+          >
+            <Play className="h-3.5 w-3.5" />
+            {t("project.previewExtract")}
+          </Button>
         </div>
       </div>
 
@@ -495,7 +570,15 @@ export default function EpisodeStoryboardPage() {
                 className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
                 title={t("project.generateShots")}
               >
-                <Plus className="h-3.5 w-3.5" />
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => handleGenerateShotsWithMode(true)}
+                disabled={anyGenerating}
+                className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
+                title={t("project.forceAiShots")}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
               </button>
             </div>
           )}
@@ -528,6 +611,24 @@ export default function EpisodeStoryboardPage() {
                 <Sparkles className="h-3.5 w-3.5" />
               )}
               {generating ? t("common.generating") : t("project.generateShots")}
+            </Button>
+            <Button
+              onClick={handlePreviewExtraction}
+              disabled={anyGenerating}
+              variant="ghost"
+              size="sm"
+            >
+              <Play className="h-3.5 w-3.5" />
+              {t("project.previewExtract")}
+            </Button>
+            <Button
+              onClick={() => handleGenerateShotsWithMode(true)}
+              disabled={anyGenerating}
+              variant="ghost"
+              size="sm"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              {t("project.forceAiShots")}
             </Button>
           </div>
 
@@ -769,6 +870,7 @@ export default function EpisodeStoryboardPage() {
                       : "pending"
                   : shot.status
               }
+              warnings={shot.warnings}
               dialogues={shot.dialogues || []}
               onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
               generationMode={generationMode}
@@ -797,6 +899,64 @@ export default function EpisodeStoryboardPage() {
           anyGenerating={anyGenerating}
         />
       )}
+
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{t("project.previewExtract")}</DialogTitle>
+          </DialogHeader>
+
+          {previewLoading ? (
+            <div className="flex min-h-[220px] items-center justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+            </div>
+          ) : extractPreview ? (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 text-sm text-[--text-secondary]">
+                <div>{t("project.previewExtractSummary", { count: extractPreview.shotCount, score: extractPreview.score } as never)}</div>
+                {extractPreview.reasons.length > 0 && (
+                  <div className="mt-1 text-xs text-[--text-muted]">{extractPreview.reasons.join(" · ")}</div>
+                )}
+                {extractPreview.warnings.length > 0 && (
+                  <div className="mt-2 text-xs text-amber-700">{extractPreview.warnings.join(" | ")}</div>
+                )}
+              </div>
+
+              <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+                {extractPreview.shots.map((shot) => (
+                  <div key={shot.sequence} className="rounded-xl border border-[--border-subtle] bg-white p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium text-[--text-primary]">
+                        #{shot.sequence} {shot.sceneTitle || t("project.previewUntitled")}
+                      </div>
+                      <div className="text-xs text-[--text-muted]">
+                        {shot.duration ? `${shot.duration}s` : t("project.previewNoDuration")} · {shot.dialogueCount} dialogue
+                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-[--text-secondary] line-clamp-3">{shot.prompt}</div>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
+                      <span className={`rounded-full px-2 py-1 ${shot.completeness.hasPrompt ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasPrompt ? t("project.previewFieldReady", { field: "prompt" } as never) : t("project.previewFieldMissing", { field: "prompt" } as never)}</span>
+                      <span className={`rounded-full px-2 py-1 ${shot.completeness.hasStartFrame ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasStartFrame ? t("project.previewFieldReady", { field: "start" } as never) : t("project.previewFieldMissing", { field: "start" } as never)}</span>
+                      <span className={`rounded-full px-2 py-1 ${shot.completeness.hasEndFrame ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasEndFrame ? t("project.previewFieldReady", { field: "end" } as never) : t("project.previewFieldMissing", { field: "end" } as never)}</span>
+                      <span className={`rounded-full px-2 py-1 ${shot.completeness.hasMotionScript ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasMotionScript ? t("project.previewFieldReady", { field: "motion" } as never) : t("project.previewFieldMissing", { field: "motion" } as never)}</span>
+                      <span className={`rounded-full px-2 py-1 ${shot.completeness.hasCameraDirection ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasCameraDirection ? t("project.previewFieldReady", { field: "camera" } as never) : t("project.previewFieldMissing", { field: "camera" } as never)}</span>
+                    </div>
+                    {shot.dialogues.length > 0 && (
+                      <div className="mt-3 rounded-lg bg-[--surface] p-2 text-[11px] text-[--text-secondary]">
+                        {shot.dialogues.slice(0, 2).map((dialogue) => (
+                          <div key={`${shot.sequence}-${dialogue.sequence}`}>
+                            <span className="font-medium text-[--text-primary]">{dialogue.character}:</span> {dialogue.text}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

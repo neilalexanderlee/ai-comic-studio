@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { characters } from "@/lib/db/schema";
+import { characters, characterAssets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 export async function GET(
@@ -8,9 +8,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
-  const result = await db
+  const projectChars = await db
     .select()
     .from(characters)
     .where(eq(characters.projectId, projectId));
+
+  const result = await Promise.all(
+    projectChars.map(async (char) => {
+      const assets = await db
+        .select()
+        .from(characterAssets)
+        .where(eq(characterAssets.characterId, char.id));
+      return { ...char, assets };
+    })
+  );
+
   return NextResponse.json(result);
 }
