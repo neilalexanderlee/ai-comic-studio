@@ -6,7 +6,11 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { addImportLog, chunkText } from "@/lib/import-utils";
+import {
+  addImportLog,
+  chunkText,
+  splitMarkdownByEpisodeHeadings,
+} from "@/lib/import-utils";
 import { buildScriptSplitPrompt } from "@/lib/ai/prompts/script-split";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -54,13 +58,31 @@ export async function POST(
     return NextResponse.json({ error: "No text model" }, { status: 400 });
   }
 
+  const structured = splitMarkdownByEpisodeHeadings(body.text);
+  if (structured) {
+    await addImportLog(
+      projectId,
+      3,
+      "running",
+      `检测到「第N集」Markdown 标题，按标题分集共 ${structured.length} 集（跳过大模型再分集）`
+    );
+    const episodes = structured.map((episode) => ({
+      ...episode,
+      script: episode.script || episode.idea,
+    }));
+    await addImportLog(projectId, 3, "done", `分集完成，共 ${episodes.length} 集`, {
+      episodes,
+    });
+    return NextResponse.json({ episodes });
+  }
+
   const chunks = chunkText(body.text);
   const model = createLanguageModel(resolvedModelConfig.text);
   const scriptSplitSystem = await resolvePrompt("script_split", { userId, projectId });
 
   await addImportLog(
     projectId, 3, "running",
-    `开始自动分集，共 ${chunks.length} 块`
+    `开始自动分集，共 ${chunks.length} 块（未检测到结构化第N集标题，使用大模型分块分集）`
   );
 
   // Build character context for prompt

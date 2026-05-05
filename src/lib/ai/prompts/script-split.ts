@@ -16,6 +16,7 @@ RULES:
    - Prefer verbatim extraction over rewriting
    - Include scene markers, dialogue labels, and shot labels when they exist in the source
    - Do NOT summarize this field unless the source chunk is clearly not episodic script material
+7. If the source already contains explicit Chinese episode headings in Markdown form (lines starting with # and containing "第 N 集" such as "## 第 3 集:标题"), treat EACH such heading block as EXACTLY ONE episode — do NOT subdivide one numbered 集 into multiple array entries. Scene beats inside that block stay inside the same episode.
 
 CRITICAL LANGUAGE RULE: ALL output fields (title, description, keywords, script) MUST be in the SAME LANGUAGE as the source material. Chinese input → Chinese output. English input → English output.
 

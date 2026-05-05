@@ -7,6 +7,10 @@ import { projects, episodes } from "@/lib/db/schema";
 import { eq, and, max } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { ulid } from "ulid";
+import {
+  chunkText,
+  splitMarkdownByEpisodeHeadings,
+} from "@/lib/import-utils";
 import { buildScriptSplitPrompt } from "@/lib/ai/prompts/script-split";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -48,32 +52,6 @@ async function extractText(buffer: Buffer, filename: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Chunking
-// ---------------------------------------------------------------------------
-
-const CHUNK_SIZE = 10000; // ~10000 chars per chunk
-
-/** Split text at paragraph boundaries, each chunk ≤ CHUNK_SIZE chars */
-function chunkText(text: string): string[] {
-  if (text.length <= CHUNK_SIZE) return [text];
-
-  const paragraphs = text.split(/\n{2,}/);
-  const chunks: string[] = [];
-  let current = "";
-
-  for (const para of paragraphs) {
-    if (current.length + para.length + 2 > CHUNK_SIZE && current.length > 0) {
-      chunks.push(current.trim());
-      current = "";
-    }
-    current += (current ? "\n\n" : "") + para;
-  }
-  if (current.trim()) chunks.push(current.trim());
-
-  return chunks;
-}
-
-// ---------------------------------------------------------------------------
 // Route handler
 // ---------------------------------------------------------------------------
 
@@ -82,6 +60,7 @@ interface EpisodeResult {
   description: string;
   keywords: string;
   idea: string;
+  script?: string;
 }
 
 export async function POST(
@@ -146,34 +125,42 @@ export async function POST(
     );
   }
 
-  // Chunk the text
-  const chunks = chunkText(fullText);
-  const model = createLanguageModel(resolvedModelConfig.text);
-  const scriptSplitSystem = await resolvePrompt("script_split", { userId, projectId });
+  const structured = splitMarkdownByEpisodeHeadings(fullText);
+  let allEpisodes: EpisodeResult[];
 
-  // Process all chunks concurrently
-  let episodeOffset = 0;
-  const chunkPromises = chunks.map(async (chunk, idx) => {
-    const prompt = buildScriptSplitPrompt(chunk, {
-      chunkIndex: idx,
-      totalChunks: chunks.length,
-      episodeOffset, // approximate — exact offset tricky with concurrency
+  if (structured) {
+    allEpisodes = structured.map((ep) => ({
+      title: ep.title,
+      description: ep.description,
+      keywords: ep.keywords,
+      idea: ep.idea,
+      script: ep.script,
+    }));
+  } else {
+    const chunks = chunkText(fullText);
+    const model = createLanguageModel(resolvedModelConfig.text);
+    const scriptSplitSystem = await resolvePrompt("script_split", { userId, projectId });
+
+    const chunkPromises = chunks.map(async (chunk, idx) => {
+      const prompt = buildScriptSplitPrompt(chunk, {
+        chunkIndex: idx,
+        totalChunks: chunks.length,
+        episodeOffset: 0,
+      });
+
+      const result = await generateText({
+        model,
+        system: scriptSplitSystem,
+        prompt,
+        temperature: 0.5,
+      });
+
+      return JSON.parse(extractJSON(result.text)) as EpisodeResult[];
     });
 
-    const result = await generateText({
-      model,
-      system: scriptSplitSystem,
-      prompt,
-      temperature: 0.5,
-    });
-
-    const parsed = JSON.parse(extractJSON(result.text)) as EpisodeResult[];
-    return parsed;
-  });
-
-  // Wait for all chunks, flatten results in order
-  const chunkResults = await Promise.all(chunkPromises);
-  const allEpisodes = chunkResults.flat();
+    const chunkResults = await Promise.all(chunkPromises);
+    allEpisodes = chunkResults.flat();
+  }
 
   if (allEpisodes.length === 0) {
     return NextResponse.json(
@@ -202,6 +189,7 @@ export async function POST(
         description: ep.description || "",
         keywords: ep.keywords || "",
         idea: ep.idea || "",
+        script: ep.script ?? ep.idea ?? "",
         sequence: seq++,
       })
       .returning();
@@ -209,7 +197,7 @@ export async function POST(
   }
 
   console.log(
-    `[UploadScript] Created ${created.length} episodes from ${chunks.length} chunks`
+    `[UploadScript] Created ${created.length} episodes (${structured ? "markdown headings" : "AI chunk split"})`
   );
 
   return NextResponse.json(
