@@ -5,6 +5,7 @@ RULES:
 2. Count approximate appearances/mentions for each character
 3. Characters mentioned 2+ times are likely main characters
 4. Merge obvious aliases (e.g. "小明" and "明哥" referring to the same person)
+5. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.
 
 ═══ STEP 1 — DETECT VISUAL STYLE ═══
 Identify the style declared or implied by the text:
@@ -32,7 +33,7 @@ CRITICAL LANGUAGE RULE: ALL output fields MUST be in the SAME LANGUAGE as the so
 OUTPUT FORMAT — JSON array only, no markdown fences, no commentary:
 [
   {
-    "name": "Character name as it appears in text",
+    "name": "Stable short character name — no age-in-parentheses suffix; age belongs in description",
     "frequency": 5,
     "description": "Full visual specification — one dense paragraph following ALL requirements above",
     "visualHint": "2-4 word physical appearance identifier"

@@ -12,7 +12,7 @@ import {
   getShotCharacters,
   persistStoryboardVersion,
 } from "@/lib/storyboard/persist-storyboard-version";
-import { completeExtractedShots } from "@/lib/storyboard/complete-extracted-shots";
+import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted-shots";
 
 export async function handleShotSplit(task: Task) {
   const payload = task.payload as {
@@ -57,13 +57,7 @@ export async function handleShotSplit(task: Task) {
 
   const extracted = extractShotsFromScript(screenplay);
   if (extracted.detection.matched && extracted.shots.length > 0) {
-    const completedShots = await completeExtractedShots({
-      script: screenplay,
-      shots: extracted.shots,
-      characterDescriptions,
-      generate: async (prompt) =>
-        ai.generateText(prompt, { temperature: 0.4 }),
-    });
+    const completedShots = finalizeExtractedShotsForDb(extracted.shots);
     const warnings =
       extracted.warnings.length > 0 ? extracted.warnings : undefined;
     completedShots.forEach((shot) => {

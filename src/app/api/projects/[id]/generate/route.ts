@@ -35,7 +35,7 @@ import {
   persistStoryboardVersion,
   type PersistableShot,
 } from "@/lib/storyboard/persist-storyboard-version";
-import { completeExtractedShots } from "@/lib/storyboard/complete-extracted-shots";
+import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted-shots";
 
 export const maxDuration = 300;
 
@@ -718,7 +718,8 @@ async function handleShotSplitStream(
   const fullScript = script || "";
   const sceneChunks = splitScriptByScenes(fullScript, 8);
   // Log scene detection details
-  const sceneRe = /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场)/i;
+  const sceneRe =
+    /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场|##\s*第\s*\d+\s*集\b)/i;
   const sceneMatches = fullScript.split("\n").filter((l) => sceneRe.test(l.trim()));
   console.log(`[ShotSplit] Detected ${sceneMatches.length} scenes, split into ${sceneChunks.length} chunk(s) of ~8 scenes each`);
   sceneChunks.forEach((c, i) => {
@@ -740,21 +741,9 @@ async function handleShotSplitStream(
 
   const extracted = extractShotsFromScript(fullScript);
   if (!options?.forceAi && extracted.detection.matched && extracted.shots.length > 0) {
-    const persistableShots: PersistableShot[] = await completeExtractedShots({
-      script: fullScript,
-      shots: extracted.shots,
-      characterDescriptions,
-      characterVisualHints,
-      generate: async (prompt) => {
-        const result = await generateText({
-          model,
-          prompt,
-          providerOptions: jsonMode,
-          temperature: 0.4,
-        });
-        return result.text;
-      },
-    });
+    const persistableShots: PersistableShot[] = finalizeExtractedShotsForDb(
+      extracted.shots
+    );
     const warnings =
       extracted.warnings.length > 0 ? extracted.warnings : undefined;
     persistableShots.forEach((shot) => {
@@ -906,7 +895,8 @@ async function handleShotExtractPreview(projectId: string, episodeId?: string) {
  *  Preserves the header (VISUAL STYLE + CHARACTERS) and prepends it to every chunk. */
 function splitScriptByScenes(script: string, maxScenes: number): string[] {
   // Match SCENE markers with optional markdown bold (**), whitespace, or other decorators
-  const scenePattern = /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场)/i;
+  const scenePattern =
+    /^[\s*#]*(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场|##\s*第\s*\d+\s*集\b)/i;
   const lines = script.split("\n");
 
   // Find scene boundary line indices

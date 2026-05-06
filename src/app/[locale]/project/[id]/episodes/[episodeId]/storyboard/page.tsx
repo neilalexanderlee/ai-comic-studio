@@ -21,6 +21,7 @@ import {
   LayoutGrid,
   List,
   ChevronDown,
+  Plus,
 } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
@@ -31,6 +32,7 @@ import { ShotDrawer } from "@/components/editor/shot-drawer";
 import { CharactersInlinePanel } from "@/components/editor/characters-inline-panel";
 import { ShotKanban } from "@/components/editor/shot-kanban";
 import { PromptEditButton } from "@/components/prompt-templates/prompt-edit-button";
+import { NewVersionDialog } from "@/components/editor/new-version-dialog";
 import Link from "next/link";
 import {
   Dialog,
@@ -80,6 +82,7 @@ export default function EpisodeStoryboardPage() {
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
+  const [newVersionDialogOpen, setNewVersionDialogOpen] = useState(false);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -505,83 +508,94 @@ export default function EpisodeStoryboardPage() {
           <GenerationModeTab />
 
           {/* Version tabs */}
-          {versions.length > 0 && (
-            <div className="flex items-center gap-1">
-              {/* Show 2 newest versions */}
-              {versions.slice(0, 2).map((v) => (
+          <div className="flex items-center gap-1">
+            {/* Show 2 newest versions */}
+            {versions.slice(0, 2).map((v) => (
+              <button
+                key={v.id}
+                onClick={() => {
+                  setSelectedVersionId(v.id);
+                  fetchProject(project!.id, undefined, v.id);
+                }}
+                className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
+                  selectedVersionId === v.id
+                    ? "bg-primary/10 text-primary"
+                    : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
+                }`}
+              >
+                {v.label}
+              </button>
+            ))}
+            {/* Older versions dropdown */}
+            {versions.length > 2 && (
+              <div className="relative" ref={versionDropdownRef}>
                 <button
-                  key={v.id}
-                  onClick={() => {
-                    setSelectedVersionId(v.id);
-                    fetchProject(project!.id, undefined, v.id);
-                  }}
-                  className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                    selectedVersionId === v.id
+                  onClick={() => setVersionDropdownOpen((o) => !o)}
+                  className={`flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
+                    versions.slice(2).some((v) => v.id === selectedVersionId)
                       ? "bg-primary/10 text-primary"
                       : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
                   }`}
                 >
-                  {v.label}
+                  {versions.slice(2).some((v) => v.id === selectedVersionId)
+                    ? versions.find((v) => v.id === selectedVersionId)?.label
+                    : `+${versions.length - 2}`}
+                  <ChevronDown className={`h-3 w-3 transition-transform ${versionDropdownOpen ? "rotate-180" : ""}`} />
                 </button>
-              ))}
-              {/* Older versions dropdown */}
-              {versions.length > 2 && (
-                <div className="relative" ref={versionDropdownRef}>
-                  <button
-                    onClick={() => setVersionDropdownOpen((o) => !o)}
-                    className={`flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
-                      versions.slice(2).some((v) => v.id === selectedVersionId)
-                        ? "bg-primary/10 text-primary"
-                        : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
-                    }`}
+                {versionDropdownOpen && (
+                  <div
+                    className="absolute right-0 top-full z-20 mt-1 min-w-[140px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white shadow-lg"
+                    onMouseLeave={() => setVersionDropdownOpen(false)}
                   >
-                    {versions.slice(2).some((v) => v.id === selectedVersionId)
-                      ? versions.find((v) => v.id === selectedVersionId)?.label
-                      : `+${versions.length - 2}`}
-                    <ChevronDown className={`h-3 w-3 transition-transform ${versionDropdownOpen ? "rotate-180" : ""}`} />
-                  </button>
-                  {versionDropdownOpen && (
-                    <div
-                      className="absolute right-0 top-full z-20 mt-1 min-w-[140px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white shadow-lg"
-                      onMouseLeave={() => setVersionDropdownOpen(false)}
-                    >
-                      {versions.slice(2).map((v) => (
-                        <button
-                          key={v.id}
-                          onClick={() => {
-                            setSelectedVersionId(v.id);
-                            fetchProject(project!.id, undefined, v.id);
-                            setVersionDropdownOpen(false);
-                          }}
-                          className={`w-full px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[--surface] ${
-                            selectedVersionId === v.id ? "text-primary" : "text-[--text-secondary]"
-                          }`}
-                        >
-                          {v.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-              <button
-                onClick={handleGenerateShots}
-                disabled={anyGenerating}
-                className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
-                title={t("project.generateShots")}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => handleGenerateShotsWithMode(true)}
-                disabled={anyGenerating}
-                className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
-                title={t("project.forceAiShots")}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
+                    {versions.slice(2).map((v) => (
+                      <button
+                        key={v.id}
+                        onClick={() => {
+                          setSelectedVersionId(v.id);
+                          fetchProject(project!.id, undefined, v.id);
+                          setVersionDropdownOpen(false);
+                        }}
+                        className={`w-full px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[--surface] ${
+                          selectedVersionId === v.id ? "text-primary" : "text-[--text-secondary]"
+                        }`}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* + 新建版本 */}
+            <button
+              onClick={() => setNewVersionDialogOpen(true)}
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary]"
+              title="新建版本"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              新建版本
+            </button>
+            {versions.length > 0 && (
+              <>
+                <button
+                  onClick={handleGenerateShots}
+                  disabled={anyGenerating}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
+                  title={t("project.generateShots")}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => handleGenerateShotsWithMode(true)}
+                  disabled={anyGenerating}
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
+                  title={t("project.forceAiShots")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Characters inline panel (Feature B) */}
@@ -899,6 +913,19 @@ export default function EpisodeStoryboardPage() {
           anyGenerating={anyGenerating}
         />
       )}
+
+      <NewVersionDialog
+        open={newVersionDialogOpen}
+        onOpenChange={setNewVersionDialogOpen}
+        projectId={project.id}
+        episodeId={currentEpisodeId!}
+        versions={versions}
+        currentVersionId={selectedVersionId}
+        onCreated={(newVersionId) => {
+          setSelectedVersionId(newVersionId);
+          fetchProject(project.id, useProjectStore.getState().currentEpisodeId!, newVersionId);
+        }}
+      />
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="sm:max-w-4xl">

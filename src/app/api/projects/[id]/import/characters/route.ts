@@ -6,7 +6,13 @@ import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { addImportLog, chunkText } from "@/lib/import-utils";
+import {
+  addImportLog,
+  chunkText,
+  canonicalCharacterNameKey,
+  displayNameForMergedCharacter,
+  pickShorterDisplayName,
+} from "@/lib/import-utils";
 import { buildImportCharacterExtractPrompt } from "@/lib/ai/prompts/import-character-extract";
 import { resolvePrompt } from "@/lib/ai/prompts/resolver";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -99,20 +105,26 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // Merge & deduplicate by name, sum frequencies
+  // Merge & deduplicate by canonical key（合并「龙渊」与「龙渊（25岁）」等）
   const charMap = new Map<string, ExtractedChar>();
   for (const chars of chunkResults) {
     for (const c of chars) {
-      const key = c.name.toLowerCase().trim();
+      const key = canonicalCharacterNameKey(c.name);
       const existing = charMap.get(key);
       if (existing) {
         existing.frequency += c.frequency;
-        // Keep longer description
         if (c.description.length > existing.description.length) {
           existing.description = c.description;
         }
+        if ((c.visualHint?.length ?? 0) > (existing.visualHint?.length ?? 0)) {
+          existing.visualHint = c.visualHint;
+        }
+        existing.name = pickShorterDisplayName(existing.name, c.name);
       } else {
-        charMap.set(key, { ...c });
+        charMap.set(key, {
+          ...c,
+          name: displayNameForMergedCharacter(c.name),
+        });
       }
     }
   }

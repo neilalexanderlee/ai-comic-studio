@@ -21,6 +21,64 @@ export async function addImportLog(
 
 export const CHUNK_SIZE = 10000;
 
+function compactKey(s: string): string {
+  return s.replace(/\s+/g, "").toLowerCase();
+}
+
+/**
+ * 导入角色去重：仅做**通用**归一——
+ * - 末尾「（N岁）」且 N≥13 与无年龄括注的同一基底名合并；
+ * - N≤12 保留独立 key（儿少与成年可分卡）；
+ * - 其余（如「魔王（人形态）」、剧作家自定义括注）原样参与 key，不做词表级特例。
+ */
+export function canonicalCharacterNameKey(raw: string): string {
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  const ageMatch = trimmed.match(
+    /^(.+?)[（(]\s*(\d{1,3})\s*岁(?:\s*[·•][^)）]{0,24})?\s*[)）]\s*$/u
+  );
+  if (ageMatch) {
+    const base = ageMatch[1].trim();
+    const age = parseInt(ageMatch[2], 10);
+    const nb = compactKey(base);
+    if (age <= 12) {
+      return `${nb}::child${age}`;
+    }
+    return nb;
+  }
+  return compactKey(trimmed);
+}
+
+/**
+ * 合并后展示用短名：仅去掉**成年冗余**的「（N岁）」（N≥13）；保留 N≤12 的括注。
+ */
+export function displayNameForMergedCharacter(raw: string): string {
+  let t = raw.trim();
+  const ageTail = t.match(
+    /^(.+?)[（(]\s*(\d{1,3})\s*岁(?:\s*[·•][^)）]{0,24})?\s*[)）]\s*$/u
+  );
+  if (ageTail) {
+    const age = parseInt(ageTail[2], 10);
+    if (age <= 12) {
+      return t;
+    }
+  }
+  t = t
+    .replace(
+      /\s*[（(]\s*\d{1,3}\s*岁(?:\s*[·•][^)）]{0,24})?\s*[)）]\s*$/u,
+      ""
+    )
+    .trim();
+  return t || raw.trim();
+}
+
+export function pickShorterDisplayName(a: string, b: string): string {
+  const da = displayNameForMergedCharacter(a);
+  const db = displayNameForMergedCharacter(b);
+  if (da.length === 0) return db;
+  if (db.length === 0) return da;
+  return da.length <= db.length ? da : db;
+}
+
 /** 与导入分集 API 返回结构一致 */
 export interface ScriptSplitEpisode {
   title: string;

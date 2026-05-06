@@ -3,6 +3,25 @@ import { buildShotCompletePrompt } from "@/lib/ai/prompts/shot-complete";
 import type { ExtractedShot } from "./extract-shot-script";
 import type { PersistableShot } from "./persist-storyboard-version";
 
+/** Map markdown-extracted shots to DB rows without LLM rewrite (author wording preserved). */
+export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): PersistableShot[] {
+  return shots.map((shot) => ({
+    sequence: shot.sequence,
+    prompt: (shot.prompt?.trim() || shot.motionScript?.trim() || "").trim(),
+    startFrameDesc: shot.startFrameDesc ?? shot.prompt ?? null,
+    endFrameDesc: shot.endFrameDesc ?? shot.startFrameDesc ?? shot.prompt ?? null,
+    motionScript: shot.motionScript ?? shot.prompt ?? null,
+    videoScript: shot.videoScript ?? null,
+    cameraDirection: shot.cameraDirection ?? "static",
+    duration: shot.duration ?? 10,
+    dialogues: shot.dialogues.map((d, i) => ({
+      character: d.character,
+      text: d.text,
+      sequence: i,
+    })),
+  }));
+}
+
 interface CompleteShotsParams {
   script: string;
   shots: ExtractedShot[];

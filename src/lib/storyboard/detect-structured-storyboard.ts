@@ -4,6 +4,10 @@ export interface StructuredStoryboardDetection {
   reasons: string[];
 }
 
+/**
+ * Detect whether the script uses a structured markdown storyboard that
+ * `extractShotsFromScript` can parse deterministically (no LLM shot_split).
+ */
 export function detectStructuredStoryboard(
   script: string
 ): StructuredStoryboardDetection {
@@ -46,8 +50,41 @@ export function detectStructuredStoryboard(
     reasons.push(`found ${dialogueMarkers.length} dialogue-like lines`);
   }
 
+  // ── Markdown boards: 【分镜详情】 + 【镜头】/【画面】 + timecode headers ──
+  const hasDetailBlock = script.includes("【分镜详情】");
+  const lensBlocks = (script.match(/【镜头】/g) ?? []).length;
+  const frameBlocks = (script.match(/【画面】/g) ?? []).length;
+  const timecodeBlocks =
+    script.match(/\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*\|/g) ?? [];
+  const tc = timecodeBlocks.length;
+
+  if (hasDetailBlock && lensBlocks + frameBlocks >= 4) {
+    score += 8;
+    reasons.push(
+      `markdown board: 分镜详情 + ${lensBlocks}【镜头】 + ${frameBlocks}【画面】`
+    );
+  }
+  if (tc >= 3) {
+    score += 4;
+    reasons.push(`${tc} timecode shot headers (M:SS-M:SS|)`);
+  }
+  if (hasDetailBlock && tc >= 1 && lensBlocks + frameBlocks >= 2) {
+    score += 3;
+    reasons.push("分镜详情 + timecode + bracket lens/frame");
+  }
+
+  const legacyMatch = score >= 5;
+  const markdownBoardMatch =
+    hasDetailBlock &&
+    tc >= 1 &&
+    lensBlocks + frameBlocks >= 3;
+  const denseBracketMatch =
+    !hasDetailBlock && lensBlocks + frameBlocks >= 12 && tc >= 3;
+
+  const matched = legacyMatch || markdownBoardMatch || denseBracketMatch;
+
   return {
-    matched: score >= 5,
+    matched,
     score,
     reasons,
   };

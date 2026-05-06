@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const userId = getUserIdFromRequest(request);
-  const body = (await request.json()) as { title: string; script?: string };
+  const body = (await request.json()) as { title: string; script?: string; idea?: string };
   const id = ulid();
 
   const [project] = await db
@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       userId,
       title: body.title,
       script: body.script || "",
+      idea: body.idea || "",
     })
     .returning();
 

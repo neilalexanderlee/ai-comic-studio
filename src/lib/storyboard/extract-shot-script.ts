@@ -15,6 +15,7 @@ export interface ExtractedShot {
   prompt: string;
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
+  videoScript?: string | null;
   motionScript?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
@@ -38,9 +39,31 @@ export interface ShotExtractionResult {
 
 const SCENE_LINE_RE = /^\s*(?:\*{0,2})?(?:SCENE\s*\d+|场景\s*\d+|第\s*\d+\s*场)\b.*$/i;
 const SHOT_LINE_RE = /^\s*(?:\*{0,2})?(?:镜头|shot)\s*\d+\b.*$/i;
-const TIMECODE_SHOT_RE =
-  /^\*{0,2}\s*(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\|(.+?)\s*\*{0,2}\s*$/;
-const DIALOGUE_LINE_RE = /^\s*([^：:\n]{1,20})[：:]\s*(.+)$/;
+
+/** `**0:00-1:00|段落标题**` or `- **0:00-1:00|标题**` */
+function matchTimecodeHeader(rawTrimmed: string): RegExpMatchArray | null {
+  const stripped = rawTrimmed
+    .replace(/^\s*[-*]+\s*/, "")
+    .replace(/^\*+/, "")
+    .replace(/\*+\s*$/, "")
+    .trim();
+  return stripped.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\|(.+)$/);
+}
+
+/** `角色(状态):「……」` — 在首条「 之前取最后一个 `:` / `：` 作为说话人边界 */
+function tryParseDialogueLine(line: string): ExtractedDialogue | null {
+  const qPos = line.search(/[「「]/u);
+  if (qPos < 0) return null;
+  const head = line.slice(0, qPos);
+  const colonPos = Math.max(head.lastIndexOf(":"), head.lastIndexOf("："));
+  if (colonPos < 0) return null;
+  const character = head.slice(0, colonPos).trim();
+  const mid = head.slice(colonPos + 1).trim();
+  const tail = line.slice(qPos).trim();
+  const text = mid ? `${mid} ${tail}`.trim() : tail;
+  if (!character || !text) return null;
+  return { character, text, sequence: 0 };
+}
 
 function cleanLabelValue(line: string): string {
   return line
@@ -69,6 +92,7 @@ function buildShot(
     promptParts: string[];
     startFrameParts: string[];
     endFrameParts: string[];
+    videoScriptParts: string[];
     motionParts: string[];
     combatParts: string[];
     cameraParts: string[];
@@ -79,6 +103,7 @@ function buildShot(
   const prompt = fields.promptParts.join("\n").trim();
   const startFrameDesc = fields.startFrameParts.join("\n").trim() || null;
   const endFrameDesc = fields.endFrameParts.join("\n").trim() || null;
+  const videoScript = fields.videoScriptParts.join("\n").trim() || null;
   const motionSegments = [...fields.motionParts];
   if (fields.combatParts.length > 0) {
     motionSegments.push(...fields.combatParts);
@@ -96,20 +121,30 @@ function buildShot(
     prompt: prompt || motionScript || "",
     startFrameDesc,
     endFrameDesc,
+    videoScript,
     motionScript,
     cameraDirection,
     duration: fields.duration,
-    dialogues: fields.dialogues,
+    dialogues: fields.dialogues.map((d, i) => ({ ...d, sequence: i })),
     source: "extracted",
     completeness: {
       hasPrompt: !!prompt,
       hasStartFrame: !!startFrameDesc,
       hasEndFrame: !!endFrameDesc,
       hasMotionScript: !!motionScript,
+      hasVideoScript: !!videoScript,
       hasCameraDirection: !!cameraDirection,
       hasDuration: fields.duration !== null,
     },
   };
+}
+
+/** 结束「【分镜详情】」内解析（不含中途 `- **【打戏分镜】**` 小节） */
+function isEndStoryboardSectionLine(rawTrimmed: string): boolean {
+  if (/^##\s*第\s*\d+\s*集\b/.test(rawTrimmed)) return true;
+  return /^(?:-\s+)?\*\*\s*【(?:打戏分镜汇总|打戏分镜表|本集重点画面清单|打戏分镜设计)】\s*\*\*\s*$/.test(
+    rawTrimmed
+  );
 }
 
 export function extractShotsFromScript(script: string): ShotExtractionResult {
@@ -127,6 +162,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     promptParts: [] as string[],
     startFrameParts: [] as string[],
     endFrameParts: [] as string[],
+    videoScriptParts: [] as string[],
     motionParts: [] as string[],
     combatParts: [] as string[],
     cameraParts: [] as string[],
@@ -139,6 +175,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     | "prompt"
     | "start"
     | "end"
+    | "videoScript"
     | "motion"
     | "combat"
     | "camera"
@@ -156,6 +193,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
       promptParts: [],
       startFrameParts: [],
       endFrameParts: [],
+      videoScriptParts: [],
       motionParts: [],
       combatParts: [],
       cameraParts: [],
@@ -167,17 +205,13 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
 
   for (const rawLine of lines) {
     const rawTrimmed = rawLine.trim();
+
     if (hasStoryboardSection && rawTrimmed.includes("【分镜详情】")) {
       inStoryboardSection = true;
       continue;
     }
 
-    if (
-      inStoryboardSection &&
-      /^(?:##\s*第\s*\d+\s*集|\*\*【(?:打戏分镜汇总|本集重点画面清单|打戏分镜设计)】\*\*)/.test(
-        rawTrimmed
-      )
-    ) {
+    if (inStoryboardSection && isEndStoryboardSectionLine(rawTrimmed)) {
       flushShot();
       inStoryboardSection = false;
       currentSection = null;
@@ -186,10 +220,14 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
 
     if (!inStoryboardSection) continue;
 
+    if (/^[-*]{3,}$/.test(rawTrimmed)) continue;
+
+    if (/^\|/.test(rawTrimmed) && rawTrimmed.includes("|")) continue;
+
     const line = cleanLabelValue(rawLine);
     if (!line) continue;
 
-    const timecodeMatch = rawTrimmed.match(TIMECODE_SHOT_RE);
+    const timecodeMatch = matchTimecodeHeader(rawTrimmed);
     if (timecodeMatch) {
       flushShot();
       currentSceneTitle = timecodeMatch[3].trim();
@@ -208,8 +246,97 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
       continue;
     }
 
+    const combatBracket = line.match(/^【(打戏分镜[^】]*)】\s*(.*)$/);
+    if (combatBracket) {
+      currentSection = "combat";
+      if (combatBracket[2].trim()) {
+        currentShotFields.combatParts.push(combatBracket[2].trim());
+      }
+      continue;
+    }
+
+    const bracketInline = line.match(
+      /^【(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)】\s*(.*)$/i
+    );
+    if (bracketInline) {
+      const [, rawLabel, rawValue] = bracketInline;
+      const value = rawValue.trim();
+      switch (rawLabel) {
+        case "画面":
+        case "场景":
+        case "环境":
+        case "镜头画面":
+          currentSection = "prompt";
+          if (value) currentShotFields.promptParts.push(value);
+          break;
+        case "videoScript":
+          currentSection = "videoScript";
+          if (value) currentShotFields.videoScriptParts.push(value);
+          break;
+        case "首帧":
+        case "开镜":
+        case "startFrame":
+          currentSection = "start";
+          if (value) currentShotFields.startFrameParts.push(value);
+          break;
+        case "尾帧":
+        case "结尾画面":
+        case "结尾镜头":
+        case "结尾特写":
+        case "endFrame":
+          currentSection = "end";
+          if (value) currentShotFields.endFrameParts.push(value);
+          break;
+        case "动作":
+        case "表演":
+        case "过程":
+        case "镜头":
+        case "特效":
+        case "motion":
+          currentSection = "motion";
+          if (value) currentShotFields.motionParts.push(value);
+          break;
+        case "运镜":
+        case "镜头运动":
+          currentSection = "camera";
+          if (value) currentShotFields.cameraParts.push(value);
+          break;
+        case "音效":
+        case "字幕":
+          currentSection = "ignore";
+          break;
+        case "时长": {
+          currentSection = null;
+          const seconds = parseDurationSeconds(value);
+          if (seconds !== null) currentShotFields.duration = seconds;
+          else warnings.push(`Could not parse duration from "${line}"`);
+          break;
+        }
+        case "台词":
+        case "对白":
+        case "对话": {
+          currentSection = null;
+          if (value) {
+            const d = tryParseDialogueLine(value);
+            if (d) {
+              currentShotFields.dialogues.push({
+                character: d.character,
+                text: d.text,
+                sequence: currentShotFields.dialogues.length,
+              });
+            }
+          }
+          break;
+        }
+        default:
+          currentSection = null;
+          break;
+      }
+      continue;
+    }
+
     const bareFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|时长|台词|对白|对话)(?:】)?$/
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?$/i
     );
     if (bareFieldMatch) {
       const [, rawLabel] = bareFieldMatch;
@@ -220,20 +347,27 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "镜头画面":
           currentSection = "prompt";
           break;
+        case "videoScript":
+          currentSection = "videoScript";
+          break;
         case "首帧":
         case "开镜":
+        case "startFrame":
           currentSection = "start";
           break;
         case "尾帧":
         case "结尾画面":
         case "结尾镜头":
         case "结尾特写":
+        case "endFrame":
           currentSection = "end";
           break;
         case "动作":
         case "表演":
         case "过程":
         case "镜头":
+        case "特效":
+        case "motion":
           currentSection = "motion";
           break;
         case "打戏分镜":
@@ -260,7 +394,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const labeledFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|时长|台词|对白|对话)(?:】)?\s*[：:]\s*(.*)$/i
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?\s*[：:]\s*(.*)$/i
     );
     if (labeledFieldMatch) {
       const [, rawLabel, rawValue] = labeledFieldMatch;
@@ -273,13 +407,19 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "prompt";
           if (value) currentShotFields.promptParts.push(value);
           break;
+        case "videoScript":
+          currentSection = "videoScript";
+          if (value) currentShotFields.videoScriptParts.push(value);
+          break;
         case "首帧":
         case "开镜":
+        case "startFrame":
           currentSection = "start";
           if (value) currentShotFields.startFrameParts.push(value);
           break;
         case "尾帧":
         case "结尾画面":
+        case "endFrame":
           currentSection = "end";
           if (value) currentShotFields.endFrameParts.push(value);
           break;
@@ -287,6 +427,8 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "表演":
         case "过程":
         case "镜头":
+        case "特效":
+        case "motion":
           currentSection = "motion";
           if (value) currentShotFields.motionParts.push(value);
           break;
@@ -309,10 +451,10 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "ignore";
           break;
         case "时长": {
+          currentSection = null;
           const seconds = parseDurationSeconds(value);
           if (seconds !== null) currentShotFields.duration = seconds;
           else warnings.push(`Could not parse duration from "${line}"`);
-          currentSection = null;
           break;
         }
         case "台词":
@@ -320,31 +462,34 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "对话": {
           currentSection = null;
           if (value) {
-            const dialogueMatch = value.match(DIALOGUE_LINE_RE);
-            if (dialogueMatch) {
+            const d = tryParseDialogueLine(value);
+            if (d) {
               currentShotFields.dialogues.push({
-                character: dialogueMatch[1].trim(),
-                text: dialogueMatch[2].trim(),
+                character: d.character,
+                text: d.text,
                 sequence: currentShotFields.dialogues.length,
               });
             }
           }
           break;
         }
+        default:
+          currentSection = null;
+          break;
       }
       continue;
     }
 
-    const dialogueMatch = line.match(DIALOGUE_LINE_RE);
+    const dialogueParsed = tryParseDialogueLine(line);
     if (
-      dialogueMatch &&
-      !["prompt", "start", "end", "motion", "combat", "camera", "ignore"].includes(
+      dialogueParsed &&
+      !["prompt", "start", "end", "videoScript", "motion", "combat", "camera", "ignore"].includes(
         currentSection ?? ""
       )
     ) {
       currentShotFields.dialogues.push({
-        character: dialogueMatch[1].trim(),
-        text: dialogueMatch[2].trim(),
+        character: dialogueParsed.character,
+        text: dialogueParsed.text,
         sequence: currentShotFields.dialogues.length,
       });
       continue;
@@ -359,6 +504,9 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         break;
       case "end":
         currentShotFields.endFrameParts.push(line);
+        break;
+      case "videoScript":
+        currentShotFields.videoScriptParts.push(line);
         break;
       case "motion":
         currentShotFields.motionParts.push(line);
