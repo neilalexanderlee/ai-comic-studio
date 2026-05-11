@@ -1,8 +1,18 @@
 import { NextResponse } from "next/server";
+import fs from "fs";
 import { db } from "@/lib/db";
 import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
 import { eq, asc, and, desc } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+
+function tryDeleteFile(filePath: string | null | undefined) {
+  if (!filePath) return;
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // ignore — file may already be gone
+  }
+}
 
 async function resolveProject(id: string, userId: string) {
   const [project] = await db
@@ -153,6 +163,47 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  // 1. Collect all file paths before deleting DB records
+
+  // Project final video
+  tryDeleteFile(project.finalVideoUrl);
+
+  // Character images (referenceImage / beautyImage / combatImage)
+  const projectCharacters = await db
+    .select({ referenceImage: characters.referenceImage, beautyImage: characters.beautyImage, combatImage: characters.combatImage, id: characters.id })
+    .from(characters)
+    .where(eq(characters.projectId, id));
+
+  for (const char of projectCharacters) {
+    tryDeleteFile(char.referenceImage);
+    tryDeleteFile(char.beautyImage);
+    tryDeleteFile(char.combatImage);
+
+    // characterAssets (morph / blueprint images)
+    const assets = await db
+      .select({ imagePath: characterAssets.imagePath })
+      .from(characterAssets)
+      .where(eq(characterAssets.characterId, char.id));
+    for (const asset of assets) {
+      tryDeleteFile(asset.imagePath);
+    }
+  }
+
+  // Shot frames and videos
+  const projectShots = await db
+    .select({ firstFrame: shots.firstFrame, lastFrame: shots.lastFrame, sceneRefFrame: shots.sceneRefFrame, videoUrl: shots.videoUrl, referenceVideoUrl: shots.referenceVideoUrl })
+    .from(shots)
+    .where(eq(shots.projectId, id));
+
+  for (const shot of projectShots) {
+    tryDeleteFile(shot.firstFrame);
+    tryDeleteFile(shot.lastFrame);
+    tryDeleteFile(shot.sceneRefFrame);
+    tryDeleteFile(shot.videoUrl);
+    tryDeleteFile(shot.referenceVideoUrl);
+  }
+
+  // 2. Delete DB record — cascade handles all child tables
   await db.delete(projects).where(eq(projects.id, id));
   return new NextResponse(null, { status: 204 });
 }

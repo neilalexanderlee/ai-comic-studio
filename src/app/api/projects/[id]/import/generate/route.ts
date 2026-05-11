@@ -19,7 +19,7 @@ interface EpisodeData {
 
 interface CharacterData {
   name: string;
-  scope: "main" | "guest";
+  scope?: "main" | "guest"; // optional — defaults to "main" regardless
   description: string;
   visualHint?: string;
 }
@@ -60,7 +60,7 @@ export async function POST(
       name: char.name,
       description: char.description,
       visualHint: char.visualHint ?? "",
-      scope: char.scope,
+      scope: "main", // default — user can manually demote to guest via UI
       episodeId: null, // all characters are project-level now
     });
     charIdByName.set(char.name.toLowerCase().trim(), charId);

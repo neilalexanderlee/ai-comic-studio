@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { characters } from "@/lib/db/schema";
+import { characters, episodeCharacters } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { ulid } from "ulid";
 
 export async function PATCH(
   request: Request,
@@ -14,9 +15,28 @@ export async function PATCH(
     visualHint: string;
     scope: string;
     episodeId: string | null;
+    /** Replace all episode associations for this character */
+    episodeIds: string[];
   }>;
 
-  // When promoting to main, auto-clear episodeId
+  // Update episode_characters table when episodeIds is provided
+  if (body.episodeIds !== undefined) {
+    await db
+      .delete(episodeCharacters)
+      .where(eq(episodeCharacters.characterId, characterId));
+
+    if (body.episodeIds.length > 0) {
+      await db.insert(episodeCharacters).values(
+        body.episodeIds.map((epId) => ({
+          id: ulid(),
+          episodeId: epId,
+          characterId,
+        }))
+      );
+    }
+  }
+
+  // Update character fields
   const updateData: Record<string, unknown> = {};
   if (body.name !== undefined) updateData.name = body.name;
   if (body.description !== undefined) updateData.description = body.description;

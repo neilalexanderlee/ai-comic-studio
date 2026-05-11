@@ -8,6 +8,11 @@ import { ulid } from "ulid";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
+function tryDeleteFile(filePath: string | null | undefined) {
+  if (!filePath) return;
+  try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string }> }
@@ -26,6 +31,12 @@ export async function POST(
     return NextResponse.json({ error: "Missing file" }, { status: 400 });
   }
 
+  // Fetch existing record to clean up old file when replacing
+  const [existing] = await db
+    .select({ imagePath: characterAssets.imagePath })
+    .from(characterAssets)
+    .where(eq(characterAssets.id, assetId));
+
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = file.name.split(".").pop() || "png";
   const filename = `${ulid()}.${ext}`;
@@ -39,6 +50,9 @@ export async function POST(
     .set({ imagePath: filepath })
     .where(eq(characterAssets.id, assetId))
     .returning();
+
+  // Delete old file AFTER successful DB update so we don't lose data on error
+  tryDeleteFile(existing?.imagePath);
 
   return NextResponse.json(updated);
 }

@@ -22,7 +22,6 @@ export const maxDuration = 300;
 interface ExtractedChar {
   name: string;
   frequency: number;
-  scope?: "main" | "guest";
   description: string;
   visualHint?: string;
 }
@@ -138,8 +137,7 @@ export async function POST(
         if ((c.visualHint?.length ?? 0) > (existing.visualHint?.length ?? 0)) {
           existing.visualHint = c.visualHint;
         }
-        // Prefer scope "main" over "guest" when merging
-        if (c.scope === "main") existing.scope = "main";
+        // scope is no longer auto-classified — skip merging it
         existing.name = pickShorterDisplayName(existing.name, c.name);
       } else {
         charMap.set(key, {
@@ -152,16 +150,16 @@ export async function POST(
 
   const merged = [...charMap.values()].sort((a, b) => b.frequency - a.frequency);
 
-  // Use LLM-provided scope when available; fall back to frequency heuristic
-  // The LLM classifies by narrative centrality (not raw count), which is far more accurate.
+  // All characters default to "main" — scope is now a pure UI label that users
+  // adjust manually. Auto-classification was unreliable and caused confusion.
   const result = merged.map((c) => ({
     ...c,
-    scope: c.scope ?? (c.frequency >= 3 ? ("main" as const) : ("guest" as const)),
+    scope: "main" as const,
   }));
 
   await addImportLog(
     projectId, 2, "done",
-    `提取完成，共 ${result.length} 个角色（主角 ${result.filter((c) => c.scope === "main").length}，配角 ${result.filter((c) => c.scope === "guest").length}）`,
+    `提取完成，共 ${result.length} 个角色`,
     { characters: result }
   );
 

@@ -433,7 +433,8 @@ async function handleCharacterExtract(
         .set({
           description: char.description,
           visualHint: char.visualHint ?? existing.visualHint ?? "",
-          scope: (char.scope === "guest" ? "guest" : "main") as "main" | "guest",
+          // scope is a manual UI label — don't overwrite with LLM classification
+      // scope: keep existing value (not updated here)
         })
         .where(eq(characters.id, existing.id));
       console.log(`[CharacterExtract] Updated existing character "${char.name}" (${existing.id}), desc length: ${char.description.length}`);
@@ -442,14 +443,13 @@ async function handleCharacterExtract(
     } else {
       // Create new character
       const charId = ulid();
-      const scope = char.scope === "guest" ? "guest" : "main";
       await db.insert(characters).values({
         id: charId,
         projectId,
         name: char.name,
         description: char.description,
         visualHint: char.visualHint ?? "",
-        scope,
+        scope: "main", // default — user can manually demote to guest
         episodeId: null,
       });
       existingByName.set(key, { id: charId, name: char.name } as typeof existingChars[0]);

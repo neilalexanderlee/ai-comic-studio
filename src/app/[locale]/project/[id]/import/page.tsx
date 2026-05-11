@@ -127,7 +127,7 @@ export default function ImportPage({
   const addLog = useCallback((step: Step, status: LogEntry["status"], message: string) => {
     setLogs((prev) => [
       ...prev,
-      { id: Date.now().toString(), step, status, message, createdAt: Date.now() },
+      { id: crypto.randomUUID(), step, status, message, createdAt: Date.now() },
     ]);
   }, []);
 

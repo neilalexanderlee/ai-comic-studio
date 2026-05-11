@@ -198,9 +198,9 @@ export default function CharactersPage({
         )}
       </section>
 
-      {/* Guest Characters Section */}
+      {/* Guest Characters Section — flat grid, episode tags on each card */}
       <section>
-        <div className="mb-4 flex items-center gap-2">
+        <div className="mb-3 flex items-center gap-2">
           <h3 className="font-display text-lg font-semibold text-[--text-primary]">
             {tChar("guestSection")}
           </h3>
@@ -208,42 +208,40 @@ export default function CharactersPage({
             {guestCount}
           </span>
         </div>
+        <p className="mb-4 text-xs text-[--text-muted]">
+          图片上传一次，集数标签可在每张卡片上自由增删
+        </p>
         {guestCount === 0 ? (
           <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-[--border-subtle] bg-white/50 p-6">
             <p className="text-sm text-[--text-muted]">{tChar("noGuest")}</p>
           </div>
         ) : (
-          <div className="space-y-6">
-            {episodes
-              .filter((ep) => guestByEpisode.has(ep.id))
-              .map((ep) => (
-                <div key={ep.id}>
-                  <h4 className="mb-3 text-sm font-medium text-[--text-secondary]">
-                    EP.{String(ep.sequence).padStart(2, "0")} —{" "}
-                    {episodeNameMap.get(ep.id)}
-                  </h4>
-                  <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 xl:grid-cols-4">
-                    {guestByEpisode.get(ep.id)!.map((char) => (
-                      <CharacterCard
-                        key={char.id}
-                        id={char.id}
-                        projectId={projectId}
-                        name={char.name}
-                        description={char.description}
-                        visualHint={char.visualHint}
-                        assets={char.assets}
-                        scope={char.scope}
-                        episodeName={`EP.${String(ep.sequence).padStart(2, "0")} ${ep.title}`}
-                        onUpdate={fetchData}
-                        onPromote={() => handlePromote(char.id)}
-                        onDelete={() => handleDelete(char.id, char.name)}
-                      />
-                    ))}
-                  </div>
-                </div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 xl:grid-cols-4">
+            {characters
+              .filter((c) => c.scope === "guest")
+              .map((char) => (
+                <CharacterCard
+                  key={char.id}
+                  id={char.id}
+                  projectId={projectId}
+                  name={char.name}
+                  description={char.description}
+                  visualHint={char.visualHint}
+                  assets={char.assets}
+                  scope={char.scope}
+                  episodeIds={char.episodeIds ?? []}
+                  allEpisodes={episodes}
+                  onUpdate={fetchData}
+                  onPromote={() => handlePromote(char.id)}
+                  onDelete={() => handleDelete(char.id, char.name)}
+                />
               ))}
+          </div>
+        )}
+      </section>
 
-            {guestOrphans.length > 0 && (
+      {/* DEAD CODE kept for reference — remove after confirming new layout works
+      {guestOrphans.length > 0 && (
               <div>
                 <h4 className="mb-2 text-sm font-medium text-[--text-secondary]">
                   {tChar("guestOrphanSection")}
@@ -257,25 +255,7 @@ export default function CharactersPage({
                 <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 xl:grid-cols-4">
                   {guestOrphans.map((char) => (
                     <CharacterCard
-                      key={char.id}
-                      id={char.id}
-                      projectId={projectId}
-                      name={char.name}
-                      description={char.description}
-                      visualHint={char.visualHint}
-                      assets={char.assets}
-                      scope={char.scope}
-                      onUpdate={fetchData}
-                      onPromote={() => handlePromote(char.id)}
-                      onDelete={() => handleDelete(char.id, char.name)}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+      */}
     </div>
   );
 }

@@ -61,84 +61,38 @@ AI 驱动的漫剧生成器 — 从剧本到动画视频的全自动流水线。
 
 ## 快速开始
 
-### 环境要求
+### 本地开发（推荐）
 
-- Node.js 18+
-- pnpm
-- FFmpeg（**必需**，用于视频合成、拼接、字幕烧录）
+热更新亚秒级响应，适合日常开发。
 
-### FFmpeg 安装
+**前置依赖：** Node.js 18+、pnpm、FFmpeg
 
-**macOS:**
 ```bash
+# macOS
 brew install ffmpeg
-```
 
-**Ubuntu/Debian:**
-```bash
+# Ubuntu / Debian
 sudo apt install ffmpeg
 ```
 
-**Windows:** 从 [ffmpeg.org](https://ffmpeg.org/download.html) 下载或使用 `winget install ffmpeg`
-
-### 安装
-
 ```bash
 pnpm install
-```
-
-### 初始化数据库
-
-```bash
-pnpm drizzle-kit push
-```
-
-### 启动
-
-```bash
-pnpm dev
+pnpm drizzle-kit push   # 初始化数据库（首次）
+pnpm dev                # 启动开发服务器
 ```
 
 访问 [http://localhost:3007](http://localhost:3007)
 
-## Docker 部署
-
-### 本地构建镜像（推荐）
-
-使用本地代码构建镜像，确保运行的是你自己的代码：
+### Docker 部署（生产）
 
 ```bash
-docker compose up --build
+make build    # 构建镜像并启动
+make up       # 仅启动（镜像已构建）
+make down     # 停止
+make logs     # 查看日志
 ```
 
-### 数据持久化
-
-通过 volume 挂载保持数据：
-
-- `./data` — SQLite 数据库文件
-- `./uploads` — 上传的文件及生成的资源（图片、视频等）
-
-### 常见操作
-
-```bash
-# 查看运行中的容器
-docker ps
-
-# 查看容器日志
-docker logs -f ai-comic-builder
-
-# 停止容器
-docker stop ai-comic-builder
-
-# 删除容器
-docker rm ai-comic-builder
-
-# 重新构建（如代码有更新）
-docker compose up --build
-
-# 如果代码没有更新，直接启动现有容器
-docker compose up
-```
+数据通过 volume 持久化：`./data`（数据库）、`./uploads`（媒体文件）。
 
 ## 生成流水线
 

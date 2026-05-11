@@ -95,6 +95,10 @@ export async function persistStoryboardVersion(params: {
     ])
   );
 
+  // Collect character IDs that appear in matched dialogues — used below to
+  // auto-update episodeCharacters so the associations reflect actual content.
+  const matchedCharacterIds = new Set<string>();
+
   for (const shot of params.shots) {
     const shotId = ulid();
     await db.insert(shots).values({
@@ -120,6 +124,8 @@ export async function persistStoryboardVersion(params: {
       );
       if (!matchedChar) continue;
 
+      matchedCharacterIds.add(matchedChar.id);
+
       await db.insert(dialogues).values({
         id: ulid(),
         shotId,
@@ -128,6 +134,36 @@ export async function persistStoryboardVersion(params: {
         sequence: dialogue.sequence ?? i,
       });
     }
+  }
+
+  // Auto-update episodeCharacters based on who actually spoke in this episode.
+  // This replaces the unreliable text-match associations from the import step:
+  // - Guest characters with dialogue → linked to this episode
+  // - Main characters always appear in all episodes (no need to track per-episode)
+  // We only update when episodeId is set and at least one dialogue was matched,
+  // so a storyboard with no dialogue (e.g. pure action) doesn't wipe existing links.
+  // Auto-update episodeCharacters for ALL characters with matched dialogue.
+  // scope (main/guest) is now a pure UI label, so we track every character that
+  // actually speaks in this episode regardless of their label.
+  if (episodeId && matchedCharacterIds.size > 0) {
+    const matchedIds = [...matchedCharacterIds];
+
+    // Delete existing links for these characters in this episode, then re-insert
+    await db
+      .delete(episodeCharacters)
+      .where(
+        and(
+          eq(episodeCharacters.episodeId, episodeId),
+          inArray(episodeCharacters.characterId, matchedIds)
+        )
+      );
+    await db.insert(episodeCharacters).values(
+      matchedIds.map((charId) => ({
+        id: ulid(),
+        episodeId,
+        characterId: charId,
+      }))
+    );
   }
 
   return { versionId, shotCount: params.shots.length };

@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2, Upload } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2, Upload, X, Plus } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -20,6 +20,12 @@ export interface CharacterAsset {
   tag: string;
   assetType: "morph" | "blueprint";
   isDefault: number;
+}
+
+export interface EpisodeRef {
+  id: string;
+  sequence: number;
+  title: string;
 }
 
 interface CharacterCardProps {
@@ -34,7 +40,12 @@ interface CharacterCardProps {
   scope?: string;
   onPromote?: () => void;
   onDelete?: () => void;
+  /** @deprecated use episodeIds + allEpisodes instead */
   episodeName?: string;
+  /** IDs of episodes this character is associated with */
+  episodeIds?: string[];
+  /** All episodes in the project — needed to render the add-episode picker */
+  allEpisodes?: EpisodeRef[];
 }
 
 export function CharacterCard({
@@ -50,6 +61,8 @@ export function CharacterCard({
   onPromote,
   onDelete,
   episodeName,
+  episodeIds = [],
+  allEpisodes = [],
 }: CharacterCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -69,6 +82,40 @@ export function CharacterCard({
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const imageGuard = useModelGuard("image");
+
+  // Episode association state (guest characters only)
+  const [localEpisodeIds, setLocalEpisodeIds] = useState<string[]>(episodeIds);
+  const [showEpPicker, setShowEpPicker] = useState(false);
+  const [savingEpisodes, setSavingEpisodes] = useState(false);
+  useEffect(() => { setLocalEpisodeIds(episodeIds); }, [episodeIds]);
+
+  async function updateEpisodeIds(ids: string[]) {
+    setLocalEpisodeIds(ids);
+    setSavingEpisodes(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/characters/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ episodeIds: ids }),
+      });
+      onUpdate();
+    } finally {
+      setSavingEpisodes(false);
+    }
+  }
+
+  function removeEpisode(epId: string) {
+    updateEpisodeIds(localEpisodeIds.filter((x) => x !== epId));
+  }
+
+  function addEpisode(epId: string) {
+    if (localEpisodeIds.includes(epId)) return;
+    updateEpisodeIds([...localEpisodeIds, epId]);
+    setShowEpPicker(false);
+  }
+
+  const linkedEpisodes = allEpisodes.filter((e) => localEpisodeIds.includes(e.id));
+  const unlinkedEpisodes = allEpisodes.filter((e) => !localEpisodeIds.includes(e.id));
 
   // Gacha State
   const [gachaOpen, setGachaOpen] = useState(false);
@@ -172,10 +219,23 @@ export function CharacterCard({
   }
 
   async function handleDeleteAsset(assetId: string) {
-    if (!confirm("确定删除此形态吗？")) return;
+    if (!confirm("确定删除此形态吗？图片文件也会一并删除。")) return;
     try {
       await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
         method: "DELETE",
+      });
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function handleClearImage(assetId: string) {
+    try {
+      await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imagePath: null }),
       });
       onUpdate();
     } catch (err) {
@@ -302,13 +362,25 @@ export function CharacterCard({
             <Sparkles className="h-3 w-3" />
           </button>
 
-          {/* Delete Asset Button */}
+          {/* Delete Asset Button (removes entire form slot + file) */}
           <button
             onClick={() => handleDeleteAsset(asset.id)}
+            title="删除形态"
             className="absolute left-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-red-500/80 text-white opacity-0 transition-all hover:bg-red-600 group-hover/slot:opacity-100 shadow-sm"
           >
             <Trash2 className="h-2.5 w-2.5" />
           </button>
+
+          {/* Clear Image Button (removes image but keeps the form slot) */}
+          {asset.imagePath && (
+            <button
+              onClick={() => handleClearImage(asset.id)}
+              title="仅清除图片（保留形态卡槽）"
+              className="absolute left-8 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-gray-700/70 text-white opacity-0 transition-all hover:bg-gray-900 group-hover/slot:opacity-100 shadow-sm"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          )}
 
           {/* Upload Overlay */}
           <label className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
@@ -359,31 +431,90 @@ export function CharacterCard({
         </div>
       </div>
 
-      {/* Scope badge */}
+      {/* Scope badge + episode tags */}
       {scope && (
-        <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
-          <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              scope === "main"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-purple-100 text-purple-700"
-            }`}
-          >
-            {scope === "main" ? t("episode.mainCharacter") : t("episode.guestCharacter")}
-          </span>
-          {episodeName && (
+        <div className="px-4 pt-3 space-y-2">
+          {/* Row 1: scope badge + promote button */}
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                scope === "main"
+                  ? "bg-blue-100 text-blue-700"
+                  : "bg-purple-100 text-purple-700"
+              }`}
+            >
+              {scope === "main" ? t("episode.mainCharacter") : t("episode.guestCharacter")}
+            </span>
+            {scope === "guest" && onPromote && (
+              <button
+                onClick={onPromote}
+                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+              >
+                <ArrowUpCircle className="h-3 w-3" />
+                {t("episode.promoteToMain")}
+              </button>
+            )}
+            {savingEpisodes && <Loader2 className="h-3 w-3 animate-spin text-[--text-muted]" />}
+          </div>
+
+          {/* Row 2: episode tags (guest only, when allEpisodes provided) */}
+          {scope === "guest" && allEpisodes.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {linkedEpisodes.map((ep) => (
+                <span
+                  key={ep.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 pl-2 pr-1 py-0.5 text-[10px] font-medium text-gray-600"
+                >
+                  EP.{String(ep.sequence).padStart(2, "0")}
+                  <button
+                    onClick={() => removeEpisode(ep.id)}
+                    className="ml-0.5 rounded-full p-0.5 hover:bg-gray-200 transition-colors"
+                    title={`移除第${ep.sequence}集`}
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+
+              {/* Add episode button + inline picker */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowEpPicker((v) => !v)}
+                  className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-[10px] text-gray-400 hover:border-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  <Plus className="h-2.5 w-2.5" />
+                  添加集数
+                </button>
+                {showEpPicker && unlinkedEpisodes.length > 0 && (
+                  <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-44 overflow-y-auto rounded-xl border border-[--border-subtle] bg-white shadow-lg">
+                    {unlinkedEpisodes.map((ep) => (
+                      <button
+                        key={ep.id}
+                        onClick={() => addEpisode(ep.id)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 transition-colors"
+                      >
+                        <span className="shrink-0 font-medium text-[--text-muted]">
+                          EP.{String(ep.sequence).padStart(2, "0")}
+                        </span>
+                        <span className="truncate text-[--text-secondary]">{ep.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showEpPicker && unlinkedEpisodes.length === 0 && (
+                  <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-xs text-[--text-muted] shadow-lg">
+                    已关联所有集数
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Fallback: legacy episodeName prop */}
+          {scope !== "guest" && episodeName && (
             <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
               {episodeName}
             </span>
-          )}
-          {scope === "guest" && onPromote && (
-            <button
-              onClick={onPromote}
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
-            >
-              <ArrowUpCircle className="h-3 w-3" />
-              {t("episode.promoteToMain")}
-            </button>
           )}
         </div>
       )}

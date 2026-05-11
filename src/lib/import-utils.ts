@@ -38,27 +38,46 @@ function normalizeParens(s: string): string {
 }
 
 /**
- * 导入角色去重：仅做**通用**归一——
- * - 全角/半角括号统一处理（防止「魔王（人形态）」与「魔王(人形态)」产生两条记录）；
- * - 末尾「（N岁）」且 N≥13 与无年龄括注的同一基底名合并；
- * - N≤12 保留独立 key（儿少与成年可分卡）；
- * - 其余（如「魔王(人形态)」、剧作家自定义括注）原样参与 key，不做词表级特例。
+ * Strip parentheticals from a character name for deduplication, preserving only
+ * true identity markers (形态 variants and child-age suffixes).
+ *
+ * Rules applied in order:
+ * 1. Full-width brackets unified to half-width (normalizeParens must run first)
+ * 2. Age suffix (N岁, N≤12) → kept as ::childN key component
+ * 3. Age suffix (N岁, N≥13) → stripped (adult age is never part of canonical identity)
+ * 4. 形态 suffix e.g. (人形态), (龙形态) → KEPT (these are distinct character forms)
+ * 5. All other parentheticals (role, title, race, emotion) → stripped so that
+ *    "白夜(魔族将军)" and "白夜" → same key,
+ *    "格朗(矮人斧手)" and "格朗" → same key,
+ *    "翠缇娜(精灵公主)" and "翠缇娜" → same key.
  */
 export function canonicalCharacterNameKey(raw: string): string {
   const trimmed = normalizeParens(raw).replace(/\s+/g, " ");
+
+  // Check for age suffix — child (≤12) kept as separate key; adult (≥13) stripped
   const ageMatch = trimmed.match(
-    /^(.+?)[（(]\s*(\d{1,3})\s*岁(?:\s*[·•][^)）]{0,24})?\s*[)）]\s*$/u
+    /^(.+?)[(]\s*(\d{1,3})\s*岁(?:\s*[·•][^)]{0,24})?\s*[)]\s*$/u
   );
   if (ageMatch) {
-    const base = ageMatch[1].trim();
+    const base = compactKey(ageMatch[1].trim());
     const age = parseInt(ageMatch[2], 10);
-    const nb = compactKey(base);
-    if (age <= 12) {
-      return `${nb}::child${age}`;
-    }
-    return nb;
+    if (age <= 12) return `${base}::child${age}`;
+    return base; // adult age suffix stripped
   }
-  return compactKey(trimmed);
+
+  // Strip parentheticals, but PRESERVE 形态 identity markers
+  const stripped = trimmed.replace(/[(][^)]*[)]/g, (match) => {
+    const inner = match.slice(1, -1).trim();
+    // Strip ·emotion suffix, keep only the base form identifier if it ends in 形态
+    const formMatch = inner.match(/^([^·•]*形态)/);
+    if (formMatch) return `(${formMatch[1].trim()})`;
+    // Pure 形态 with no suffix
+    if (/形态$/.test(inner)) return `(${inner})`;
+    // Everything else (age N≥13, role/title/race/emotion) → strip
+    return "";
+  });
+
+  return compactKey(stripped.trim());
 }
 
 /**
