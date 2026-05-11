@@ -30,7 +30,7 @@ interface ExtractedCharacter {
   frequency: number;
   description: string;
   visualHint?: string;
-  scope: "main" | "guest";
+  scope?: string;
 }
 
 interface SplitEpisode {
@@ -189,9 +189,7 @@ export default function AutoPipelinePage({
       });
       const data = await res.json();
       characters.current = data.characters;
-      const mainCount = data.characters.filter((c: ExtractedCharacter) => c.scope === "main").length;
-      const guestCount = data.characters.length - mainCount;
-      setStep(2, "done", `提取完成: ${mainCount} 主角, ${guestCount} 配角`);
+      setStep(2, "done", `提取完成: ${data.characters.length} 个角色`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "提取失败";
       setStep(2, "error", `角色提取失败: ${msg}`);
@@ -713,11 +711,7 @@ export default function AutoPipelinePage({
                   {characters.current.slice(0, 20).map((char) => (
                     <span
                       key={char.name}
-                      className={`rounded-full px-2.5 py-0.5 text-[10px] font-medium ${
-                        char.scope === "main"
-                          ? "bg-blue-50 text-blue-600"
-                          : "bg-purple-50 text-purple-600"
-                      }`}
+                      className="rounded-full px-2.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600"
                     >
                       {char.name}
                     </span>

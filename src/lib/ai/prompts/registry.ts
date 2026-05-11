@@ -355,17 +355,11 @@ const CHAR_EXTRACT_OUTPUT_FORMAT = `═══ 输出格式 ═══
 [
   {
     "name": "角色名，与剧本中完全一致",
-    "scope": "main" 或 "guest",
     "description": "完整视觉规格——单段落，包含以下所有要求",
     "visualHint": "2-4个字的视觉标识符，用于对白标签（如 银发金瞳、红衣长发）。必须一眼可识别——聚焦最显著的外貌特征。",
     "personality": "2-3个塑造姿态、表情和动作的核心性格特质"
   }
 ]`;
-
-const CHAR_EXTRACT_SCOPE_RULES = `═══ 角色分类规则 ═══
-- "main"：驱动故事的核心角色，出现在多个场景中，或对剧情至关重要——主角、重要配角、关键反派
-- "guest"：短暂出现的次要/辅助角色——路人、只出场一次的龙套、有名字但不重要的角色
-拿不准时，优先选"main"。有实质对白或剧情影响的角色就是"main"。`;
 
 const CHAR_EXTRACT_DESCRIPTION_REQUIREMENTS = `═══ 描述要求 ═══
 写一段密集、精确的段落，涵盖以下所有方面。该描述将被原封不动地传给图像生成器——以专业摄影指导向摄影师布置任务的口吻书写：
@@ -424,7 +418,6 @@ const characterExtractDef: PromptDefinition = {
     slot("role_definition", CHAR_EXTRACT_ROLE_DEFINITION, true),
     slot("style_detection", CHAR_EXTRACT_STYLE_DETECTION, true),
     slot("output_format", CHAR_EXTRACT_OUTPUT_FORMAT, false),
-    slot("scope_rules", CHAR_EXTRACT_SCOPE_RULES, true),
     slot(
       "description_requirements",
       CHAR_EXTRACT_DESCRIPTION_REQUIREMENTS,

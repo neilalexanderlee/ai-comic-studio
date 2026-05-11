@@ -61,7 +61,6 @@ export async function handleCharacterExtract(task: Task) {
     }
   }
 
-  const scope = payload.episodeId ? "guest" : "main";
   const created = [];
   for (const char of newCharacters) {
     const id = ulid();
@@ -73,7 +72,7 @@ export async function handleCharacterExtract(task: Task) {
         name: char.name,
         description: char.description,
         visualHint: char.visualHint ?? "",
-        scope,
+        scope: "main",
         episodeId: payload.episodeId ?? null,
       })
       .returning();

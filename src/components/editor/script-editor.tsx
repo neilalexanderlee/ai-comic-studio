@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
 import { useModelStore } from "@/stores/model-store";
 import { useTranslations } from "next-intl";
-import { Sparkles, Loader2, FileText, Lightbulb } from "lucide-react";
+import { Sparkles, Loader2, FileText, Lightbulb, Download } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -182,11 +182,29 @@ export function ScriptEditor() {
       {/* Generated script */}
       {project.script && (
         <div className="rounded-2xl border border-[--border-subtle] bg-white p-1.5">
-          <div className="flex items-center gap-2 px-5 pt-3 pb-1">
-            <FileText className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
-              {t("project.generatedScript")}
-            </span>
+          <div className="flex items-center justify-between px-5 pt-3 pb-1">
+            <div className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                {t("project.generatedScript")}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                const blob = new Blob([project.script ?? ""], { type: "text/markdown;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `${(project.title ?? "script").replace(/\s+/g, "_")}.md`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[--text-muted] hover:bg-gray-100 hover:text-[--text-primary] transition-colors"
+              title="导出 Markdown"
+            >
+              <Download className="h-3 w-3" />
+              导出 .md
+            </button>
           </div>
           <Textarea
             ref={scriptTextareaRef}

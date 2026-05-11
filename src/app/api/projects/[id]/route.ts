@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import { db } from "@/lib/db";
 import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
-import { eq, asc, and, desc } from "drizzle-orm";
+import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 
 function tryDeleteFile(filePath: string | null | undefined) {
@@ -47,21 +47,27 @@ export async function GET(
   // Resolve which version to show shots for
   const resolvedVersionId = versionId ?? allVersions[0]?.id;
 
-  // Fetch related data
+  // Fetch related data — batch queries to avoid N+1
   const projectCharactersRaw = await db
     .select()
     .from(characters)
     .where(eq(characters.projectId, id));
 
-  const projectCharacters = await Promise.all(
-    projectCharactersRaw.map(async (char) => {
-      const assets = await db
-        .select()
-        .from(characterAssets)
-        .where(eq(characterAssets.characterId, char.id));
-      return { ...char, assets };
-    })
-  );
+  // Batch fetch all assets for all characters in one query
+  const charIds = projectCharactersRaw.map((c) => c.id);
+  const allAssets = charIds.length > 0
+    ? await db.select().from(characterAssets).where(inArray(characterAssets.characterId, charIds))
+    : [];
+  const assetsByCharId = new Map<string, typeof allAssets>();
+  for (const asset of allAssets) {
+    const list = assetsByCharId.get(asset.characterId) ?? [];
+    list.push(asset);
+    assetsByCharId.set(asset.characterId, list);
+  }
+  const projectCharacters = projectCharactersRaw.map((char) => ({
+    ...char,
+    assets: assetsByCharId.get(char.id) ?? [],
+  }));
 
   const projectShots = resolvedVersionId
     ? await db
@@ -71,12 +77,13 @@ export async function GET(
         .orderBy(asc(shots.sequence))
     : [];
 
-  // Enrich each shot with its dialogues (including character name)
-  const enrichedShots = await Promise.all(
-    projectShots.map(async (shot) => {
-      const shotDialogues = await db
+  // Batch fetch all dialogues for all shots in one query
+  const shotIds = projectShots.map((s) => s.id);
+  const allDialogues = shotIds.length > 0
+    ? await db
         .select({
           id: dialogues.id,
+          shotId: dialogues.shotId,
           text: dialogues.text,
           characterId: dialogues.characterId,
           characterName: characters.name,
@@ -84,11 +91,19 @@ export async function GET(
         })
         .from(dialogues)
         .innerJoin(characters, eq(dialogues.characterId, characters.id))
-        .where(eq(dialogues.shotId, shot.id))
-        .orderBy(asc(dialogues.sequence));
-      return { ...shot, dialogues: shotDialogues };
-    })
-  );
+        .where(inArray(dialogues.shotId, shotIds))
+        .orderBy(asc(dialogues.sequence))
+    : [];
+  const dialoguesByShotId = new Map<string, typeof allDialogues>();
+  for (const d of allDialogues) {
+    const list = dialoguesByShotId.get(d.shotId) ?? [];
+    list.push(d);
+    dialoguesByShotId.set(d.shotId, list);
+  }
+  const enrichedShots = projectShots.map((shot) => ({
+    ...shot,
+    dialogues: dialoguesByShotId.get(shot.id) ?? [],
+  }));
 
   // Fetch episodes for this project
   const projectEpisodes = await db

@@ -38,8 +38,6 @@ interface CharacterCardProps {
   onUpdate: () => void;
   batchGenerating?: boolean;
   onDelete?: () => void;
-  /** @deprecated */
-  episodeName?: string;
   /** IDs of episodes this character is associated with */
   episodeIds?: string[];
   /** All episodes in the project — needed to render the add-episode picker */
@@ -56,7 +54,6 @@ export function CharacterCard({
   onUpdate,
   batchGenerating,
   onDelete,
-  episodeName,
   episodeIds = [],
   allEpisodes = [],
 }: CharacterCardProps) {
@@ -174,7 +171,7 @@ export function CharacterCard({
         body: formData,
       });
       if (!response.ok) throw new Error("Upload failed");
-      toast.success(t("common.saved"));
+      toast.success(t("common.save"));
       onUpdate();
     } catch (err) {
       console.error(err);
@@ -284,7 +281,7 @@ export function CharacterCard({
         body: JSON.stringify({ imagePath: path }),
       });
       if (!response.ok) throw new Error("Save failed");
-      toast.success(t("common.saved"));
+      toast.success(t("common.save"));
       setGachaOpen(false);
       onUpdate();
     } catch (err) {

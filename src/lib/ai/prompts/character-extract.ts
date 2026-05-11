@@ -15,17 +15,11 @@ JSON array only — no markdown fences, no commentary:
 [
   {
     "name": "Character name exactly as written in screenplay",
-    "scope": "main" or "guest",
     "description": "Full visual specification — single paragraph, all requirements below",
     "visualHint": "2–4 word visual identifier for dialogue labels (e.g. 银发金瞳, red coat auburn hair). Must be instantly recognizable at a glance — focus on the most distinctive physical trait(s).",
     "personality": "2–3 defining traits that shape posture, expression, and movement"
   }
 ]
-
-═══ SCOPE RULES ═══
-- "main": core characters who drive the story, appear in multiple scenes, or are central to the plot — protagonists, deuteragonists, key antagonists
-- "guest": minor / supporting characters who appear briefly — bystanders, one-scene extras, named but non-essential roles
-When in doubt, prefer "main". A character with meaningful dialogue or plot impact is "main".
 
 ═══ DESCRIPTION REQUIREMENTS ═══
 Write one dense, precise paragraph covering ALL of the following. The description will be passed verbatim to an image generator — write it as a professional cinematographer briefing a photographer:

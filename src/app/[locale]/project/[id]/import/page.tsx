@@ -22,7 +22,7 @@ interface ExtractedCharacter {
   frequency: number;
   description: string;
   visualHint?: string;
-  scope: "main" | "guest";
+  scope?: string;
 }
 
 interface SplitEpisode {
@@ -196,9 +196,7 @@ export default function ImportPage({
       }
       const data = await res.json();
       setCharacters(data.characters);
-      const mainCount = data.characters.filter((c: ExtractedCharacter) => c.scope === "main").length;
-      const guestCount = data.characters.length - mainCount;
-      addLog(2, "done", `提取完成: ${mainCount} 个主角, ${guestCount} 个配角`);
+      addLog(2, "done", `提取完成: ${data.characters.length} 个角色`);
       setStepStatus((prev) => ({ ...prev, 2: "done" }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Extract failed";
@@ -228,9 +226,7 @@ export default function ImportPage({
       }
       const data = await res.json();
       setCharacters(data.characters);
-      const mainCount = data.characters.filter((c: ExtractedCharacter) => c.scope === "main").length;
-      const guestCount = data.characters.length - mainCount;
-      addLog(2, "done", `提取完成: ${mainCount} 个主角, ${guestCount} 个配角`);
+      addLog(2, "done", `提取完成: ${data.characters.length} 个角色`);
       setStepStatus((prev) => ({ ...prev, 2: "done" }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Extract failed";
@@ -325,13 +321,6 @@ export default function ImportPage({
     }
   }
 
-  function toggleScope(idx: number) {
-    setCharacters((prev) =>
-      prev.map((c, i) =>
-        i === idx ? { ...c, scope: c.scope === "main" ? "guest" : "main" } : c
-      )
-    );
-  }
 
   function updateEpisode(idx: number, field: keyof SplitEpisode, value: string) {
     setEpisodes((prev) =>
@@ -497,7 +486,7 @@ export default function ImportPage({
                   className="group relative overflow-hidden rounded-[14px] border border-[--border-subtle] bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[--border-hover]"
                 >
                   {/* Top accent strip */}
-                  <div className={`h-1 w-full ${char.scope === "main" ? "bg-gradient-to-r from-blue-500 to-blue-400" : "bg-gradient-to-r from-purple-500 to-purple-400"}`} />
+                  <div className="h-1 w-full bg-gradient-to-r from-primary/60 to-primary/40" />
                   <div className="p-3.5">
                     {/* Avatar + Name */}
                     <div className="mb-2.5 flex items-center gap-2.5">
@@ -529,17 +518,6 @@ export default function ImportPage({
                     {/* Description */}
                     <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
                   </div>
-                  {/* Scope badge (floating, clickable) */}
-                  <button
-                    onClick={() => toggleScope(idx)}
-                    className={`absolute right-3 top-3 rounded-[8px] px-2 py-0.5 text-[9px] font-bold tracking-wide transition-colors ${
-                      char.scope === "main"
-                        ? "bg-blue-50 text-blue-600 hover:bg-blue-100"
-                        : "bg-purple-50 text-purple-600 hover:bg-purple-100"
-                    }`}
-                  >
-                    {char.scope === "main" ? t("main") : t("guest")}
-                  </button>
                 </div>
               ))}
             </div>
@@ -584,9 +562,8 @@ export default function ImportPage({
                   {ep.characters && ep.characters.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {ep.characters.map((name) => {
-                        const isMain = characters.some((c) => c.name === name && c.scope === "main");
                         return (
-                          <span key={name} className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isMain ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"}`}>
+                          <span key={name} className="rounded-full px-2 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600">
                             {name}
                           </span>
                         );
@@ -700,7 +677,7 @@ export default function ImportPage({
                         key={idx}
                         className="group relative overflow-hidden rounded-[14px] border border-[--border-subtle] bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[--border-hover]"
                       >
-                        <div className={`h-1 w-full ${char.scope === "main" ? "bg-gradient-to-r from-blue-500 to-blue-400" : "bg-gradient-to-r from-purple-500 to-purple-400"}`} />
+                        <div className="h-1 w-full bg-gradient-to-r from-primary/60 to-primary/40" />
                         <div className="p-3.5">
                           <div className="mb-2.5 flex items-center gap-2.5">
                             <div
@@ -729,11 +706,6 @@ export default function ImportPage({
                           )}
                           <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
                         </div>
-                        <span className={`absolute right-3 top-3 rounded-[8px] px-2 py-0.5 text-[9px] font-bold tracking-wide ${
-                          char.scope === "main" ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"
-                        }`}>
-                          {char.scope === "main" ? t("main") : t("guest")}
-                        </span>
                       </div>
                     ))}
                   </div>
