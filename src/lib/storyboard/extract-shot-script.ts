@@ -26,6 +26,7 @@ export interface ExtractedShot {
     hasStartFrame: boolean;
     hasEndFrame: boolean;
     hasMotionScript: boolean;
+    hasVideoScript: boolean;
     hasCameraDirection: boolean;
     hasDuration: boolean;
   };

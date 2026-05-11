@@ -22,6 +22,7 @@ export const maxDuration = 300;
 interface ExtractedChar {
   name: string;
   frequency: number;
+  scope?: "main" | "guest";
   description: string;
   visualHint?: string;
 }
@@ -56,6 +57,17 @@ export async function POST(
   const model = createLanguageModel(resolvedModelConfig.text);
   const importCharSystem = await resolvePrompt("import_character_extract", { userId, projectId });
 
+  // Extract the official character-names table (系统提取·角色标准名) from the script
+  // preamble so it can be prepended to every chunk — prevents the LLM from inventing
+  // variant names (e.g. "酒馆老板娘（矮人）" vs "老板娘") in later chunks where the
+  // table is no longer visible.
+  const charTableMatch = body.text.match(
+    /【系统提取·角色标准名】[\s\S]*?(?=\n---|\n##\s|$)/
+  );
+  const charTableHeader = charTableMatch
+    ? `[官方角色名称表 — 所有角色名必须与下表完全一致]\n${charTableMatch[0].trim()}\n\n`
+    : "";
+
   await addImportLog(
     projectId, 2, "running",
     `开始角色提取，共 ${chunks.length} 块`
@@ -70,6 +82,11 @@ export async function POST(
           projectId, 2, "running",
           `正在处理第 ${idx + 1}/${chunks.length} 块...`
         );
+        // Prepend the character table to chunks after the first so the LLM
+        // always has the authoritative names visible regardless of chunk boundary.
+        const chunkWithHeader = idx > 0 && charTableHeader
+          ? charTableHeader + chunk
+          : chunk;
 
         const jsonMode = {
           openai: { response_format: { type: "json_object" } },
@@ -77,7 +94,7 @@ export async function POST(
         const result = await generateText({
           model,
           system: importCharSystem,
-          prompt: buildImportCharacterExtractPrompt(chunk),
+          prompt: buildImportCharacterExtractPrompt(chunkWithHeader),
           providerOptions: jsonMode,
         });
 
@@ -92,7 +109,7 @@ export async function POST(
           const retry = await generateText({
             model,
             system: importCharSystem,
-            prompt: buildImportCharacterExtractPrompt(chunk) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON array.",
+            prompt: buildImportCharacterExtractPrompt(chunkWithHeader) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON array.",
             providerOptions: jsonMode,
           });
           return JSON.parse(extractJSON(retry.text)) as ExtractedChar[];
@@ -106,6 +123,8 @@ export async function POST(
   }
 
   // Merge & deduplicate by canonical key（合并「龙渊」与「龙渊（25岁）」等）
+  // canonicalCharacterNameKey already normalises full-width brackets, so
+  // 「魔王（人形态）」and「魔王(人形态)」resolve to the same key and merge correctly.
   const charMap = new Map<string, ExtractedChar>();
   for (const chars of chunkResults) {
     for (const c of chars) {
@@ -119,6 +138,8 @@ export async function POST(
         if ((c.visualHint?.length ?? 0) > (existing.visualHint?.length ?? 0)) {
           existing.visualHint = c.visualHint;
         }
+        // Prefer scope "main" over "guest" when merging
+        if (c.scope === "main") existing.scope = "main";
         existing.name = pickShorterDisplayName(existing.name, c.name);
       } else {
         charMap.set(key, {
@@ -131,10 +152,11 @@ export async function POST(
 
   const merged = [...charMap.values()].sort((a, b) => b.frequency - a.frequency);
 
-  // Classify: frequency >= 2 = main, else guest
+  // Use LLM-provided scope when available; fall back to frequency heuristic
+  // The LLM classifies by narrative centrality (not raw count), which is far more accurate.
   const result = merged.map((c) => ({
     ...c,
-    scope: c.frequency >= 2 ? ("main" as const) : ("guest" as const),
+    scope: c.scope ?? (c.frequency >= 3 ? ("main" as const) : ("guest" as const)),
   }));
 
   await addImportLog(

@@ -26,13 +26,26 @@ function compactKey(s: string): string {
 }
 
 /**
+ * 全角括号 → 半角，全角冒号 → 半角，统一空格。
+ * 用于所有角色名归一化的第一步。
+ */
+function normalizeParens(s: string): string {
+  return s
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[：]/g, ":")
+    .trim();
+}
+
+/**
  * 导入角色去重：仅做**通用**归一——
+ * - 全角/半角括号统一处理（防止「魔王（人形态）」与「魔王(人形态)」产生两条记录）；
  * - 末尾「（N岁）」且 N≥13 与无年龄括注的同一基底名合并；
  * - N≤12 保留独立 key（儿少与成年可分卡）；
- * - 其余（如「魔王（人形态）」、剧作家自定义括注）原样参与 key，不做词表级特例。
+ * - 其余（如「魔王(人形态)」、剧作家自定义括注）原样参与 key，不做词表级特例。
  */
 export function canonicalCharacterNameKey(raw: string): string {
-  const trimmed = raw.trim().replace(/\s+/g, " ");
+  const trimmed = normalizeParens(raw).replace(/\s+/g, " ");
   const ageMatch = trimmed.match(
     /^(.+?)[（(]\s*(\d{1,3})\s*岁(?:\s*[·•][^)）]{0,24})?\s*[)）]\s*$/u
   );

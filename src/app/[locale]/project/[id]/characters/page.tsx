@@ -22,7 +22,10 @@ interface Character {
     isDefault: number;
   }[];
   scope: string;
+  /** 旧数据或手动绑定可能仍有单列 episode_id */
   episodeId: string | null;
+  /** 分集角色解析写入 episode_characters，列表由此得出出场分集 */
+  episodeIds?: string[];
 }
 
 interface Episode {
@@ -65,17 +68,33 @@ export default function CharactersPage({
     [characters]
   );
 
-  const guestByEpisode = useMemo(() => {
+  /**
+   * 配角分组：优先用 episode_characters（API 的 episodeIds），兼容旧数据的 characters.episode_id。
+   * 分集解析路径只写关联表、不写 episode_id，此前会导致「有计数无列表」。
+   */
+  const { guestByEpisode, guestOrphans } = useMemo(() => {
+    const validEpisodeIds = new Set(episodes.map((e) => e.id));
     const map = new Map<string, Character[]>();
+    const orphans: Character[] = [];
     for (const c of characters) {
-      if (c.scope === "guest" && c.episodeId) {
-        const list = map.get(c.episodeId) || [];
+      if (c.scope !== "guest") continue;
+      const fromLinks =
+        c.episodeIds?.filter((id) => validEpisodeIds.has(id)) ?? [];
+      const legacy =
+        c.episodeId && validEpisodeIds.has(c.episodeId) ? [c.episodeId] : [];
+      const epIds = [...new Set([...fromLinks, ...legacy])];
+      if (epIds.length === 0) {
+        orphans.push(c);
+        continue;
+      }
+      for (const epId of epIds) {
+        const list = map.get(epId) ?? [];
         list.push(c);
-        map.set(c.episodeId, list);
+        map.set(epId, list);
       }
     }
-    return map;
-  }, [characters]);
+    return { guestByEpisode: map, guestOrphans: orphans };
+  }, [characters, episodes]);
 
   const episodeNameMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -141,6 +160,10 @@ export default function CharactersPage({
         </div>
       </div>
 
+      <div className="mb-6 rounded-2xl border border-[--border-subtle] bg-white/70 px-4 py-3 text-xs leading-relaxed text-[--text-secondary] shadow-sm">
+        {tChar("morphNamingHint")}
+      </div>
+
       {/* Main Characters Section */}
       <section className="mb-8">
         <div className="mb-4 flex items-center gap-2">
@@ -166,6 +189,7 @@ export default function CharactersPage({
                 description={char.description}
                 visualHint={char.visualHint}
                 assets={char.assets}
+                scope={char.scope}
                 onUpdate={fetchData}
                 onDelete={() => handleDelete(char.id, char.name)}
               />
@@ -208,6 +232,7 @@ export default function CharactersPage({
                         description={char.description}
                         visualHint={char.visualHint}
                         assets={char.assets}
+                        scope={char.scope}
                         episodeName={`EP.${String(ep.sequence).padStart(2, "0")} ${ep.title}`}
                         onUpdate={fetchData}
                         onPromote={() => handlePromote(char.id)}
@@ -217,6 +242,37 @@ export default function CharactersPage({
                   </div>
                 </div>
               ))}
+
+            {guestOrphans.length > 0 && (
+              <div>
+                <h4 className="mb-2 text-sm font-medium text-[--text-secondary]">
+                  {tChar("guestOrphanSection")}
+                  <span className="ml-2 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-800">
+                    {guestOrphans.length}
+                  </span>
+                </h4>
+                <p className="mb-3 text-xs leading-relaxed text-[--text-muted]">
+                  {tChar("guestOrphanHint")}
+                </p>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 xl:grid-cols-4">
+                  {guestOrphans.map((char) => (
+                    <CharacterCard
+                      key={char.id}
+                      id={char.id}
+                      projectId={projectId}
+                      name={char.name}
+                      description={char.description}
+                      visualHint={char.visualHint}
+                      assets={char.assets}
+                      scope={char.scope}
+                      onUpdate={fetchData}
+                      onPromote={() => handlePromote(char.id)}
+                      onDelete={() => handleDelete(char.id, char.name)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>

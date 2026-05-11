@@ -34,12 +34,14 @@ export async function getShotCharacters(
       .select({ characterId: episodeCharacters.characterId })
       .from(episodeCharacters)
       .where(eq(episodeCharacters.episodeId, episodeId));
-    return linkedIds.length > 0
-      ? db
-          .select()
-          .from(characters)
-          .where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
-      : [];
+    if (linkedIds.length > 0) {
+      return db
+        .select()
+        .from(characters)
+        .where(inArray(characters.id, linkedIds.map((r) => r.characterId)));
+    }
+    // Fallback: no episode-character links (structural import path sets characters:[])
+    // Use all project characters so dialogue matching still works
   }
 
   return db.select().from(characters).where(eq(characters.projectId, projectId));

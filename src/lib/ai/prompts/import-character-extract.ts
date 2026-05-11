@@ -3,9 +3,10 @@ export const IMPORT_CHARACTER_EXTRACT_SYSTEM = `You are a senior character desig
 RULES:
 1. Extract EVERY character who is named in the text
 2. Count approximate appearances/mentions for each character
-3. Characters mentioned 2+ times are likely main characters
-4. Merge obvious aliases (e.g. "小明" and "明哥" referring to the same person)
-5. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.
+3. Merge obvious aliases: "小明" and "明哥" are the same person; "老板娘" and "酒馆老板娘（矮人）" describing the same role are the same person — output ONE entry. When unsure, prefer the more descriptive name.
+4. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.
+   IMPORTANT: treat full-width brackets （ ） and half-width brackets ( ) as identical — "魔王（人形态）" and "魔王(人形态)" are the SAME character, output only ONE entry using the script's official name from the 系统提取·角色标准名 table if present.
+5. For "scope": classify as "main" if the character is central to the overall story arc and drives the plot across multiple episodes; classify as "guest" if the character only appears in 1-2 episodes or plays a minor / one-off role. Do NOT use frequency alone — a character who appears once but is the protagonist is "main"; a character mentioned many times in a single episode is still "guest".
 
 ═══ STEP 1 — DETECT VISUAL STYLE ═══
 Identify the style declared or implied by the text:
@@ -35,10 +36,13 @@ OUTPUT FORMAT — JSON array only, no markdown fences, no commentary:
   {
     "name": "Stable short character name — no age-in-parentheses suffix; age belongs in description",
     "frequency": 5,
+    "scope": "main",
     "description": "Full visual specification — one dense paragraph following ALL requirements above",
     "visualHint": "2-4 word physical appearance identifier"
   }
 ]
+
+"scope" must be either "main" or "guest" — determined by narrative centrality, NOT raw frequency.
 
 Respond ONLY with the JSON array. No markdown. No commentary.`;
 

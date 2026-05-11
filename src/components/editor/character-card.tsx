@@ -76,8 +76,25 @@ export function CharacterCard({
   const [gachaCount, setGachaCount] = useState(4);
   const [gachaPaths, setGachaPaths] = useState<string[]>([]);
   const [isGachaGenerating, setIsGachaGenerating] = useState(false);
+  /** 形态名称编辑草稿（受控 input 需本地 state，否则无法键入） */
+  const [assetTagDrafts, setAssetTagDrafts] = useState<Record<string, string>>({});
 
   const isGenerating = generating;
+
+  useEffect(() => {
+    const ids = new Set(assets.map((a) => a.id));
+    setAssetTagDrafts((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const k of Object.keys(next)) {
+        if (!ids.has(k)) {
+          delete next[k];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [assets]);
 
   function resolveImageRef(ref: ModelRef | null) {
     if (!ref) return null;
@@ -139,7 +156,7 @@ export function CharacterCard({
     }
   }
 
-  async function handleUpdateAssetTag(assetId: string, tag: string) {
+  async function handleUpdateAssetTag(assetId: string, tag: string): Promise<boolean> {
     try {
       await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
         method: "PATCH",
@@ -147,8 +164,10 @@ export function CharacterCard({
         body: JSON.stringify({ tag }),
       });
       onUpdate();
+      return true;
     } catch (err) {
       console.error(err);
+      return false;
     }
   }
 
@@ -225,12 +244,35 @@ export function CharacterCard({
       <div key={asset.id} className="relative flex-shrink-0 w-[140px] snap-center group/slot flex flex-col gap-1">
         <input 
           className="text-[11px] font-semibold text-center text-[--text-secondary] bg-white/50 rounded-full py-0.5 border border-[--border-subtle] focus:bg-white outline-none transition-colors"
-          value={asset.tag}
-          onChange={(e) => {
-              // Local state update would be better for UX, but for now we update assets through props/onUpdate
-              // Or we could have a localAssets state.
+          title={t("character.morphTagInputTitle")}
+          value={assetTagDrafts[asset.id] ?? asset.tag}
+          onChange={(e) =>
+            setAssetTagDrafts((prev) => ({ ...prev, [asset.id]: e.target.value }))
+          }
+          onBlur={async (e) => {
+            let next = e.target.value.trim();
+            if (!next) {
+              setAssetTagDrafts((prev) => {
+                const { [asset.id]: _, ...rest } = prev;
+                return rest;
+              });
+              return;
+            }
+            if (next === asset.tag) {
+              setAssetTagDrafts((prev) => {
+                const { [asset.id]: _, ...rest } = prev;
+                return rest;
+              });
+              return;
+            }
+            const ok = await handleUpdateAssetTag(asset.id, next);
+            if (ok) {
+              setAssetTagDrafts((prev) => {
+                const { [asset.id]: _, ...rest } = prev;
+                return rest;
+              });
+            }
           }}
-          onBlur={(e) => handleUpdateAssetTag(asset.id, e.target.value)}
         />
         <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[--surface] border border-[--border-subtle] transition-shadow hover:shadow-md">
           {asset.imagePath ? (

@@ -89,7 +89,7 @@ export default function EpisodeCharactersPage() {
 
   return (
     <div className="animate-page-in space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
             <Users className="h-4 w-4 text-primary" />
@@ -103,7 +103,7 @@ export default function EpisodeCharactersPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <PromptEditButton promptKeys="character_extract" projectId={project.id} />
           <InlineModelPicker capability="text" />
           <Button
@@ -139,6 +139,10 @@ export default function EpisodeCharactersPage() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="rounded-2xl border border-[--border-subtle] bg-white/70 px-4 py-3 text-xs leading-relaxed text-[--text-secondary] shadow-sm">
+        {t("character.morphNamingHint")}
       </div>
 
       {project.characters.length === 0 ? (

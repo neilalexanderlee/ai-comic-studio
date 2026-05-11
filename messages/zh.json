@@ -118,7 +118,11 @@
     "guestSection": "配角",
     "noMain": "还没有主角",
     "noGuest": "还没有配角",
-    "deleteConfirm": "确定要删除角色「{name}」吗？"
+    "guestOrphanSection": "未关联分集的配角",
+    "guestOrphanHint": "下列角色为配角，但未绑定当前项目中的分集（例如分集已删或数据导入未写入分集）。仍可编辑、上传参考图或升为主角。",
+    "deleteConfirm": "确定要删除角色「{name}」吗？",
+    "morphNamingHint": "形态标签会在分镜里用来匹配参考图，建议简短、好记，并与剧本说法一致。例如：「日常」（便装、未持械）、「武装」（持武器/战斗造型）；也可按服装区分如「礼服」「睡衣」等。",
+    "morphTagInputTitle": "编辑形态名称，点击框外保存"
   },
   "shot": {
     "sequence": "第 {number} 个分镜",

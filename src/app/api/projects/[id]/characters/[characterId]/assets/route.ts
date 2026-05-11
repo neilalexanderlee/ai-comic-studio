@@ -10,8 +10,8 @@ export async function POST(
 ) {
   const { characterId } = await params;
   const body = (await request.json()) as {
-    imagePath: string;
-    tag: string;
+    imagePath?: string | null;
+    tag?: string;
     assetType?: "morph" | "blueprint";
     isDefault?: boolean;
   };
@@ -21,7 +21,8 @@ export async function POST(
     .values({
       id: ulid(),
       characterId,
-      imagePath: body.imagePath,
+      // 新建形态可先无图；DB 列为 NOT NULL，用空串表示「尚未上传」
+      imagePath: body.imagePath ?? "",
       tag: body.tag || "日常",
       assetType: body.assetType || "morph",
       isDefault: body.isDefault ? 1 : 0,

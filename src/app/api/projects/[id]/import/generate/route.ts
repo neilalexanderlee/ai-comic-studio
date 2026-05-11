@@ -98,14 +98,35 @@ export async function POST(
   }
 
   // 3. Create episode_characters relations
+  // If the split path provided explicit character lists, use them.
+  // Otherwise (structural heading split always returns []), fall back to
+  // text-matching: any character name that appears in the episode script
+  // gets linked, so dialogue matching works correctly later.
   let relationCount = 0;
+  const allCharNames = [...charIdByName.keys()]; // lowercase trimmed names
+
   for (let i = 0; i < body.episodes.length; i++) {
     const epData = body.episodes[i];
     const episodeId = created[i]?.id;
-    if (!episodeId || !epData.characters) continue;
+    if (!episodeId) continue;
 
-    for (const charName of epData.characters) {
-      const charId = charIdByName.get(charName.toLowerCase().trim());
+    const explicitChars = epData.characters ?? [];
+    const scriptText = (epData.script || epData.idea || "").toLowerCase();
+
+    // Collect names to link: explicit list union text-match fallback
+    const namesToLink = new Set<string>();
+    for (const cn of explicitChars) {
+      namesToLink.add(cn.toLowerCase().trim());
+    }
+    if (namesToLink.size === 0) {
+      // Structural split: detect character appearances in episode script
+      for (const cn of allCharNames) {
+        if (scriptText.includes(cn)) namesToLink.add(cn);
+      }
+    }
+
+    for (const cn of namesToLink) {
+      const charId = charIdByName.get(cn);
       if (!charId) continue;
       await db.insert(episodeCharacters).values({
         id: ulid(),
