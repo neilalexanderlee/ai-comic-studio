@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, ArrowUpCircle, Trash2, Upload, X, Plus } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -37,10 +37,8 @@ interface CharacterCardProps {
   assets?: CharacterAsset[];
   onUpdate: () => void;
   batchGenerating?: boolean;
-  scope?: string;
-  onPromote?: () => void;
   onDelete?: () => void;
-  /** @deprecated use episodeIds + allEpisodes instead */
+  /** @deprecated */
   episodeName?: string;
   /** IDs of episodes this character is associated with */
   episodeIds?: string[];
@@ -57,8 +55,6 @@ export function CharacterCard({
   assets = [],
   onUpdate,
   batchGenerating,
-  scope,
-  onPromote,
   onDelete,
   episodeName,
   episodeIds = [],
@@ -431,91 +427,59 @@ export function CharacterCard({
         </div>
       </div>
 
-      {/* Scope badge + episode tags */}
-      {scope && (
-        <div className="px-4 pt-3 space-y-2">
-          {/* Row 1: scope badge + promote button */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                scope === "main"
-                  ? "bg-blue-100 text-blue-700"
-                  : "bg-purple-100 text-purple-700"
-              }`}
-            >
-              {scope === "main" ? t("episode.mainCharacter") : t("episode.guestCharacter")}
-            </span>
-            {scope === "guest" && onPromote && (
-              <button
-                onClick={onPromote}
-                className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium text-blue-600 hover:bg-blue-50 transition-colors"
+      {/* Episode tags — shown for all characters */}
+      {allEpisodes.length > 0 && (
+        <div className="px-4 pt-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {linkedEpisodes.map((ep) => (
+              <span
+                key={ep.id}
+                className="inline-flex items-center gap-1 rounded-full bg-gray-100 pl-2 pr-1 py-0.5 text-[10px] font-medium text-gray-600"
               >
-                <ArrowUpCircle className="h-3 w-3" />
-                {t("episode.promoteToMain")}
+                EP.{String(ep.sequence).padStart(2, "0")}
+                <button
+                  onClick={() => removeEpisode(ep.id)}
+                  className="ml-0.5 rounded-full p-0.5 hover:bg-gray-200 transition-colors"
+                  title={`移除第${ep.sequence}集`}
+                >
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              </span>
+            ))}
+
+            {/* Add episode button + inline picker */}
+            <div className="relative">
+              <button
+                onClick={() => setShowEpPicker((v) => !v)}
+                className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-[10px] text-gray-400 hover:border-gray-400 hover:text-gray-600 transition-colors"
+              >
+                <Plus className="h-2.5 w-2.5" />
+                添加集数
               </button>
-            )}
+              {showEpPicker && unlinkedEpisodes.length > 0 && (
+                <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-44 overflow-y-auto rounded-xl border border-[--border-subtle] bg-white shadow-lg">
+                  {unlinkedEpisodes.map((ep) => (
+                    <button
+                      key={ep.id}
+                      onClick={() => addEpisode(ep.id)}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 transition-colors"
+                    >
+                      <span className="shrink-0 font-medium text-[--text-muted]">
+                        EP.{String(ep.sequence).padStart(2, "0")}
+                      </span>
+                      <span className="truncate text-[--text-secondary]">{ep.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {showEpPicker && unlinkedEpisodes.length === 0 && (
+                <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-xs text-[--text-muted] shadow-lg">
+                  已关联所有集数
+                </div>
+              )}
+            </div>
             {savingEpisodes && <Loader2 className="h-3 w-3 animate-spin text-[--text-muted]" />}
           </div>
-
-          {/* Row 2: episode tags (guest only, when allEpisodes provided) */}
-          {scope === "guest" && allEpisodes.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {linkedEpisodes.map((ep) => (
-                <span
-                  key={ep.id}
-                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 pl-2 pr-1 py-0.5 text-[10px] font-medium text-gray-600"
-                >
-                  EP.{String(ep.sequence).padStart(2, "0")}
-                  <button
-                    onClick={() => removeEpisode(ep.id)}
-                    className="ml-0.5 rounded-full p-0.5 hover:bg-gray-200 transition-colors"
-                    title={`移除第${ep.sequence}集`}
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              ))}
-
-              {/* Add episode button + inline picker */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowEpPicker((v) => !v)}
-                  className="inline-flex items-center gap-0.5 rounded-full border border-dashed border-gray-300 px-2 py-0.5 text-[10px] text-gray-400 hover:border-gray-400 hover:text-gray-600 transition-colors"
-                >
-                  <Plus className="h-2.5 w-2.5" />
-                  添加集数
-                </button>
-                {showEpPicker && unlinkedEpisodes.length > 0 && (
-                  <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-44 overflow-y-auto rounded-xl border border-[--border-subtle] bg-white shadow-lg">
-                    {unlinkedEpisodes.map((ep) => (
-                      <button
-                        key={ep.id}
-                        onClick={() => addEpisode(ep.id)}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 transition-colors"
-                      >
-                        <span className="shrink-0 font-medium text-[--text-muted]">
-                          EP.{String(ep.sequence).padStart(2, "0")}
-                        </span>
-                        <span className="truncate text-[--text-secondary]">{ep.title}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {showEpPicker && unlinkedEpisodes.length === 0 && (
-                  <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-xs text-[--text-muted] shadow-lg">
-                    已关联所有集数
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Fallback: legacy episodeName prop */}
-          {scope !== "guest" && episodeName && (
-            <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
-              {episodeName}
-            </span>
-          )}
         </div>
       )}
 
