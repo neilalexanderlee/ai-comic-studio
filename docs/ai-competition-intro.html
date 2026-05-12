@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Comic Builder — AI 大赛项目介绍</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #e2e8f0;
+      --accent: #e8553a;
+      --accent-soft: #fff1ed;
+      --card: #f8fafc;
+      --white: #ffffff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Noto Sans SC", system-ui, sans-serif;
+      color: var(--ink);
+      font-size: 11pt;
+      line-height: 1.55;
+      background: #cbd5e1;
+    }
+    .sheet {
+      max-width: 210mm;
+      margin: 0 auto;
+      background: var(--white);
+      box-shadow: 0 8px 40px rgba(15, 23, 42, 0.12);
+    }
+    section {
+      padding: 14mm 16mm;
+      border-bottom: 1px solid var(--line);
+    }
+    section:last-child { border-bottom: none; }
+    h1 {
+      font-size: 26pt;
+      font-weight: 700;
+      margin: 0 0 8px;
+      letter-spacing: -0.02em;
+    }
+    h2 {
+      font-size: 14pt;
+      font-weight: 600;
+      margin: 0 0 10px;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    h2::before {
+      content: "";
+      width: 4px;
+      height: 1.1em;
+      background: var(--accent);
+      border-radius: 2px;
+    }
+    h3 { font-size: 11pt; font-weight: 600; margin: 14px 0 6px; }
+    p { margin: 0 0 8px; color: var(--muted); }
+    ul { margin: 6px 0 0; padding-left: 1.2em; color: var(--muted); }
+    li { margin-bottom: 4px; }
+    .tagline { font-size: 12pt; color: var(--muted); margin-bottom: 18px; }
+    .cover {
+      min-height: 260mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 45%, #334155 100%);
+      color: #f1f5f9;
+      border-bottom: none;
+    }
+    .cover-top { padding-top: 8mm; }
+    .cover-brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .cover-brand svg { flex-shrink: 0; }
+    .cover-brand .name { font-size: 13pt; font-weight: 600; letter-spacing: 0.04em; opacity: 0.9; }
+    .cover-main { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 20mm 0; }
+    .cover h1 { color: #fff; font-size: 32pt; line-height: 1.15; }
+    .cover .tagline { color: #94a3b8; font-size: 13pt; max-width: 85%; }
+    .cover-meta {
+      font-size: 9pt;
+      color: #64748b;
+      border-top: 1px solid rgba(148, 163, 184, 0.25);
+      padding-top: 10px;
+    }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .card h3 { margin-top: 0; color: var(--ink); }
+    .mono { font-family: "JetBrains Mono", monospace; font-size: 9pt; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin-top: 8px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 6px 8px;
+      text-align: left;
+    }
+    th { background: var(--accent-soft); font-weight: 600; color: var(--ink); }
+    .figure {
+      margin: 12px 0;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fafafa;
+    }
+    .figure-caption {
+      font-size: 9pt;
+      color: var(--muted);
+      padding: 8px 12px;
+      background: var(--white);
+      border-top: 1px solid var(--line);
+    }
+    .highlight {
+      background: linear-gradient(90deg, var(--accent-soft), transparent);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 500;
+      color: var(--ink);
+    }
+    @page { size: A4; margin: 0; }
+    @media print {
+      body { background: white; }
+      .sheet { box-shadow: none; max-width: none; }
+      section { break-inside: avoid; page-break-inside: avoid; }
+      .cover { min-height: auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <!-- 封面 -->
+    <section class="cover">
+      <div class="cover-top">
+        <div class="cover-brand">
+          <svg width="48" height="48" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <rect width="32" height="32" rx="8" fill="#E8553A"/>
+            <rect x="5" y="5" width="22" height="17" rx="3" fill="white"/>
+            <line x1="14" y1="5" x2="14" y2="22" stroke="#E8553A" stroke-width="1.2" stroke-opacity="0.25"/>
+            <line x1="5" y1="14" x2="14" y2="14" stroke="#E8553A" stroke-width="1.2" stroke-opacity="0.25"/>
+            <path d="M11 22L8.5 26.5L14 22" fill="white"/>
+            <path d="M21 9.5L22 12L24.5 13L22 14L21 16.5L20 14L17.5 13L20 12L21 9.5Z" fill="#E8553A"/>
+            <circle cx="9" cy="9.5" r="1" fill="#E8553A" fill-opacity="0.35"/>
+          </svg>
+          <div>
+            <div class="name">AI COMIC BUILDER</div>
+            <div style="font-size:9pt;opacity:0.7">全栈漫剧 / 动画短片生成工作台</div>
+          </div>
+        </div>
+      </div>
+      <div class="cover-main">
+        <h1>从剧本到成片：<br/>端到端 AI 漫剧流水线</h1>
+        <p class="tagline">
+          面向创作者的一站式工具：剧本解析、角色一致性、智能分镜、首尾帧与参考帧、多模型视频生成、FFmpeg 合成与字幕烧录。密钥后端存储，数据默认本地化部署。
+        </p>
+      </div>
+      <div class="cover-meta">
+        项目版本参考 README（v0.2.x） · 文档生成日期：2026 年 5 月 · Apache License 2.0
+      </div>
+    </section>
+
+    <!-- 背景与价值 -->
+    <section>
+      <h2>背景与问题</h2>
+      <p>传统漫剧与短片制作链路长、环节割裂：剧本结构化、角色设定统一、分镜语言专业、关键帧与视频模型接口各异。独立创作者与小团队难以在可控成本下完成「从文本到连贯影像」的闭环。</p>
+      <h3>本项目定位</h3>
+      <p><span class="highlight">AI Comic Builder</span> 将多阶段 AI 能力与本地媒体管线整合为可编排的 Web 应用：用户上传或编写剧本后，可按阶段触发或批量执行生成任务，并在分镜看板中跟踪进度、对比版本、精细编辑单镜提示词与参考资源。</p>
+    </section>
+
+    <!-- 核心能力 -->
+    <section>
+      <h2>核心能力（功能亮点）</h2>
+      <div class="two-col">
+        <div class="card">
+          <h3>剧本与分集</h3>
+          <ul>
+            <li>支持 TXT / DOCX / PDF 导入与可视化解析流程</li>
+            <li>项目级分集、按集角色关联与复用</li>
+            <li>AI 辅助剧本生成与结构化拆分</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>角色与一致性</h3>
+          <ul>
+            <li>AI 从剧本提取角色与视觉描述</li>
+            <li>四视图参考图（正 / ¾ / 侧 / 背）</li>
+            <li>分镜帧生成时智能解析场景并挂载角色参考图</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>分镜与编辑</h3>
+          <ul>
+            <li>专业镜头列表：构图、灯光、运镜等指令</li>
+            <li>分镜抽屉、角色内联面板、看板视图</li>
+            <li>分镜版本管理与单镜 AI 优化</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>影像与成片</h3>
+          <ul>
+            <li>首尾帧或场景参考帧模式</li>
+            <li>视频提示词生成与多供应商视频模型</li>
+            <li>片段拼接、字幕烧录、素材打包下载</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 图示：流水线 -->
+    <section>
+      <h2>生成流水线（示意图）</h2>
+      <div class="figure" aria-label="流水线示意图">
+        <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:auto">
+          <defs>
+            <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" style="stop-color:#fff1ed"/>
+              <stop offset="100%" style="stop-color:#f8fafc"/>
+            </linearGradient>
+            <filter id="shadow" x="-5%" y="-5%" width="110%" height="120%">
+              <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/>
+            </filter>
+          </defs>
+          <rect width="720" height="200" fill="#fafafa"/>
+          <!-- 节点 -->
+          <g font-family="Noto Sans SC, sans-serif" font-size="11" fill="#0f172a">
+            <rect x="12" y="72" width="88" height="56" rx="8" fill="url(#g1)" stroke="#e2e8f0" filter="url(#shadow)"/>
+            <text x="56" y="98" text-anchor="middle" font-weight="600">剧本输入</text>
+            <text x="56" y="114" text-anchor="middle" fill="#64748b" font-size="9">导入 / 创作</text>
+
+            <path d="M100 100 L118 100" stroke="#cbd5e1" stroke-width="2" marker-end="url(#arr)"/>
+            <rect x="118" y="72" width="88" height="56" rx="8" fill="#fff" stroke="#e2e8f0" filter="url(#shadow)"/>
+            <text x="162" y="98" text-anchor="middle" font-weight="600">解析分集</text>
+            <text x="162" y="114" text-anchor="middle" fill="#64748b" font-size="9">结构化</text>
+
+            <path d="M206 100 L224 100" stroke="#cbd5e1" stroke-width="2"/>
+            <rect x="224" y="72" width="88" height="56" rx="8" fill="#fff" stroke="#e2e8f0" filter="url(#shadow)"/>
+            <text x="268" y="98" text-anchor="middle" font-weight="600">角色提取</text>
+            <text x="268" y="114" text-anchor="middle" fill="#64748b" font-size="9">视觉描述</text>
+
+            <path d="M312 100 L330 100" stroke="#cbd5e1" stroke-width="2"/>
+            <rect x="330" y="56" width="100" height="88" rx="8" fill="#fff1ed" stroke="#fdba74" filter="url(#shadow)"/>
+            <text x="380" y="88" text-anchor="middle" font-weight="600">四视图</text>
+            <text x="380" y="104" text-anchor="middle" fill="#64748b" font-size="9">参考图</text>
+            <text x="380" y="120" text-anchor="middle" fill="#64748b" font-size="9">一致性</text>
+
+            <path d="M430 100 L448 100" stroke="#cbd5e1" stroke-width="2"/>
+            <rect x="448" y="72" width="88" height="56" rx="8" fill="#fff" stroke="#e2e8f0" filter="url(#shadow)"/>
+            <text x="492" y="98" text-anchor="middle" font-weight="600">智能分镜</text>
+            <text x="492" y="114" text-anchor="middle" fill="#64748b" font-size="9">镜头列表</text>
+
+            <path d="M536 100 L554 100" stroke="#cbd5e1" stroke-width="2"/>
+            <rect x="554" y="72" width="88" height="56" rx="8" fill="#fff" stroke="#e2e8f0" filter="url(#shadow)"/>
+            <text x="598" y="98" text-anchor="middle" font-weight="600">帧 / 视频</text>
+            <text x="598" y="114" text-anchor="middle" fill="#64748b" font-size="9">多模型</text>
+
+            <path d="M642 100 L660 100" stroke="#cbd5e1" stroke-width="2"/>
+            <rect x="660" y="72" width="48" height="56" rx="8" fill="#0f172a" stroke="#0f172a"/>
+            <text x="684" y="104" text-anchor="middle" fill="#fff" font-weight="600" font-size="10">成片</text>
+          </g>
+          <defs>
+            <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#94a3b8"/>
+            </marker>
+          </defs>
+          <text x="360" y="28" text-anchor="middle" font-family="Noto Sans SC, sans-serif" font-size="12" font-weight="600" fill="#334155">可阶段触发 · 可批量生成 · 进度可追踪</text>
+        </svg>
+        <div class="figure-caption">图 1：从剧本到成片的阶段化流水线（与 README 描述一致，各阶段可单独或批量执行）。</div>
+      </div>
+    </section>
+
+    <!-- 图示：系统架构 -->
+    <section>
+      <h2>系统架构（示意图）</h2>
+      <div class="figure">
+        <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" style="display:block;width:100%;height:auto">
+          <rect width="720" height="280" fill="#f8fafc"/>
+          <g font-family="Noto Sans SC, sans-serif" font-size="11">
+            <rect x="40" y="40" width="160" height="90" rx="10" fill="#fff" stroke="#e2e8f0"/>
+            <text x="120" y="68" text-anchor="middle" font-weight="600" fill="#0f172a">Next.js 前端</text>
+            <text x="120" y="88" text-anchor="middle" fill="#64748b" font-size="9">React 19 · Tailwind · Zustand</text>
+            <text x="120" y="104" text-anchor="middle" fill="#64748b" font-size="9">next-intl 多语言</text>
+            <text x="120" y="120" text-anchor="middle" fill="#64748b" font-size="9">项目 / 分镜 / 设置 UI</text>
+
+            <rect x="280" y="40" width="400" height="90" rx="10" fill="#fff" stroke="#e2e8f0"/>
+            <text x="480" y="68" text-anchor="middle" font-weight="600" fill="#0f172a">App Router API</text>
+            <text x="480" y="88" text-anchor="middle" fill="#64748b" font-size="9">统一生成入口 generate · 导入 · 上传</text>
+            <text x="480" y="104" text-anchor="middle" fill="#64748b" font-size="9">提示词模板 / Provider 密钥后端存储</text>
+            <text x="480" y="120" text-anchor="middle" fill="#64748b" font-size="9">任务队列编排异步生成</text>
+
+            <path d="M200 85 L270 85" stroke="#94a3b8" stroke-width="2" marker-end="url(#a2)"/>
+            <path d="M270 85 L270 155 L40 155 L40 145" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4 3" fill="none" opacity="0.6"/>
+
+            <rect x="40" y="150" width="200" height="100" rx="10" fill="#fff1ed" stroke="#fdba74"/>
+            <text x="140" y="178" text-anchor="middle" font-weight="600" fill="#0f172a">数据与媒体</text>
+            <text x="140" y="198" text-anchor="middle" fill="#64748b" font-size="9">SQLite + Drizzle ORM</text>
+            <text x="140" y="214" text-anchor="middle" fill="#64748b" font-size="9">projects / episodes /</text>
+            <text x="140" y="228" text-anchor="middle" fill="#64748b" font-size="9">characters / shots / tasks</text>
+            <text x="140" y="244" text-anchor="middle" fill="#64748b" font-size="9">本地 uploads 媒体目录</text>
+
+            <rect x="260" y="150" width="200" height="100" rx="10" fill="#fff" stroke="#e2e8f0"/>
+            <text x="360" y="178" text-anchor="middle" font-weight="600" fill="#0f172a">AI Provider 层</text>
+            <text x="360" y="198" text-anchor="middle" fill="#64748b" font-size="9">OpenAI · Gemini · Kling</text>
+            <text x="360" y="214" text-anchor="middle" fill="#64748b" font-size="9">Seedance · Veo 等</text>
+            <text x="360" y="232" text-anchor="middle" fill="#64748b" font-size="9">工厂模式统一文本 / 图 / 视频</text>
+
+            <rect x="480" y="150" width="200" height="100" rx="10" fill="#fff" stroke="#e2e8f0"/>
+            <text x="580" y="178" text-anchor="middle" font-weight="600" fill="#0f172a">FFmpeg 视频管线</text>
+            <text x="580" y="198" text-anchor="middle" fill="#64748b" font-size="9">拼接片段</text>
+            <text x="580" y="214" text-anchor="middle" fill="#64748b" font-size="9">字幕烧录</text>
+            <text x="580" y="232" text-anchor="middle" fill="#64748b" font-size="9">成片与资源导出</text>
+          </g>
+          <defs>
+            <marker id="a2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L6,3 L0,6 Z" fill="#64748b"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="figure-caption">图 2：全栈单体架构 — 前后端同仓，媒体与数据库默认本地化，便于 Docker 与内网部署。</div>
+      </div>
+    </section>
+
+    <!-- 技术栈 -->
+    <section>
+      <h2>技术栈摘要</h2>
+      <table>
+        <thead>
+          <tr><th>层级</th><th>技术选型</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>框架</td><td>Next.js 16（App Router）</td></tr>
+          <tr><td>前端</td><td>React 19、Tailwind CSS 4、Zustand、Base UI</td></tr>
+          <tr><td>国际化</td><td>next-intl（中文 / English / 日本語 / 한국어）</td></tr>
+          <tr><td>数据</td><td>SQLite + Drizzle ORM；异步任务队列</td></tr>
+          <tr><td>AI</td><td>AI SDK / 多供应商图像与视频 API；可配置提示词注册表</td></tr>
+          <tr><td>视频</td><td>fluent-ffmpeg 封装拼接与字幕</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- 创新点总结 -->
+    <section>
+      <h2>差异化与可演示性</h2>
+      <ul>
+        <li><strong>流水线产品化</strong>：不是单点「文生图」Demo，而是覆盖导入、角色、分镜、帧、视频、合成的完整工作流。</li>
+        <li><strong>一致性设计</strong>：四视图 + 分镜帧生成时的角色参考图解析，降低跨镜头形象漂移。</li>
+        <li><strong>工程与安全</strong>：API Key 后端存储；日志对 Prompt 降敏；默认本地媒体路径，适合大赛演示与私有化说明。</li>
+        <li><strong>可扩展</strong>：Provider 工厂与提示词槽位化，便于接入新模型与调优比赛场景。</li>
+      </ul>
+      <p style="margin-top:12px;font-size:9.5pt">演示素材：README 中附有 Bilibili 系统介绍与版本更新视频链接，可作为现场演示辅助材料。</p>
+    </section>
+  </div>
+</body>
+</html>

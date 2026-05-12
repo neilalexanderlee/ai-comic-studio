@@ -168,8 +168,15 @@ export async function POST(
 
 STRICT RULES — read carefully before answering:
 1. NEVER merge a child version (age ≤ 12, e.g. "龙渊(10岁)", "小龙渊") with the adult version of the same character. They look completely different and must remain separate entries.
-2. Only merge entries that are clearly the SAME PERSON with the SAME APPEARANCE referenced by different name variants (role prefix, title, shortened form, or relational term).
-3. When in doubt, do NOT merge.
+2. Merge entries that refer to the SAME underlying entity, including:
+   a. Different name variants for the same person (role prefix, title, shortened form, relational term).
+   b. The same creature/entity with a CONTEXT or SETTING qualifier — e.g. "石龙" and "石龙魔兽" are the same entity; "火龙" and "魔境火龙" are the same dragon in a different realm. Context suffixes like 魔兽、魔境、(魔化) typically do NOT change visual appearance enough to warrant a separate entry.
+3. NEVER merge entries that have EXPLICIT VISUAL-FORM markers indicating completely different appearances:
+   - 人形态 / 龙形态 / 兽形 / 真身 → e.g. "魔王(人形态)" and "魔王(龙形态)" look COMPLETELY different — keep them as SEPARATE entries.
+   - Child age markers (e.g. "龙渊(10岁)", "小龙渊") vs. adult → keep separate.
+4. When in doubt, do NOT merge.
+
+Canonical name selection: prefer the SHORTER, more commonly used base name (e.g. "石龙" over "石龙魔兽", "火龙" over "魔境火龙").
 
 Character names:
 ${nameList.map((n, i) => `${i}: ${n}`).join("\n")}
@@ -182,7 +189,7 @@ Return ONLY the JSON array. No explanation.`;
 
       const dedupeResult = await generateText({
         model,
-        system: "You are a character deduplication assistant for screenplays. Return only valid JSON. IMPORTANT: never merge a child-age character (e.g. 'X(10岁)') with their adult counterpart — they are visually distinct and must stay separate.",
+        system: "You are a character deduplication assistant for screenplays. Return only valid JSON. Merge context/setting variants of the same entity (e.g. '石龙'+'石龙魔兽', '火龙'+'魔境火龙'). NEVER merge entries with explicit visual-form markers like 人形态/龙形态/兽形/真身 — those look completely different and must stay separate. NEVER merge a child-age character with their adult counterpart.",
         prompt: dedupePrompt,
         providerOptions: {},
       });

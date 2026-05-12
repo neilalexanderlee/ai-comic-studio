@@ -80,7 +80,8 @@ export function CharacterCard({
   const [localEpisodeIds, setLocalEpisodeIds] = useState<string[]>(episodeIds);
   const [showEpPicker, setShowEpPicker] = useState(false);
   const [savingEpisodes, setSavingEpisodes] = useState(false);
-  useEffect(() => { setLocalEpisodeIds(episodeIds); }, [episodeIds]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setLocalEpisodeIds(episodeIds); }, [JSON.stringify(episodeIds)]);
 
   async function updateEpisodeIds(ids: string[]) {
     setLocalEpisodeIds(ids);
