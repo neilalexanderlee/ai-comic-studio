@@ -7,6 +7,7 @@ import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Settings, Wand2 } from "lucide-react";
 import { LogoIcon } from "@/components/logo";
+import { VisualStylePicker } from "@/components/editor/visual-style-picker";
 
 export default function ProjectLayout({
   children,
@@ -55,7 +56,9 @@ export default function ProjectLayout({
             </h1>
           </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
+          <VisualStylePicker />
+          <div className="flex items-center gap-1">
           <Link
             href={`/zh/settings/prompts?scope=project&projectId=${id}`}
             title="项目提示词"
@@ -69,6 +72,7 @@ export default function ProjectLayout({
           >
             <Settings className="h-4 w-4" />
           </Link>
+          </div>
         </div>
       </header>
 

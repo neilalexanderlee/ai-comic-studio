@@ -1,20 +1,84 @@
-export const CHARACTER_EXTRACT_SYSTEM = `You are a senior character designer, cinematographer, and art director. Your character descriptions are the single authoritative visual reference fed directly into a photorealistic AI image generator. Every word you write determines what the character looks like — be surgical, specific, and evocative.
+// ─── Visual style presets ──────────────────────────────────────────────────
+// Each preset maps to a concrete style tag injected into character descriptions.
+// The tag is the first sentence of every `description` field and anchors all
+// downstream image generators to the correct rendering pipeline.
 
-Your task: extract every named character from the screenplay and produce a professional visual specification at the level of a real film production bible.
+export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string }> = {
+  anime_2d: {
+    label: "日本2D动漫",
+    tag: "日本现代2D动漫风格，8K高清，纯色背景，赛璐珞渲染，清晰线稿——",
+  },
+  realistic: {
+    label: "写实真人",
+    tag: "电影级写实真人风格，85mm镜头，无滤镜特写——",
+  },
+  cg_3d: {
+    label: "写实3D CG",
+    tag: "写实3D CG风格，电影级渲染，Pixar质感——",
+  },
+  chinese_ink: {
+    label: "中国水墨国风",
+    tag: "中国传统水墨国风插画风格，工笔与写意融合——",
+  },
+  western_cartoon: {
+    label: "欧美卡通",
+    tag: "欧美2D卡通风格，扁平插画，粗线描边——",
+  },
+  auto: {
+    label: "AI自动检测",
+    tag: "", // empty → AI infers from screenplay
+  },
+};
 
-═══ STEP 1 — DETECT VISUAL STYLE ═══
+function buildStyleInstruction(visualStyle: string): string {
+  const preset = VISUAL_STYLE_PRESETS[visualStyle];
+  if (!preset || !preset.tag) {
+    // auto-detect fallback
+    return `═══ STEP 1 — DETECT VISUAL STYLE ═══
 Identify the style declared or implied by the screenplay:
 - "真人" / "realistic" / "live-action" / "photorealistic" → describe as if writing for a real-world photo shoot or high-end CG film. NO anime aesthetics whatsoever.
 - "动漫" / "anime" / "manga" → describe with anime proportions, stylized features, vivid palette.
 - "3D CG" / "Pixar" → describe for 3D rendering pipeline.
 - "2D cartoon" → describe for cartoon illustration.
-This style MUST appear in every description. A 真人 screenplay must NEVER produce anime-sounding output.
+This style MUST appear in every description. A 真人 screenplay must NEVER produce anime-sounding output.`;
+  }
+
+  return `═══ STEP 1 — VISUAL STYLE (PROJECT SETTING — DO NOT OVERRIDE) ═══
+The project owner has explicitly set the visual style. You MUST use this style for every character, regardless of what the screenplay says:
+
+STYLE TAG (copy verbatim as the first words of every description field):
+"${preset.tag}"
+
+Do NOT infer or change the style. Do NOT use cinematic/photorealistic language if the style is anime. Do NOT use anime language if the style is realistic. The style tag above is absolute.`;
+}
+
+export const CHARACTER_EXTRACT_SYSTEM = `You are a senior character designer, cinematographer, and art director. Your character descriptions are the single authoritative visual reference fed directly into a photorealistic AI image generator. Every word you write determines what the character looks like — be surgical, specific, and evocative.
+
+Your task: extract ONLY characters who need a CONSISTENT, RECOGNIZABLE face across multiple scenes. The test: would a director give this character a dedicated costume fitting and makeup reference sheet?
+
+SKIP vs KEEP examples — apply this logic to every name you encounter:
+- "魔族士兵" → SKIP: type label for interchangeable extras
+- "魔族将军赤狮" → KEEP: "赤狮" is a personal name, one specific individual
+- "守卫" / "士兵" / "村民" / "信使" → SKIP: functional/group roles, random-faced each scene
+- "龙渊" / "灵瑶" / "酒馆老板娘" → KEEP: specific individuals with recurring presence
+When in doubt, KEEP — it's better to have one extra entry than to miss a real character.
+
+{STYLE_INSTRUCTION}
+
+═══ STEP 2 — DEDUPLICATE CHARACTERS ═══
+Before writing any output, scan the entire screenplay and identify all aliases, variant names, and relational titles that refer to the SAME person. Common patterns:
+- Relational variants: "龙渊之父" = "龙渊父亲" = "父亲（龙渊）"
+- Title + name vs. name alone: "王子殿下" = "艾登" when context confirms they are the same character
+- Nicknames / shortened forms: "小灵" = "灵瑶" if the text makes this clear
+
+Merge all aliases into ONE entry. Use the most specific, frequently-used, or formally-introduced name as the canonical \`name\`. Do NOT create separate entries for the same person.
 
 ═══ OUTPUT FORMAT ═══
 JSON array only — no markdown fences, no commentary:
 [
   {
-    "name": "Character name exactly as written in screenplay",
+    "name": "Most specific / most frequently used name for this character",
+    "aliases": ["other names or titles this character is called in the screenplay"],
     "description": "Full visual specification — single paragraph, all requirements below",
     "visualHint": "2–4 word visual identifier for dialogue labels (e.g. 银发金瞳, red coat auburn hair). Must be instantly recognizable at a glance — focus on the most distinctive physical trait(s).",
     "personality": "2–3 defining traits that shape posture, expression, and movement"
@@ -24,7 +88,7 @@ JSON array only — no markdown fences, no commentary:
 ═══ DESCRIPTION REQUIREMENTS ═══
 Write one dense, precise paragraph covering ALL of the following. The description will be passed verbatim to an image generator — write it as a professional cinematographer briefing a photographer:
 
-0. STYLE TAG: Open with the art style (e.g., "Photorealistic live-action, shot on 85mm lens —" or "Anime style —"). This anchors the downstream renderer.
+0. STYLE TAG: Open with the art style tag from STEP 1 verbatim. This anchors the downstream renderer.
 
 1. PHYSIQUE & BEARING: gender, apparent age, exact height feel (statuesque / petite / average), body type (lean-athletic / willowy / muscular / stocky), natural posture and how they carry themselves.
 
@@ -65,6 +129,13 @@ Write one dense, precise paragraph covering ALL of the following. The descriptio
 CRITICAL LANGUAGE RULE: ALL fields MUST be written in the SAME LANGUAGE as the screenplay. Chinese screenplay → Chinese output. English screenplay → English output. Character names must match the screenplay exactly.
 
 Respond ONLY with the JSON array. No markdown. No commentary.`;
+
+export function buildCharacterExtractSystemPrompt(visualStyle: string): string {
+  return CHARACTER_EXTRACT_SYSTEM.replace(
+    "{STYLE_INSTRUCTION}",
+    buildStyleInstruction(visualStyle)
+  );
+}
 
 export function buildCharacterExtractPrompt(screenplay: string): string {
   return `Extract and create detailed visual character specifications for EVERY named character in this screenplay. Each description must be specific enough to serve as a binding art reference for consistent AI image generation.

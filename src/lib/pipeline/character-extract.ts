@@ -1,11 +1,10 @@
 import { db } from "@/lib/db";
-import { characters } from "@/lib/db/schema";
+import { projects, characters } from "@/lib/db/schema";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
-import { buildCharacterExtractPrompt } from "@/lib/ai/prompts/character-extract";
-import { resolvePrompt } from "@/lib/ai/prompts/resolver";
+import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
 import { extractJSON } from "@/lib/ai/ai-sdk";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import type { Task } from "@/lib/task-queue";
 
@@ -16,12 +15,20 @@ export async function handleCharacterExtract(task: Task) {
     modelConfig?: ModelConfigPayload;
     episodeId?: string;
     userId?: string;
+    visualStyle?: string;
   };
 
-  const systemPrompt = await resolvePrompt("character_extract", {
-    userId: payload.userId ?? "",
-    projectId: payload.projectId,
-  });
+  // Resolve visual style: payload override → project setting → default anime_2d
+  let visualStyle = payload.visualStyle ?? "anime_2d";
+  if (!payload.visualStyle) {
+    const [project] = await db
+      .select({ visualStyle: projects.visualStyle })
+      .from(projects)
+      .where(eq(projects.id, payload.projectId));
+    visualStyle = project?.visualStyle || "anime_2d";
+  }
+
+  const systemPrompt = buildCharacterExtractSystemPrompt(visualStyle);
 
   const ai = resolveAIProvider(payload.modelConfig);
   const result = await ai.generateText(
@@ -31,20 +38,19 @@ export async function handleCharacterExtract(task: Task) {
 
   const extracted = JSON.parse(extractJSON(result)) as Array<{
     name: string;
+    aliases?: string[];
     description: string;
     visualHint?: string;
   }>;
 
   let newCharacters = extracted;
 
-  // AI deduplication when extracting for an episode with existing main chars
+  // AI deduplication when extracting for an episode with existing chars
   if (payload.episodeId) {
     const existingChars = await db
       .select()
       .from(characters)
-      .where(
-        and(eq(characters.projectId, payload.projectId), eq(characters.scope, "main"))
-      );
+      .where(eq(characters.projectId, payload.projectId));
 
     if (existingChars.length > 0) {
       try {

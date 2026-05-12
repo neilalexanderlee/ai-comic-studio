@@ -27,6 +27,7 @@ import { toast } from "sonner";
 
 interface ExtractedCharacter {
   name: string;
+  aliases?: string[];
   frequency: number;
   description: string;
   visualHint?: string;

@@ -19,6 +19,7 @@ const MAX_SIZE = 20 * 1024 * 1024;
 
 interface ExtractedCharacter {
   name: string;
+  aliases?: string[];
   frequency: number;
   description: string;
   visualHint?: string;
@@ -82,6 +83,7 @@ export default function ImportPage({
 
   // Step 2 result
   const [characters, setCharacters] = useState<ExtractedCharacter[]>([]);
+  const [selectedCharIdxs, setSelectedCharIdxs] = useState<Set<number>>(new Set());
 
   // Step 3 result
   const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
@@ -196,6 +198,7 @@ export default function ImportPage({
       }
       const data = await res.json();
       setCharacters(data.characters);
+      setSelectedCharIdxs(new Set(data.characters.map((_: ExtractedCharacter, i: number) => i)));
       addLog(2, "done", `提取完成: ${data.characters.length} 个角色`);
       setStepStatus((prev) => ({ ...prev, 2: "done" }));
     } catch (err) {
@@ -226,6 +229,7 @@ export default function ImportPage({
       }
       const data = await res.json();
       setCharacters(data.characters);
+      setSelectedCharIdxs(new Set(data.characters.map((_: ExtractedCharacter, i: number) => i)));
       addLog(2, "done", `提取完成: ${data.characters.length} 个角色`);
       setStepStatus((prev) => ({ ...prev, 2: "done" }));
     } catch (err) {
@@ -249,7 +253,9 @@ export default function ImportPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: fullText,
-          allCharacters: characters.map((c) => ({ name: c.name, scope: c.scope })),
+          allCharacters: characters
+            .filter((_, i) => selectedCharIdxs.has(i))
+            .map((c) => ({ name: c.name, scope: c.scope })),
           modelConfig: getModelConfig(),
         }),
       });
@@ -280,7 +286,7 @@ export default function ImportPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           episodes,
-          characters,
+          characters: characters.filter((_, i) => selectedCharIdxs.has(i)),
         }),
       });
       if (!res.ok) {
@@ -471,55 +477,100 @@ export default function ImportPage({
         {showCharReview && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold text-[--text-primary]">
-                {t("reviewCharacters")}
-              </h3>
-              <Button onClick={runSplit} className="rounded-xl">
-                {t("confirmAndSplit")}
-              </Button>
-            </div>
-            <p className="text-sm text-[--text-muted]">{t("reviewCharactersHint")}</p>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
-              {characters.map((char, idx) => (
-                <div
-                  key={idx}
-                  className="group relative overflow-hidden rounded-[14px] border border-[--border-subtle] bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[--border-hover]"
+              <div className="flex items-center gap-3">
+                <h3 className="font-display text-lg font-bold text-[--text-primary]">
+                  {t("reviewCharacters")}
+                </h3>
+                <span className="text-sm text-[--text-muted]">
+                  已选 {selectedCharIdxs.size} / {characters.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    if (selectedCharIdxs.size === characters.length) {
+                      setSelectedCharIdxs(new Set());
+                    } else {
+                      setSelectedCharIdxs(new Set(characters.map((_, i) => i)));
+                    }
+                  }}
+                  className="text-xs text-[--text-muted] hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-[--surface]"
                 >
-                  {/* Top accent strip */}
-                  <div className="h-1 w-full bg-gradient-to-r from-primary/60 to-primary/40" />
-                  <div className="p-3.5">
-                    {/* Avatar + Name */}
-                    <div className="mb-2.5 flex items-center gap-2.5">
-                      <div
-                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-bold text-white"
-                        style={{ background: `linear-gradient(135deg, hsl(${(char.name.charCodeAt(0) * 37) % 360}, 45%, 45%), hsl(${(char.name.charCodeAt(0) * 37) % 360}, 50%, 55%))` }}
-                      >
-                        {char.name.charAt(0)}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-[13px] font-bold text-[--text-primary]">{char.name}</div>
-                        <div className="flex items-center gap-1.5 text-[10px] text-[--text-muted]">
-                          <span>{t("frequency")} {char.frequency}</span>
-                          {char.visualHint && (
-                            <>
-                              <span className="h-[3px] w-[3px] rounded-full bg-[#ddd]" />
-                              <span className="truncate">{char.visualHint}</span>
-                            </>
+                  {selectedCharIdxs.size === characters.length ? "取消全选" : "全选"}
+                </button>
+                <Button onClick={runSplit} disabled={selectedCharIdxs.size === 0} className="rounded-xl">
+                  确认导入 {selectedCharIdxs.size > 0 ? `(${selectedCharIdxs.size})` : ""}
+                </Button>
+              </div>
+            </div>
+            <p className="text-sm text-[--text-muted]">点击角色卡可取消选中，取消选中的角色不会被导入</p>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
+              {characters.map((char, idx) => {
+                const selected = selectedCharIdxs.has(idx);
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => {
+                      setSelectedCharIdxs((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(idx)) next.delete(idx); else next.add(idx);
+                        return next;
+                      });
+                    }}
+                    className={`group relative cursor-pointer overflow-hidden rounded-[14px] border transition-all duration-150 select-none
+                      ${selected
+                        ? "border-primary/30 bg-white hover:border-primary/50 hover:shadow-md hover:shadow-black/5"
+                        : "border-[--border-subtle] bg-[--surface] opacity-45 hover:opacity-60"
+                      }`}
+                  >
+                    {/* Top accent strip */}
+                    <div className={`h-1 w-full ${selected ? "bg-gradient-to-r from-primary/60 to-primary/40" : "bg-gray-200"}`} />
+                    {/* Checkbox indicator */}
+                    <div className={`absolute right-2.5 top-3 flex h-4.5 w-4.5 items-center justify-center rounded-full border-2 transition-all
+                      ${selected ? "border-primary bg-primary" : "border-gray-300 bg-white"}`}
+                      style={{ width: 16, height: 16 }}
+                    >
+                      {selected && <Check className="h-2.5 w-2.5 text-white" style={{ strokeWidth: 3 }} />}
+                    </div>
+                    <div className="p-3.5">
+                      {/* Avatar + Name */}
+                      <div className="mb-2.5 flex items-center gap-2.5">
+                        <div
+                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-sm font-bold text-white"
+                          style={{ background: `linear-gradient(135deg, hsl(${(char.name.charCodeAt(0) * 37) % 360}, 45%, 45%), hsl(${(char.name.charCodeAt(0) * 37) % 360}, 50%, 55%))` }}
+                        >
+                          {char.name.charAt(0)}
+                        </div>
+                        <div className="min-w-0 flex-1 pr-5">
+                          <div className="truncate text-[13px] font-bold text-[--text-primary]">{char.name}</div>
+                          {char.aliases && char.aliases.length > 0 && (
+                            <div className="truncate text-[10px] text-[--text-muted]">
+                              又称: {char.aliases.join(" / ")}
+                            </div>
                           )}
+                          <div className="flex items-center gap-1.5 text-[10px] text-[--text-muted]">
+                            <span>{t("frequency")} {char.frequency}</span>
+                            {char.visualHint && (
+                              <>
+                                <span className="h-[3px] w-[3px] rounded-full bg-[#ddd]" />
+                                <span className="truncate">{char.visualHint}</span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
+                      {/* Visual hint tag */}
+                      {char.visualHint && (
+                        <div className="mb-2 inline-block rounded-md bg-[--surface] px-2 py-0.5 text-[10px] font-medium text-[--text-muted]">
+                          {char.visualHint}
+                        </div>
+                      )}
+                      {/* Description */}
+                      <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
                     </div>
-                    {/* Visual hint tag */}
-                    {char.visualHint && (
-                      <div className="mb-2 inline-block rounded-md bg-[--surface] px-2 py-0.5 text-[10px] font-medium text-[--text-muted]">
-                        {char.visualHint}
-                      </div>
-                    )}
-                    {/* Description */}
-                    <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

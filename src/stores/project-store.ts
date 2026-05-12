@@ -62,6 +62,7 @@ interface Project {
   status: string;
   finalVideoUrl: string | null;
   generationMode: "keyframe" | "reference";
+  visualStyle: string;
   characters: Character[];
   shots: Shot[];
   versions: StoryboardVersion[];
@@ -74,6 +75,7 @@ interface ProjectStore {
   fetchProject: (id: string, episodeId?: string, versionId?: string) => Promise<void>;
   updateIdea: (idea: string) => void;
   updateScript: (script: string) => void;
+  updateVisualStyle: (visualStyle: string) => void;
   setProject: (project: Project) => void;
 }
 
@@ -108,6 +110,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateScript: (script: string) => {
     set((state) => ({
       project: state.project ? { ...state.project, script } : null,
+    }));
+  },
+
+  updateVisualStyle: (visualStyle: string) => {
+    set((state) => ({
+      project: state.project ? { ...state.project, visualStyle } : null,
     }));
   },
 
