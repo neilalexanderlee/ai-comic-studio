@@ -3,8 +3,10 @@ import { db } from "@/lib/db";
 import { projects, episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 async function resolveProject(id: string, userId: string) {
+  await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)

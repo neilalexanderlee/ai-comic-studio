@@ -39,6 +39,20 @@ function createDb(): DrizzleDB {
   return instance;
 }
 
+/** 与 createDb 一致的主库绝对路径（用于备份等） */
+export function getResolvedDatabasePath(): string {
+  const dbPath =
+    process.env.DATABASE_URL?.replace("file:", "") || "./data/aicomic.db";
+  return path.resolve(dbPath);
+}
+
+/** 在主连接上执行单条 SQL（如 VACUUM INTO） */
+export function execSqliteRaw(statement: string): void {
+  createDb();
+  const sqlite = globalForDb.sqlite as { exec: (sql: string) => void };
+  sqlite.exec(statement);
+}
+
 function getSqliteHandle() {
   createDb();
   return globalForDb.sqlite as {

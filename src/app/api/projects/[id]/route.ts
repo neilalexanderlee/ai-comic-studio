@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
 import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
@@ -15,6 +16,7 @@ function tryDeleteFile(filePath: string | null | undefined) {
 }
 
 async function resolveProject(id: string, userId: string) {
+  await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)

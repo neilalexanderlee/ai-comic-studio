@@ -28,7 +28,10 @@ export class JimengImageProvider implements AIProvider {
   private model: string;
   private uploadDir: string;
   private region: string;
-  private visualService: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private submitApi: (body: Record<string, unknown>) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private pollApi: (body: Record<string, unknown>) => Promise<any>;
 
   constructor(params?: {
     apiKey?: string;
@@ -54,7 +57,8 @@ export class JimengImageProvider implements AIProvider {
     });
     svc.setAccessKeyId(this.accessKey);
     svc.setSecretKey(this.secretKey);
-    this.visualService = svc;
+    this.submitApi = svc.createJSONAPI("CVSync2AsyncSubmitTask", { Version: "2022-08-31" });
+    this.pollApi   = svc.createJSONAPI("CVSync2AsyncGetResult",  { Version: "2022-08-31" });
   }
 
   async generateText(_prompt: string, _options?: TextOptions): Promise<string> {
@@ -109,14 +113,8 @@ export class JimengImageProvider implements AIProvider {
   }
 
   private async submitTask(body: Record<string, unknown>): Promise<string> {
-    const action = "CVSync2AsyncSubmitTask";
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = this.visualService as any;
-      const response = await svc.request(action, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const response = await this.submitApi(body);
 
       if (response.ResponseMetadata?.Error) {
         throw new Error(
@@ -146,12 +144,7 @@ export class JimengImageProvider implements AIProvider {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
 
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const svc = this.visualService as any;
-        const response = await svc.request(action, {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
+        const response = await this.pollApi(body);
 
         if (response.ResponseMetadata?.Error) {
           throw new Error(

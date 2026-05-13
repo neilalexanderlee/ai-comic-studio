@@ -4,7 +4,8 @@ import { projects, episodes, characters, episodeCharacters } from "@/lib/db/sche
 import { eq, and, max } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { addImportLog } from "@/lib/import-utils";
+import { addImportLog, canonicalCharacterNameKey } from "@/lib/import-utils";
+import { parseTargetDurationSeconds } from "@/lib/utils/parse-duration";
 
 export const maxDuration = 60;
 
@@ -50,25 +51,52 @@ export async function POST(
     `开始创建 ${body.episodes.length} 集和 ${body.characters.length} 个角色`
   );
 
-  // 1. Create all characters (main + guest), build name→id map
+  // 1. Upsert characters: reuse existing records (preserving images) when name matches,
+  //    only insert truly new characters. This makes reimport safe.
+  const existingChars = await db
+    .select({ id: characters.id, name: characters.name })
+    .from(characters)
+    .where(eq(characters.projectId, projectId));
+
+  // Build a canonical-key → existing-id map for fast lookup
+  const existingByKey = new Map<string, string>();
+  for (const ec of existingChars) {
+    existingByKey.set(canonicalCharacterNameKey(ec.name), ec.id);
+  }
+
   const charIdByName = new Map<string, string>();
+  let createdCount = 0;
+  let reusedCount = 0;
+
   for (const char of body.characters) {
-    const charId = ulid();
-    await db.insert(characters).values({
-      id: charId,
-      projectId,
-      name: char.name,
-      description: char.description,
-      visualHint: char.visualHint ?? "",
-      scope: "main", // default — user can manually demote to guest via UI
-      episodeId: null, // all characters are project-level now
-    });
-    charIdByName.set(char.name.toLowerCase().trim(), charId);
+    const key = canonicalCharacterNameKey(char.name);
+    const existingId = existingByKey.get(key);
+
+    if (existingId) {
+      // Character already exists — reuse its ID (keeps images, description, etc.)
+      charIdByName.set(char.name.toLowerCase().trim(), existingId);
+      reusedCount++;
+    } else {
+      // Genuinely new character — insert it
+      const charId = ulid();
+      await db.insert(characters).values({
+        id: charId,
+        projectId,
+        name: char.name,
+        description: char.description,
+        visualHint: char.visualHint ?? "",
+        scope: "main",
+        episodeId: null,
+      });
+      charIdByName.set(char.name.toLowerCase().trim(), charId);
+      existingByKey.set(key, charId); // prevent duplicate insert if same char appears twice
+      createdCount++;
+    }
   }
 
   await addImportLog(
     projectId, 4, "running",
-    `已创建 ${body.characters.length} 个角色`
+    `角色处理完成：复用已有角色 ${reusedCount} 个（图片保留），新建 ${createdCount} 个`
   );
 
   // 2. Create episodes
@@ -81,6 +109,11 @@ export async function POST(
 
   const created = [];
   for (const ep of body.episodes) {
+    // Auto-detect target duration from title / description / idea / script header
+    const durationHint = parseTargetDurationSeconds(
+      [ep.title, ep.description, ep.idea, ep.script?.slice(0, 500)].filter(Boolean).join(" ")
+    );
+
     const [row] = await db
       .insert(episodes)
       .values({
@@ -92,6 +125,7 @@ export async function POST(
         idea: ep.idea || "",
         script: ep.script || ep.idea || "",
         sequence: seq++,
+        ...(durationHint !== null && { targetDurationSeconds: durationHint }),
       })
       .returning();
     created.push(row);
@@ -139,12 +173,14 @@ export async function POST(
 
   await addImportLog(
     projectId, 4, "done",
-    `导入完成！创建了 ${body.characters.length} 个角色和 ${created.length} 集（${relationCount} 个角色分配）`,
-    { episodeCount: created.length, characterCount: body.characters.length }
+    `导入完成！新建角色 ${createdCount} 个，复用已有角色 ${reusedCount} 个（图片不受影响），共 ${created.length} 集（${relationCount} 个角色分配）`,
+    { episodeCount: created.length, characterCount: body.characters.length, createdCount, reusedCount }
   );
 
   return NextResponse.json({
     episodes: created,
     characterCount: body.characters.length,
+    createdCount,
+    reusedCount,
   }, { status: 201 });
 }

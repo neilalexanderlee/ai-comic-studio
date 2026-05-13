@@ -43,6 +43,7 @@ export const episodes = sqliteTable("episodes", {
   description: text("description").default(""),
   keywords: text("keywords").default(""),
   finalVideoUrl: text("final_video_url"),
+  targetDurationSeconds: integer("target_duration_seconds"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -83,7 +84,7 @@ export const characterAssets = sqliteTable("character_assets", {
   characterId: text("character_id")
     .notNull()
     .references(() => characters.id, { onDelete: "cascade" }),
-  imagePath: text("image_path").notNull(),
+  imagePath: text("image_path"),
   tag: text("tag").notNull().default("日常"),
   isDefault: integer("is_default").notNull().default(0),
   assetType: text("asset_type", { enum: ["morph", "blueprint"] })
@@ -216,6 +217,15 @@ export const providerSecrets = sqliteTable("provider_secrets", {
   providerId: text("provider_id").notNull(),
   apiKey: text("api_key").notNull().default(""),
   secretKey: text("secret_key"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 无登录场景下 model-store 的服务端备份（与 zustand partialize 同形，不含密钥） */
+export const userClientPrefs = sqliteTable("user_client_prefs", {
+  userId: text("user_id").primaryKey().notNull(),
+  modelStoreJson: text("model_store_json").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

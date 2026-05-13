@@ -13,6 +13,7 @@ export interface Episode {
   status: string;
   generationMode: "keyframe" | "reference";
   finalVideoUrl: string | null;
+  targetDurationSeconds: number | null;
   previewImages?: string[];
   createdAt: string | number;
   updatedAt: string | number;

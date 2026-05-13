@@ -137,8 +137,8 @@ function extractSynopsisFromSegment(segment: string): string {
 
 function extractDurationHint(segment: string): string {
   const m =
-    segment.match(/\*\*【时长】\*\*\s*:?\s*([^\n]+)/) ??
-    segment.match(/\*\*时长\*\*\s*:?\s*([^\n]+)/);
+    segment.match(/\*\*【时长】\*\*\s*[：:]?\s*([^\n]+)/) ??
+    segment.match(/\*\*时长\*\*\s*[：:]?\s*([^\n]+)/);
   return m ? m[1].trim().slice(0, 80) : "";
 }
 

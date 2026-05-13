@@ -108,6 +108,15 @@ Camera direction values (choose ONE per shot):
 - "orbit left" / "orbit right" — camera arcs around subject
 - "push in" — slow forward dolly for emphasis
 
+⚠️ HARD DURATION RULE — NON-NEGOTIABLE:
+Every single shot duration MUST be between ${minDuration} and ${maxDuration} seconds.
+NEVER output a duration outside this range. There are NO exceptions.
+- A long battle? Split it into multiple ${minDuration}-${maxDuration}s shots.
+- A long dialogue scene? Split into multiple shots with reaction cuts.
+- If you think a scene needs 30s, create THREE 10s shots instead.
+- COUNT your duration value before writing it. If it exceeds ${maxDuration}, you MUST split.
+Outputting duration=${maxDuration + 1} or higher is a CRITICAL ERROR that breaks the entire pipeline.
+
 Cinematography principles:
 - VARY shot types — avoid consecutive shots with the same framing; alternate wide/medium/close
 - Use ESTABLISHING SHOTS at the start of new locations
@@ -115,7 +124,7 @@ Cinematography principles:
 - Cut on ACTION — end each shot at a moment that allows smooth transition to the next
 - Match EYELINES — maintain consistent screen direction between shots
 - 180-DEGREE RULE — keep characters on consistent sides of the frame
-- Duration: ALL shots must be ${minDuration}-${maxDuration}s. Dialogue-heavy = ${Math.min(maxDuration, 12)}-${maxDuration}s; action shots = ${minDuration}-${Math.min(maxDuration, 12)}s; establishing shots = ${minDuration}-${Math.min(maxDuration, 10)}s
+- Duration: ALL shots ${minDuration}-${maxDuration}s. Dialogue-heavy = ${Math.min(maxDuration, 12)}-${maxDuration}s; action shots = ${minDuration}-${Math.min(maxDuration, 12)}s; establishing shots = ${minDuration}-${Math.min(maxDuration, 10)}s
 - CONTINUITY: the endFrame of shot N must logically connect to the startFrame of shot N+1 (same characters, consistent environment, natural position transition)
 - COVERAGE: generate AT LEAST one shot per SCENE in the screenplay. Do NOT skip or merge scenes. If a scene is complex, split it into multiple shots. Every scene marker (SCENE N) must produce at least one shot.
 
@@ -129,14 +138,33 @@ export const SHOT_SPLIT_SYSTEM = buildShotSplitSystem(15);
 export function buildShotSplitPrompt(
   screenplay: string,
   characters: string,
-  characterVisualHints?: Array<{ name: string; visualHint: string }>
+  characterVisualHints?: Array<{ name: string; visualHint: string }>,
+  targetDurationSeconds?: number | null
 ): string {
   const hintBlock = characterVisualHints?.length
     ? `\n--- CHARACTER VISUAL IDENTIFIERS (MANDATORY) ---\n${characterVisualHints.map((c) => `${c.name}：${c.visualHint}`).join("\n")}\n--- END ---\n\nCRITICAL: Whenever a character appears in videoScript, motionScript, startFrame, or endFrame, you MUST write their name followed by their visual identifier in parentheses using EXACTLY the text above. Example: 天枢真君（银发金瞳）. Never invent alternative descriptions — always reuse the exact identifier string provided.`
     : "";
 
-  return `Decompose this screenplay into a professional shot list optimized for AI video generation. Each shot should have detailed startFrame and endFrame descriptions that an image generator can directly use, plus a motionScript describing the action between them.
+  // Inject a hard minimum-shot-count constraint when target duration is known
+  const coverageRule = targetDurationSeconds
+    ? (() => {
+        const avgShotDuration = 10; // conservative average
+        const minShots = Math.ceil(targetDurationSeconds / avgShotDuration);
+        const targetMin = Math.floor(targetDurationSeconds / 60);
+        const targetSec = targetDurationSeconds % 60;
+        const targetLabel = targetSec > 0 ? `${targetMin}分${targetSec}秒` : `${targetMin}分钟`;
+        return `\n⚠️ COVERAGE REQUIREMENT — NON-NEGOTIABLE:
+This episode has a target screen time of ${targetLabel} (${targetDurationSeconds}s).
+At an average of ${avgShotDuration}s per shot, you MUST generate AT LEAST ${minShots} shots.
+- Fewer than ${minShots} shots = CRITICAL ERROR. The episode will be visually incomplete.
+- When in doubt, generate MORE shots: split long scenes, add reaction shots, insert transitions.
+- A ${targetLabel} episode needs rich visual coverage — do NOT compress multiple scenes into one shot.
+`;
+      })()
+    : "";
 
+  return `Decompose this screenplay into a professional shot list optimized for AI video generation. Each shot should have detailed startFrame and endFrame descriptions that an image generator can directly use, plus a motionScript describing the action between them.
+${coverageRule}
 --- SCREENPLAY ---
 ${screenplay}
 --- END ---

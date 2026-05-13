@@ -119,13 +119,15 @@ export async function POST(request: Request) {
 
     // ── Doubao Seedance 视频生成（方舟 Ark API）───────────────────────
     // 参考文档：https://www.volcengine.com/docs/82379/1520757
+    // 模型 ID 参考：https://www.volcengine.com/docs/82379/2291680
+    // 注：doubao-* 为中国区 Volcengine Ark 的 ID；国际区 BytePlus 对应 dreamina-*
     if (body.protocol === "seedance") {
       return NextResponse.json({
         models: [
-          { id: "doubao-seedance-2-0-260128",      name: "Doubao Seedance 2.0" },
-          { id: "doubao-seedance-2-0-lite-260505", name: "Doubao Seedance 2.0 Lite" },
-          { id: "doubao-seedance-1-5-pro-250528",  name: "Doubao Seedance 1.5 Pro" },
-          { id: "doubao-seedance-1-5-lite-250601", name: "Doubao Seedance 1.5 Lite" },
+          { id: "doubao-seedance-2-0-260128",      name: "Doubao Seedance 2.0 (15s, up to 1080p)" },
+          { id: "doubao-seedance-2-0-fast-260128", name: "Doubao Seedance 2.0 Fast (15s, up to 720p)" },
+          { id: "doubao-seedance-1-5-pro-250528",  name: "Doubao Seedance 1.5 Pro (15s, up to 1080p)" },
+          { id: "doubao-seedance-1-5-lite-250601", name: "Doubao Seedance 1.5 Lite (10s, 480p only)" },
         ],
       });
     }

@@ -12,12 +12,14 @@ import {
 } from "@/lib/db/schema";
 import { eq, asc, and, or, isNull, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 async function resolveProjectAndEpisode(
   projectId: string,
   episodeId: string,
   userId: string
 ) {
+  await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)
@@ -175,9 +177,10 @@ export async function PATCH(
     script: string;
     status: "draft" | "processing" | "completed";
     generationMode: "keyframe" | "reference";
+    targetDurationSeconds: number | null;
   }>;
 
-  const { title, description, keywords, idea, script, status, generationMode } = body;
+  const { title, description, keywords, idea, script, status, generationMode, targetDurationSeconds } = body;
 
   const [updated] = await db
     .update(episodes)
@@ -189,6 +192,7 @@ export async function PATCH(
       ...(script !== undefined && { script }),
       ...(status !== undefined && { status }),
       ...(generationMode !== undefined && { generationMode }),
+      ...(targetDurationSeconds !== undefined && { targetDurationSeconds }),
       updatedAt: new Date(),
     })
     .where(eq(episodes.id, episodeId))

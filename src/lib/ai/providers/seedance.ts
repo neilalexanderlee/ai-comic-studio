@@ -9,7 +9,8 @@
  * 接口端点：POST {baseUrl}/contents/generations/tasks
  * 轮询端点：GET  {baseUrl}/contents/generations/tasks/{id}
  *
- * Seedance 2.0 新增参数：
+ * Seedance 2.0 参数说明（官方确认）：
+ *   - duration：支持 5 / 10 / 15 秒（Seedance 2.0 最高 15s；1.5 最高 12s；1.0-lite 最高 5s）
  *   - resolution：视频分辨率，支持 "480p" | "720p" | "1080p" | "2K"
  *
  * 支持的生成模式：
@@ -19,7 +20,7 @@
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
 import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
+import { downloadVideoWithRetry } from "./download-with-retry";
 
 function toDataUrl(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase().replace(".", "");
@@ -116,13 +117,9 @@ export class SeedanceProvider implements VideoProvider {
 
     const { videoUrl, lastFrameUrl } = await this.pollForResult(submitResult.id);
 
-    const videoResponse = await fetch(videoUrl);
-    const buffer = Buffer.from(await videoResponse.arrayBuffer());
-    const filename = `${ulid()}.mp4`;
-    const dir = path.join(this.uploadDir, "videos");
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    fs.writeFileSync(filepath, buffer);
+    const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
+      logPrefix: "SeedanceDownload",
+    });
 
     return { filePath: filepath, lastFrameUrl };
   }

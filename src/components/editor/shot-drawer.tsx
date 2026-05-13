@@ -19,7 +19,9 @@ import {
   Sparkles,
   RefreshCw,
   Clock,
+  Scissors,
 } from "lucide-react";
+import { getModelMaxDuration } from "@/lib/ai/model-limits";
 
 interface Dialogue {
   id: string;
@@ -74,6 +76,8 @@ export function ShotDrawer({
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
+  const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
+  const [splittingShot, setSplittingShot] = useState(false);
 
   const currentIndex = shots.findIndex((s) => s.id === openShotId);
   const shot = currentIndex >= 0 ? shots[currentIndex] : null;
@@ -143,6 +147,26 @@ export function ShotDrawer({
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+    }
+  }
+
+  async function handleSplitShot() {
+    if (!shot) return;
+    setSplittingShot(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${shot.id}/split`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxDuration: videoModelMax }),
+      });
+      const data = await res.json();
+      toast.success(`已拆分为 ${data.splits} 个镜头（每个 ≤${videoModelMax}s）`);
+      onUpdate();
+      onClose();
+    } catch (err) {
+      toast.error("拆分失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSplittingShot(false);
     }
   }
 
@@ -346,22 +370,41 @@ export function ShotDrawer({
                 placeholder="static / pan-left / zoom-in ..."
               />
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-xs text-[--text-muted]">
+                <span className={`flex items-center gap-1 text-xs ${editDuration > videoModelMax ? "text-orange-600" : "text-[--text-muted]"}`}>
                   <Clock className="h-3 w-3" />
                   <input
                     type="number"
                     min={5}
-                    max={15}
+                    max={videoModelMax}
                     value={editDuration}
                     onChange={(e) => {
-                      const v = Math.min(15, Math.max(5, Number(e.target.value)));
+                      const v = Math.min(videoModelMax, Math.max(5, Number(e.target.value)));
                       setEditDuration(v);
                       patchShot({ duration: v });
                     }}
-                    className="w-9 rounded border border-[--border-subtle] bg-white px-1 py-0.5 text-center text-[11px] font-medium outline-none focus:border-primary/50"
+                    className={`w-9 rounded border px-1 py-0.5 text-center text-[11px] font-medium outline-none ${
+                      editDuration > videoModelMax
+                        ? "border-orange-400 bg-orange-50 text-orange-700"
+                        : "border-[--border-subtle] bg-white focus:border-primary/50"
+                    }`}
                   />
                   <span className="text-[11px]">s</span>
+                  {editDuration > videoModelMax && (
+                    <span className="ml-1 text-[10px] font-semibold text-orange-600">
+                      ⚠ 超过模型上限 {videoModelMax}s
+                    </span>
+                  )}
                 </span>
+                {editDuration > videoModelMax && (
+                  <button
+                    onClick={handleSplitShot}
+                    disabled={splittingShot}
+                    className="flex items-center gap-1 rounded-lg bg-orange-100 px-2 py-1 text-[11px] font-semibold text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition-colors"
+                  >
+                    {splittingShot ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
+                    自动拆分
+                  </button>
+                )}
               </div>
               {shot.dialogues.length > 0 && (
                 <div className="space-y-1 rounded-xl bg-[--surface] p-3">

@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import { getTranslations } from "next-intl/server";
 import { cookies } from "next/headers";
 import { ProjectCard } from "@/components/project-card";
@@ -11,6 +12,10 @@ export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
   const cookieStore = await cookies();
   const userId = cookieStore.get("ai_comic_uid")?.value ?? "";
+
+  if (userId) {
+    await reclaimLocalProjectsForUser(userId);
+  }
 
   const allProjects = userId
     ? await db

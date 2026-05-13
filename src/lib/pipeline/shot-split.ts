@@ -24,13 +24,16 @@ export async function handleShotSplit(task: Task) {
   };
 
   let screenplay = payload.screenplay;
+  let targetDurationSeconds: number | null = null;
+
   if (!screenplay) {
     if (payload.episodeId) {
       const [episode] = await db
-        .select({ script: episodes.script })
+        .select({ script: episodes.script, targetDurationSeconds: episodes.targetDurationSeconds })
         .from(episodes)
         .where(eq(episodes.id, payload.episodeId));
       screenplay = episode?.script ?? "";
+      targetDurationSeconds = episode?.targetDurationSeconds ?? null;
     } else {
       const [project] = await db
         .select({ script: projects.script })
@@ -38,6 +41,13 @@ export async function handleShotSplit(task: Task) {
         .where(eq(projects.id, payload.projectId));
       screenplay = project?.script ?? "";
     }
+  } else if (payload.episodeId) {
+    // screenplay was passed directly (e.g. from generate route), but still fetch duration
+    const [episode] = await db
+      .select({ targetDurationSeconds: episodes.targetDurationSeconds })
+      .from(episodes)
+      .where(eq(episodes.id, payload.episodeId));
+    targetDurationSeconds = episode?.targetDurationSeconds ?? null;
   }
 
   const projectCharacters = await getShotCharacters(
@@ -75,7 +85,7 @@ export async function handleShotSplit(task: Task) {
   }
 
   const result = await ai.generateText(
-    buildShotSplitPrompt(screenplay, characterDescriptions),
+    buildShotSplitPrompt(screenplay, characterDescriptions, undefined, targetDurationSeconds),
     { systemPrompt, temperature: 0.5 }
   );
 

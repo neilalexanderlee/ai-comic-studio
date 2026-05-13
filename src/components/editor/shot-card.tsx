@@ -35,6 +35,8 @@ import {
   ClipboardCopy,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
+import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { Scissors } from "lucide-react";
 
 interface Dialogue {
   id: string;
@@ -160,6 +162,8 @@ export function ShotCard({
 }: ShotCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
+  const [splittingShot, setSplittingShot] = useState(false);
 
   // Edit state
   const [editPrompt, setEditPrompt] = useState(prompt);
@@ -169,6 +173,9 @@ export function ShotCard({
   const [editVideoPrompt, setEditVideoPrompt] = useState(videoPrompt ?? "");
   const [editCameraDirection, setEditCameraDirection] = useState(cameraDirection ?? "static");
   const [editDuration, setEditDuration] = useState(duration);
+
+  // Derived: is the stored duration over the selected video model's limit?
+  const durationOverLimit = editDuration > videoModelMax;
 
   useEffect(() => { setEditPrompt(prompt); }, [prompt]);
   useEffect(() => { setEditStartFrame(startFrameDesc ?? ""); }, [startFrameDesc]);
@@ -234,6 +241,25 @@ export function ShotCard({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(fields),
     });
+  }
+
+  async function handleSplitShot() {
+    if (!durationOverLimit) return;
+    setSplittingShot(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/split`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxDuration: videoModelMax }),
+      });
+      const data = await res.json();
+      toast.success(`已拆分为 ${data.splits} 个镜头（每个 ≤${videoModelMax}s）`);
+      onUpdate();
+    } catch (err) {
+      toast.error("拆分失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSplittingShot(false);
+    }
   }
 
   async function handleGenerateFrames() {
@@ -509,22 +535,39 @@ export function ShotCard({
           <p className="truncate text-sm text-[--text-primary]">{prompt}</p>
           <div className="mt-1 flex items-center gap-2">
             {/* Duration */}
-            <span className="flex items-center gap-1 text-xs text-[--text-muted]">
+            <span className={`flex items-center gap-1 text-xs rounded px-1 -mx-1 ${durationOverLimit ? "text-orange-600" : "text-[--text-muted]"}`}>
               <Clock className="h-3 w-3" />
               <input
                 type="number"
                 min={5}
-                max={15}
+                max={videoModelMax}
                 value={editDuration}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => {
-                  const v = Math.min(15, Math.max(5, Number(e.target.value)));
+                  const v = Math.min(videoModelMax, Math.max(5, Number(e.target.value)));
                   setEditDuration(v);
                   patchShot({ duration: v });
                 }}
-                className="w-9 rounded border border-[--border-subtle] bg-white px-1 py-0.5 text-center text-[11px] font-medium text-[--text-primary] outline-none focus:border-primary/50"
+                className={`w-9 rounded border px-1 py-0.5 text-center text-[11px] font-medium outline-none ${
+                  durationOverLimit
+                    ? "border-orange-400 bg-orange-50 text-orange-700 focus:border-orange-500"
+                    : "border-[--border-subtle] bg-white text-[--text-primary] focus:border-primary/50"
+                }`}
               />
               <span className="text-[11px]">s</span>
+              {durationOverLimit && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleSplitShot(); }}
+                  disabled={splittingShot}
+                  title={`时长超过模型上限 ${videoModelMax}s，点击自动拆分`}
+                  className="ml-0.5 flex items-center gap-0.5 rounded bg-orange-100 px-1 py-0.5 text-[10px] font-semibold text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition-colors"
+                >
+                  {splittingShot
+                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                    : <Scissors className="h-3 w-3" />}
+                  拆分
+                </button>
+              )}
             </span>
             {dialogues.length > 0 && (
               <span className="flex items-center gap-1 text-xs text-[--text-muted]">

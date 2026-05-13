@@ -22,6 +22,8 @@ import {
   List,
   ChevronDown,
   Plus,
+  X,
+  Clock,
 } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
@@ -83,6 +85,8 @@ export default function EpisodeStoryboardPage() {
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const versionDropdownRef = useRef<HTMLDivElement>(null);
   const [newVersionDialogOpen, setNewVersionDialogOpen] = useState(false);
+  const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null);
+  const [deletingVersion, setDeletingVersion] = useState(false);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -99,6 +103,9 @@ export default function EpisodeStoryboardPage() {
   const episodeStoreEpisodes = useEpisodeStore((s) => s.episodes);
   const fetchEpisodes = useEpisodeStore((s) => s.fetchEpisodes);
 
+  const currentEpisode = episodeStoreEpisodes.find((e) => e.id === currentEpisodeId) ?? null;
+  const targetDurationSeconds: number | null = currentEpisode?.targetDurationSeconds ?? null;
+
   useEffect(() => {
     if (project?.id && episodeStoreEpisodes.length === 0) {
       fetchEpisodes(project.id);
@@ -111,6 +118,29 @@ export default function EpisodeStoryboardPage() {
   function switchView(mode: "list" | "kanban") {
     setViewMode(mode);
     if (project) localStorage.setItem(`storyboardView:${project.id}`, mode);
+  }
+
+  async function handleDeleteVersion(versionId: string) {
+    if (!project || !currentEpisodeId) return;
+    setDeletingVersion(true);
+    try {
+      await apiFetch(
+        `/api/projects/${project.id}/episodes/${currentEpisodeId}/versions/${versionId}`,
+        { method: "DELETE" }
+      );
+      // Switch to another version before refreshing
+      const remaining = versions.filter((v) => v.id !== versionId);
+      const nextId = remaining[0]?.id ?? null;
+      setSelectedVersionId(nextId);
+      setVersions(remaining);
+      setDeleteVersionId(null);
+      await fetchProject(project.id, currentEpisodeId, nextId ?? undefined);
+      toast.success("版本已删除");
+    } catch {
+      toast.error("删除失败，请重试");
+    } finally {
+      setDeletingVersion(false);
+    }
   }
 
   const textGuard = useModelGuard("text");
@@ -508,23 +538,33 @@ export default function EpisodeStoryboardPage() {
           <GenerationModeTab />
 
           {/* Version tabs */}
-          <div className="flex items-center gap-1">
-            {/* Show 2 newest versions */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {/* Show 2 newest versions — each tab has a delete ✕ on hover */}
             {versions.slice(0, 2).map((v) => (
-              <button
-                key={v.id}
-                onClick={() => {
-                  setSelectedVersionId(v.id);
-                  fetchProject(project!.id, undefined, v.id);
-                }}
-                className={`rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors ${
-                  selectedVersionId === v.id
-                    ? "bg-primary/10 text-primary"
-                    : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
-                }`}
-              >
-                {v.label}
-              </button>
+              <div key={v.id} className="group relative flex items-center">
+                <button
+                  onClick={() => {
+                    setSelectedVersionId(v.id);
+                    fetchProject(project!.id, undefined, v.id);
+                  }}
+                  className={`rounded-lg pl-3 pr-6 py-1.5 text-[13px] font-medium transition-colors ${
+                    selectedVersionId === v.id
+                      ? "bg-primary/10 text-primary"
+                      : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
+                  }`}
+                >
+                  {v.label}
+                </button>
+                {versions.length > 1 && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeleteVersionId(v.id); }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-[--text-muted] hover:bg-red-100 hover:text-red-500 transition-colors"
+                    title={`删除版本 ${v.label}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
             ))}
             {/* Older versions dropdown */}
             {versions.length > 2 && (
@@ -544,23 +584,31 @@ export default function EpisodeStoryboardPage() {
                 </button>
                 {versionDropdownOpen && (
                   <div
-                    className="absolute right-0 top-full z-20 mt-1 min-w-[140px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white shadow-lg"
+                    className="absolute right-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white shadow-lg"
                     onMouseLeave={() => setVersionDropdownOpen(false)}
                   >
                     {versions.slice(2).map((v) => (
-                      <button
-                        key={v.id}
-                        onClick={() => {
-                          setSelectedVersionId(v.id);
-                          fetchProject(project!.id, undefined, v.id);
-                          setVersionDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[--surface] ${
-                          selectedVersionId === v.id ? "text-primary" : "text-[--text-secondary]"
-                        }`}
-                      >
-                        {v.label}
-                      </button>
+                      <div key={v.id} className="group relative flex items-center">
+                        <button
+                          onClick={() => {
+                            setSelectedVersionId(v.id);
+                            fetchProject(project!.id, undefined, v.id);
+                            setVersionDropdownOpen(false);
+                          }}
+                          className={`w-full pl-3 pr-8 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[--surface] ${
+                            selectedVersionId === v.id ? "text-primary" : "text-[--text-secondary]"
+                          }`}
+                        >
+                          {v.label}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setDeleteVersionId(v.id); setVersionDropdownOpen(false); }}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-[--text-muted] hover:bg-red-100 hover:text-red-500 transition-colors"
+                          title={`删除版本 ${v.label}`}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -597,6 +645,41 @@ export default function EpisodeStoryboardPage() {
             )}
           </div>
         </div>
+
+        {/* Duration coverage bar — only shown when targetDurationSeconds is known */}
+        {(() => {
+          if (!targetDurationSeconds || targetDurationSeconds <= 0) return null;
+          const totalShotDuration = project.shots.reduce((sum, s) => sum + (s.duration ?? 0), 0);
+          const pct = Math.min(100, Math.round((totalShotDuration / targetDurationSeconds) * 100));
+          const isLow = pct < 80;
+          const fmtSec = (s: number) => {
+            const m = Math.floor(s / 60);
+            const sec = s % 60;
+            return m > 0 ? `${m}分${sec > 0 ? `${sec}秒` : ""}` : `${sec}秒`;
+          };
+          return (
+            <div className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12px] ${isLow ? "bg-amber-50 border border-amber-200" : "bg-emerald-50 border border-emerald-200"}`}>
+              <Clock className={`h-3.5 w-3.5 flex-shrink-0 ${isLow ? "text-amber-500" : "text-emerald-500"}`} />
+              <div className="flex-1 min-w-0">
+                <div className={`mb-1 flex items-center justify-between ${isLow ? "text-amber-700" : "text-emerald-700"}`}>
+                  <span className="font-medium">时长覆盖率 {pct}%</span>
+                  <span className="text-[11px] opacity-80">{fmtSec(totalShotDuration)} / 目标 {fmtSec(targetDurationSeconds)}</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-black/10 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-300 ${isLow ? "bg-amber-400" : "bg-emerald-400"}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+              {isLow && (
+                <span className="flex-shrink-0 text-amber-600 text-[11px]">
+                  还缺约 {Math.ceil((targetDurationSeconds - totalShotDuration) / 10)} 个镜头
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Characters inline panel (Feature B) */}
         <CharactersInlinePanel
@@ -926,6 +1009,42 @@ export default function EpisodeStoryboardPage() {
           fetchProject(project.id, useProjectStore.getState().currentEpisodeId!, newVersionId);
         }}
       />
+
+      {/* Delete version confirmation dialog */}
+      <Dialog open={deleteVersionId !== null} onOpenChange={(open) => { if (!open) setDeleteVersionId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-600">
+              <X className="h-4 w-4" />
+              删除版本
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <p className="text-sm text-[--text-secondary]">
+              确认删除版本 <span className="font-semibold text-[--text-primary]">
+                {versions.find((v) => v.id === deleteVersionId)?.label}
+              </span>？
+            </p>
+            <p className="text-xs text-amber-700 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+              此操作不可撤销。该版本的所有分镜和已生成的帧/视频记录将被永久删除。
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setDeleteVersionId(null)} disabled={deletingVersion}>
+                取消
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => deleteVersionId && handleDeleteVersion(deleteVersionId)}
+                disabled={deletingVersion}
+              >
+                {deletingVersion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                {deletingVersion ? "删除中..." : "确认删除"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="sm:max-w-4xl">

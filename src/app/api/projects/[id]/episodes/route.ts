@@ -4,8 +4,10 @@ import { projects, episodes, shots, characters, episodeCharacters, characterAsse
 import { eq, asc, and, max, isNotNull, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 async function resolveProject(id: string, userId: string) {
+  await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)

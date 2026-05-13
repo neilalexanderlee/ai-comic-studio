@@ -4,9 +4,11 @@ import { projects } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 export async function GET(request: Request) {
   const userId = getUserIdFromRequest(request);
+  await reclaimLocalProjectsForUser(userId);
   const allProjects = await db
     .select()
     .from(projects)

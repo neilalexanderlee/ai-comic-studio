@@ -22,11 +22,10 @@
  *   - ReferenceVideoParams (initialImage)：首帧/参考图模式
  */
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
-import fs from "node:fs";
 import path from "node:path";
-import { ulid } from "ulid";
 // @ts-ignore
 import { Service } from "@volcengine/openapi";
+import { downloadVideoWithRetry } from "./download-with-retry";
 
 /** 本地文件 → base64 Data URL */
 function toBase64DataUrl(filePath: string): string {
@@ -81,7 +80,10 @@ export class JimengVideoProvider implements VideoProvider {
   private model: string;
   private uploadDir: string;
   private region: string;
-  private visualService: unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private submitApi: (body: Record<string, unknown>) => Promise<any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private pollApi: (body: Record<string, unknown>) => Promise<any>;
 
   constructor(params?: {
     apiKey?: string;
@@ -107,7 +109,8 @@ export class JimengVideoProvider implements VideoProvider {
     });
     svc.setAccessKeyId(this.accessKey);
     svc.setSecretKey(this.secretKey);
-    this.visualService = svc;
+    this.submitApi = svc.createJSONAPI("CVSync2AsyncSubmitTask", { Version: "2022-08-31" });
+    this.pollApi   = svc.createJSONAPI("CVSync2AsyncGetResult",  { Version: "2022-08-31" });
   }
 
   async generateVideo(params: VideoGenerateParams): Promise<VideoGenerateResult> {
@@ -146,28 +149,17 @@ export class JimengVideoProvider implements VideoProvider {
 
     const videoUrl = await this.pollForResult(taskId, reqKey);
 
-    // 下载并保存到本地
-    const videoRes = await fetch(videoUrl);
-    const buffer = Buffer.from(await videoRes.arrayBuffer());
-    const filename = `${ulid()}.mp4`;
-    const dir = path.join(this.uploadDir, "videos");
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    fs.writeFileSync(filepath, buffer);
+    const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
+      logPrefix: "JimengVideoDownload",
+    });
 
     console.log(`[JimengVideo] Saved to ${filepath}`);
     return { filePath: filepath };
   }
 
   private async submitTask(body: Record<string, unknown>): Promise<string> {
-    const action = "CVSync2AsyncSubmitTask";
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const svc = this.visualService as any;
-      const response = await svc.request(action, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
+      const response = await this.submitApi(body);
 
       if (response.ResponseMetadata?.Error) {
         throw new Error(
@@ -197,12 +189,7 @@ export class JimengVideoProvider implements VideoProvider {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
 
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const svc = this.visualService as any;
-        const response = await svc.request(action, {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
+        const response = await this.pollApi(body);
 
         if (response.ResponseMetadata?.Error) {
           throw new Error(

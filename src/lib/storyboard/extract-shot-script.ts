@@ -44,11 +44,12 @@ const SHOT_LINE_RE = /^\s*(?:\*{0,2})?(?:镜头|shot)\s*\d+\b.*$/i;
 /** `**0:00-1:00|段落标题**` or `- **0:00-1:00|标题**` */
 function matchTimecodeHeader(rawTrimmed: string): RegExpMatchArray | null {
   const stripped = rawTrimmed
+    .replace(/^\s*#{1,6}\s*/, "")
     .replace(/^\s*[-*]+\s*/, "")
     .replace(/^\*+/, "")
-    .replace(/\*+\s*$/, "")
+    .replace(/\*+\s*.*$/, "")
     .trim();
-  return stripped.match(/^(\d{1,2}:\d{2})-(\d{1,2}:\d{2})\|(.+)$/);
+  return stripped.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s*\|\s*(.+)$/);
 }
 
 /** `角色(状态):「……」` — 在首条「 之前取最后一个 `:` / `：` 作为说话人边界 */
@@ -257,7 +258,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const bracketInline = line.match(
-      /^【(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)】\s*(.*)$/i
+      /^【(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)】\s*(.*)$/i
     );
     if (bracketInline) {
       const [, rawLabel, rawValue] = bracketInline;
@@ -303,6 +304,10 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           if (value) currentShotFields.cameraParts.push(value);
           break;
         case "音效":
+        case "背景音":
+          currentSection = "motion";
+          if (value) currentShotFields.motionParts.push(value);
+          break;
         case "字幕":
           currentSection = "ignore";
           break;
@@ -337,7 +342,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const bareFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?$/i
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?$/i
     );
     if (bareFieldMatch) {
       const [, rawLabel] = bareFieldMatch;
@@ -379,6 +384,9 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "camera";
           break;
         case "音效":
+        case "背景音":
+          currentSection = "motion";
+          break;
         case "字幕":
           currentSection = "ignore";
           break;
@@ -395,7 +403,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const labeledFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?\s*[：:]\s*(.*)$/i
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?\s*[：:]\s*(.*)$/i
     );
     if (labeledFieldMatch) {
       const [, rawLabel, rawValue] = labeledFieldMatch;
@@ -448,6 +456,10 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           if (value) currentShotFields.cameraParts.push(value);
           break;
         case "音效":
+        case "背景音":
+          currentSection = "motion";
+          if (value) currentShotFields.motionParts.push(value);
+          break;
         case "字幕":
           currentSection = "ignore";
           break;

@@ -120,6 +120,27 @@
       "when": 1777732000000,
       "tag": "0016_add_character_assets",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1747008000000,
+      "tag": "0017_nullable_asset_image_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1747094400000,
+      "tag": "0018_repair_nullable_image_path",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1747180800000,
+      "tag": "0019_add_episode_target_duration",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,9 @@
 import { and, eq, sql } from "drizzle-orm";
 import { ulid } from "ulid";
+import { scheduleDatabaseHotBackup } from "@/lib/db-file-backup";
 import { db } from "@/lib/db";
 import { providerSecrets } from "@/lib/db/schema";
+import { syncSecretsVaultEncAfterMutation } from "@/lib/secrets-vault-file";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 
 type ProviderConfigWithId = ProviderConfig & {
@@ -16,7 +18,7 @@ export interface ModelConfigPayload {
 
 let providerSecretsTableReady = false;
 
-async function ensureProviderSecretsTable() {
+export async function ensureProviderSecretsTable() {
   if (providerSecretsTableReady) return;
   await db.run(sql`
     CREATE TABLE IF NOT EXISTS provider_secrets (
@@ -112,17 +114,19 @@ export async function upsertProviderSecret(args: {
         updatedAt: new Date(),
       })
       .where(eq(providerSecrets.id, existing.id));
-    return;
+  } else {
+    await db.insert(providerSecrets).values({
+      id: ulid(),
+      userId: args.userId,
+      providerId: args.providerId,
+      apiKey: args.apiKey,
+      secretKey: args.secretKey ?? null,
+      updatedAt: new Date(),
+    });
   }
 
-  await db.insert(providerSecrets).values({
-    id: ulid(),
-    userId: args.userId,
-    providerId: args.providerId,
-    apiKey: args.apiKey,
-    secretKey: args.secretKey ?? null,
-    updatedAt: new Date(),
-  });
+  scheduleDatabaseHotBackup();
+  await syncSecretsVaultEncAfterMutation();
 }
 
 export async function getProviderSecret(userId: string, providerId: string) {
@@ -154,4 +158,7 @@ export async function deleteProviderSecret(userId: string, providerId: string) {
         eq(providerSecrets.providerId, providerId)
       )
     );
+
+  scheduleDatabaseHotBackup();
+  await syncSecretsVaultEncAfterMutation();
 }
