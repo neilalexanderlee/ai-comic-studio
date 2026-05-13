@@ -1,3 +1,4 @@
+import { ensureArkApiV3BaseUrl } from "./ark-base-url";
 import { OpenAIProvider } from "./providers/openai";
 import { GeminiProvider } from "./providers/gemini";
 import { SeedanceProvider } from "./providers/seedance";
@@ -62,7 +63,9 @@ export function createAIProvider(config: ProviderConfig, uploadDir?: string): AI
       // 参考：https://www.volcengine.com/docs/82379/1541523
       return new OpenAIProvider({
         apiKey: config.apiKey,
-        baseURL: config.baseUrl || "https://ark.cn-beijing.volces.com/api/v3",
+        baseURL: ensureArkApiV3BaseUrl(
+          (config.baseUrl || "https://ark.cn-beijing.volces.com/api/v3").trim()
+        ),
         model: config.modelId,
         ...(uploadDir && { uploadDir }),
       });
@@ -78,7 +81,9 @@ export function createVideoProvider(config: ProviderConfig, uploadDir?: string):
       // 参考：https://www.volcengine.com/docs/82379/1520757
       return new SeedanceProvider({
         apiKey: config.apiKey,
-        baseUrl: config.baseUrl,
+        baseUrl: ensureArkApiV3BaseUrl(
+          (config.baseUrl || "https://ark.cn-beijing.volces.com/api/v3").trim()
+        ),
         model: config.modelId,
         ...(uploadDir && { uploadDir }),
       });

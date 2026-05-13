@@ -2,7 +2,8 @@
  * SeedanceProvider
  *
  * 接入火山方舟 Seedance 视频生成模型。
- * 参考文档：https://www.volcengine.com/docs/82379/1520757
+ * 参考文档：https://www.volcengine.com/docs/82379/1520757 （创建视频生成任务等）
+ * Base URL：https://www.volcengine.com/docs/82379/1298459
  * 版本：Seedance 2.0（兼容 1.5）
  *
  * 认证：Bearer Token（方舟 API Key）。
@@ -17,6 +18,7 @@
  *   - 首尾帧模式（firstFrame + lastFrame）
  *   - 参考图模式（initialImage）
  */
+import { ensureArkApiV3BaseUrl } from "../ark-base-url";
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
 import fs from "node:fs";
 import path from "node:path";
@@ -59,11 +61,13 @@ export class SeedanceProvider implements VideoProvider {
     model?: string;
     uploadDir?: string;
   }) {
-    this.apiKey = params?.apiKey || process.env.SEEDANCE_API_KEY || "";
-    this.baseUrl = (
-      params?.baseUrl ||
-      process.env.SEEDANCE_BASE_URL ||
-      "https://ark.cn-beijing.volces.com/api/v3"
+    this.apiKey = (params?.apiKey || process.env.SEEDANCE_API_KEY || "").trim();
+    this.baseUrl = ensureArkApiV3BaseUrl(
+      (
+        params?.baseUrl ||
+        process.env.SEEDANCE_BASE_URL ||
+        "https://ark.cn-beijing.volces.com/api/v3"
+      ).trim()
     ).replace(/\/+$/, "");
     // 默认使用 Seedance 2.0 模型
     this.model =

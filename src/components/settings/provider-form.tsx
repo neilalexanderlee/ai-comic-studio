@@ -18,11 +18,11 @@ import { toast } from "sonner";
 const DEFAULT_BASE_URLS: Record<Protocol, string> = {
   openai: "https://api.openai.com",
   gemini: "https://generativelanguage.googleapis.com",
-  seedance: "https://ark.cn-beijing.volces.com",
+  seedance: "https://ark.cn-beijing.volces.com/api/v3",
   kling: "https://api.klingai.com",
   jimeng: "https://visual.volcengineapi.com",
   "jimeng-video": "https://visual.volcengineapi.com",
-  doubao: "https://ark.cn-beijing.volces.com",
+  doubao: "https://ark.cn-beijing.volces.com/api/v3",
 };
 
 function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {

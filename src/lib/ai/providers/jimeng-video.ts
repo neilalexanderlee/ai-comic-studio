@@ -22,6 +22,7 @@
  *   - ReferenceVideoParams (initialImage)：首帧/参考图模式
  */
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
+import fs from "node:fs";
 import path from "node:path";
 // @ts-ignore
 import { Service } from "@volcengine/openapi";
@@ -72,6 +73,10 @@ export function resolveJimengVideoReqKey(
   return "jimeng_i2v_first_tail_v30_1080";
 }
 
+function trimCred(v?: string): string {
+  return (v ?? "").trim();
+}
+
 export class JimengVideoProvider implements VideoProvider {
   private accessKey: string;
   private secretKey: string;
@@ -93,8 +98,10 @@ export class JimengVideoProvider implements VideoProvider {
     uploadDir?: string;
     region?: string;
   }) {
-    this.accessKey = params?.apiKey || process.env.JIMENG_ACCESS_KEY || "";
-    this.secretKey = params?.secretKey || process.env.JIMENG_SECRET_KEY || "";
+    this.accessKey =
+      trimCred(params?.apiKey) || trimCred(process.env.JIMENG_ACCESS_KEY) || "";
+    this.secretKey =
+      trimCred(params?.secretKey) || trimCred(process.env.JIMENG_SECRET_KEY) || "";
     this.baseUrl = (params?.baseUrl || "https://visual.volcengineapi.com").replace(/\/+$/, "");
     this.model = params?.model || "jimeng_i2v_v30";
     this.uploadDir = params?.uploadDir || process.env.UPLOAD_DIR || "./uploads";

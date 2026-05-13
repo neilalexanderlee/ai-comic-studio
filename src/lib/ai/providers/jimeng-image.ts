@@ -20,6 +20,10 @@ import { ulid } from "ulid";
 // @ts-ignore
 import { Service } from "@volcengine/openapi";
 
+function trimCred(v?: string): string {
+  return (v ?? "").trim();
+}
+
 export class JimengImageProvider implements AIProvider {
   private accessKey: string;
   private secretKey: string;
@@ -41,8 +45,10 @@ export class JimengImageProvider implements AIProvider {
     uploadDir?: string;
     region?: string;
   }) {
-    this.accessKey = params?.apiKey || process.env.JIMENG_ACCESS_KEY || "";
-    this.secretKey = params?.secretKey || process.env.JIMENG_SECRET_KEY || "";
+    this.accessKey =
+      trimCred(params?.apiKey) || trimCred(process.env.JIMENG_ACCESS_KEY) || "";
+    this.secretKey =
+      trimCred(params?.secretKey) || trimCred(process.env.JIMENG_SECRET_KEY) || "";
     this.baseUrl = (params?.baseUrl || "https://visual.volcengineapi.com").replace(/\/+$/, "");
     this.model = params?.model || "jimeng_high_aes_general_v21_L";
     this.uploadDir = params?.uploadDir || process.env.UPLOAD_DIR || "./uploads";
