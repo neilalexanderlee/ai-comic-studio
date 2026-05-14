@@ -55,6 +55,24 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
 }
 
 /**
+ * Filter characters to only those whose name appears in the shot's text fields.
+ * Prevents passing irrelevant character reference images to the image model.
+ * Falls back to all characters if none match (e.g., scene with no named characters).
+ */
+function filterShotCharacters<T extends { name: string }>(
+  shotText: string,
+  allCharacters: T[]
+): T[] {
+  if (!shotText || allCharacters.length === 0) return allCharacters;
+  const text = shotText.toLowerCase();
+  const matched = allCharacters.filter((c) =>
+    c.name && text.includes(c.name.toLowerCase())
+  );
+  // If no character names found in text, return empty array (no char refs needed)
+  return matched;
+}
+
+/**
  * Check if a character is visible on-screen by looking for their name
  * in the videoScript or startFrameDesc fields.
  */
@@ -1217,7 +1235,6 @@ async function handleBatchFrameGenerate(
     .join("\n");
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
-  const results: Array<{ shotId: string; sequence: number; status: string; firstFrame?: string; lastFrame?: string; error?: string }> = [];
 
   const overwrite = payload?.overwrite === true;
   const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
@@ -1228,133 +1245,117 @@ async function handleBatchFrameGenerate(
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
-  let previousLastFrame: string | undefined;
+  const encoder = new TextEncoder();
 
-  for (let i = 0; i < allShots.length; i++) {
-    const shot = allShots[i];
+  // Capture all loop variables needed inside the stream start callback
+  const loopCtx = {
+    allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
+    frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
+    userId, projectId, skipCount,
+  };
 
-    // Skip completed shots in normal mode, but advance the chain from their existing lastFrame
-    if (!overwrite && shot.firstFrame && shot.lastFrame) {
-      previousLastFrame = shot.lastFrame;
-      results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
-        status: "skipped",
-      });
-      continue;
-    }
+  // SSE streaming via ReadableStream start() — Next.js App Router idiomatic pattern
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const { allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
+              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount } = loopCtx;
 
-    const startTime = Date.now();
-    try {
-      await db
-        .update(shots)
-        .set({ status: "generating" })
-        .where(eq(shots.id, shot.id));
-
-      let firstFramePath: string;
-
-      if (copiedFirstFrame && i === 0) {
-        // Episode continuation: use copied frame from previous episode
-        firstFramePath = copiedFirstFrame;
-      } else if (i === 0 || !previousLastFrame) {
-        // First shot or broken chain: generate first frame
-        const resolvedChars = await resolveCharacterImages(
-          shot.prompt || "",
-          frameCharacters,
-          modelConfig?.text,
-          userId,
-          projectId
-        );
-        await saveShotWarnings(shot.id, resolvedChars);
-        const charRefImages = resolvedChars.map((c) => c.imagePath);
-        const charRefLabels = resolvedChars.map((c) => c.name);
-
-        const firstPrompt = buildFirstFramePrompt({
-          sceneDescription: shot.prompt || "",
-          startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-          characterDescriptions,
-          slotContents: frameFirstSlots,
-        });
-        firstFramePath = await ai.generateImage(firstPrompt, {
-          ...imageOpts,
-          quality: "hd",
-          referenceImages: charRefImages,
-          referenceLabels: charRefLabels,
-        });
-      } else {
-        // Continuity chain: reuse previous shot's last frame
-        firstFramePath = previousLastFrame;
+      function emit(data: object) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
 
-      // Generate last frame for this shot
-      const resolvedChars = await resolveCharacterImages(
-        shot.prompt || "",
-        frameCharacters,
-        modelConfig?.text,
-        userId,
-        projectId
-      );
-      await saveShotWarnings(shot.id, resolvedChars);
-      const charRefImages = resolvedChars.map((c) => c.imagePath);
-      const charRefLabels = resolvedChars.map((c) => c.name);
+      let previousLastFrame: string | undefined;
+      let okCount = 0;
+      let errCount = 0;
 
-      const lastPrompt = buildLastFramePrompt({
-        sceneDescription: shot.prompt || "",
-        endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-        characterDescriptions,
-        firstFramePath,
-        slotContents: frameLastSlots,
-      });
-      const lastFramePath = await ai.generateImage(lastPrompt, {
-        ...imageOpts,
-        quality: "hd",
-        referenceImages: [firstFramePath, ...charRefImages],
-          referenceLabels: ["首帧/First Frame", ...charRefLabels],
-      });
+      for (let i = 0; i < allShots.length; i++) {
+        const shot = allShots[i];
 
-      await db
-        .update(shots)
-        .set({
-          firstFrame: firstFramePath,
-          lastFrame: lastFramePath,
-          status: "completed",
-        })
-        .where(eq(shots.id, shot.id));
+        if (!overwrite && shot.firstFrame && shot.lastFrame) {
+          previousLastFrame = shot.lastFrame;
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
+          continue;
+        }
 
-      previousLastFrame = lastFramePath;
+        const startTime = Date.now();
+        try {
+          await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id));
 
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed (${elapsed}s)`);
+          let firstFramePath: string;
 
-      results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
-        status: "ok",
-        firstFrame: firstFramePath,
-        lastFrame: lastFramePath,
-      });
-    } catch (err) {
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-      console.error(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
-      await db
-        .update(shots)
-        .set({ status: "failed" })
-        .where(eq(shots.id, shot.id));
-      previousLastFrame = undefined; // Break chain so next shot generates its own first frame
-      results.push({
-        shotId: shot.id,
-        sequence: shot.sequence,
-        status: "error",
-        error: extractErrorMessage(err),
-      });
-    }
-  }
+          if (copiedFirstFrame && i === 0) {
+            firstFramePath = copiedFirstFrame;
+          } else if (i === 0 || !previousLastFrame) {
+            const shotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
+            const shotChars = filterShotCharacters(shotText, frameCharacters);
+            const resolvedChars = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
+            await saveShotWarnings(shot.id, resolvedChars);
+            const firstPrompt = buildFirstFramePrompt({
+              sceneDescription: shot.prompt || "",
+              startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+              characterDescriptions,
+              slotContents: frameFirstSlots,
+            });
+            firstFramePath = await ai.generateImage(firstPrompt, {
+              ...imageOpts,
+              quality: "hd",
+              referenceImages: resolvedChars.map((c) => c.imagePath),
+              referenceLabels: resolvedChars.map((c) => c.name),
+            });
+          } else {
+            firstFramePath = previousLastFrame;
+          }
 
-  const okCount = results.filter((r) => r.status === "ok").length;
-  const errCount = results.filter((r) => r.status === "error").length;
-  console.log(`[BatchFrameGenerate] Done: ${okCount} ok, ${errCount} errors, ${skipCount} skipped`);
+          // Last frame
+          const shotText2 = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
+          const shotChars2 = filterShotCharacters(shotText2, frameCharacters);
+          const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
+          await saveShotWarnings(shot.id, resolvedChars2);
+          const lastPrompt = buildLastFramePrompt({
+            sceneDescription: shot.prompt || "",
+            endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+            characterDescriptions,
+            firstFramePath,
+            slotContents: frameLastSlots,
+          });
+          const lastFramePath = await ai.generateImage(lastPrompt, {
+            ...imageOpts,
+            quality: "hd",
+            referenceImages: [firstFramePath, ...resolvedChars2.map((c) => c.imagePath)],
+            referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
+          });
 
-  return NextResponse.json({ results });
+          await db.update(shots).set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" }).where(eq(shots.id, shot.id));
+          previousLastFrame = lastFramePath;
+          okCount++;
+
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed (${elapsed}s)`);
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath, lastFrame: lastFramePath });
+
+        } catch (err) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.error(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
+          await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
+          previousLastFrame = undefined;
+          errCount++;
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) });
+        }
+      }
+
+      console.log(`[BatchFrameGenerate] Done: ${okCount} ok, ${errCount} errors, ${skipCount} skipped`);
+      emit({ type: "done", okCount, errCount, skipCount });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 // --- single_frame_generate: synchronous frame generation for one shot ---

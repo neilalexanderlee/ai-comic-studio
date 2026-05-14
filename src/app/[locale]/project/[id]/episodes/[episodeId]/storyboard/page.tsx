@@ -271,6 +271,7 @@ export default function EpisodeStoryboardPage() {
     setGeneratingFramesOverwrite(overwrite);
     setGeneratingFrames(true);
 
+    let hasError = false;
     try {
       const response = await apiFetch(`/api/projects/${project.id}/generate`, {
         method: "POST",
@@ -282,15 +283,47 @@ export default function EpisodeStoryboardPage() {
           episodeId: useProjectStore.getState().currentEpisodeId,
         }),
       });
-      const data = await response.json() as { results: Array<{ status: string }> };
-      if (data.results?.some((r) => r.status === "error")) {
-        toast.warning(t("common.batchPartialFailed"));
+
+      // Stream SSE events: each completed shot is emitted immediately
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Parse complete SSE events (separated by \n\n)
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? ""; // keep incomplete tail
+          for (const part of parts) {
+            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!dataLine) continue;
+            try {
+              const event = JSON.parse(dataLine.slice(6)) as {
+                type?: string;
+                shotId?: string;
+                status?: string;
+                firstFrame?: string;
+                lastFrame?: string;
+              };
+              if (event.status === "error") hasError = true;
+              // Refresh only the affected shot so the frame appears immediately
+              if (event.shotId && (event.status === "ok" || event.status === "skipped")) {
+                fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+              }
+              if (event.type === "done") break;
+            } catch { /* ignore malformed events */ }
+          }
+        }
       }
     } catch (err) {
       console.error("Batch frame generate error:", err);
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
 
+    if (hasError) toast.warning(t("common.batchPartialFailed"));
     setGeneratingFramesOverwrite(false);
     setGeneratingFrames(false);
     fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);

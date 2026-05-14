@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 const STORAGE_KEY = "ai_comic_uid";
 const COOKIE_NAME = "ai_comic_uid";
 const MAX_AGE_SEC = 365 * 24 * 60 * 60;
+const IDB_DB_NAME = "ai_comic";
+const IDB_STORE = "session";
+const IDB_KEY = "uid";
 
 function readCookie(name: string): string | undefined {
   return document.cookie
@@ -14,9 +17,53 @@ function readCookie(name: string): string | undefined {
     ?.split("=")[1];
 }
 
+function writeCookie(value: string) {
+  document.cookie = `${COOKIE_NAME}=${value}; path=/; max-age=${MAX_AGE_SEC}; SameSite=Lax`;
+}
+
+/** IndexedDB helpers — survives "Clear cookies" and "Clear localStorage" individually */
+function idbGet(): Promise<string | null> {
+  return new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(IDB_DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => {
+        const tx = req.result.transaction(IDB_STORE, "readonly");
+        const get = tx.objectStore(IDB_STORE).get(IDB_KEY);
+        get.onsuccess = () => resolve((get.result as string | undefined) ?? null);
+        get.onerror = () => resolve(null);
+      };
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function idbSet(value: string): void {
+  try {
+    const req = indexedDB.open(IDB_DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+    req.onsuccess = () => {
+      const tx = req.result.transaction(IDB_STORE, "readwrite");
+      tx.objectStore(IDB_STORE).put(value, IDB_KEY);
+    };
+  } catch { /* silent */ }
+}
+
 /**
- * - 仅删 cookie 时：用 localStorage 里仍保留的旧 ID 写回 cookie，并 refresh，使服务端列表与 apiFetch 一致。
- * - 否则：把 middleware 下发的 cookie 同步到 localStorage，供 getUserId() / apiFetch 使用。
+ * Three-layer session persistence: cookie ↔ localStorage ↔ IndexedDB
+ *
+ * Recovery priority (first non-empty wins):
+ *   1. localStorage  — survives "Clear cookies"
+ *   2. IndexedDB     — survives "Clear localStorage" (but NOT Chrome's "Clear all site data")
+ *   3. cookie        — set by middleware on every request
+ *
+ * On recovery: the found ID is written back to all 3 layers + cookie, then page refresh
+ * ensures the server sees the restored user ID via x-user-id header.
+ *
+ * On first visit / total clear: middleware assigns a new UUID, reclaim-local-user.ts
+ * automatically reassigns all DB data from previous orphan IDs to the new one.
  */
 export function FingerprintProvider({
   children,
@@ -26,18 +73,31 @@ export function FingerprintProvider({
   const router = useRouter();
 
   useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    const cookieUid = readCookie(COOKIE_NAME);
+    async function sync() {
+      const lsUid = localStorage.getItem(STORAGE_KEY);
+      const cookieUid = readCookie(COOKIE_NAME);
+      const idbUid = await idbGet();
 
-    if (stored && stored !== cookieUid) {
-      document.cookie = `${COOKIE_NAME}=${stored}; path=/; max-age=${MAX_AGE_SEC}; SameSite=Lax`;
-      router.refresh();
-      return;
+      // Pick the best stored ID (localStorage > IndexedDB > cookie)
+      const savedUid = lsUid || idbUid;
+
+      if (savedUid && savedUid !== cookieUid) {
+        // Restore: write saved ID to all layers and refresh so server picks it up
+        writeCookie(savedUid);
+        localStorage.setItem(STORAGE_KEY, savedUid);
+        idbSet(savedUid);
+        router.refresh();
+        return;
+      }
+
+      // Normal case: sync cookie value to all local layers
+      if (cookieUid) {
+        localStorage.setItem(STORAGE_KEY, cookieUid);
+        idbSet(cookieUid);
+      }
     }
 
-    if (cookieUid) {
-      localStorage.setItem(STORAGE_KEY, cookieUid);
-    }
+    void sync();
   }, [router]);
 
   return <>{children}</>;

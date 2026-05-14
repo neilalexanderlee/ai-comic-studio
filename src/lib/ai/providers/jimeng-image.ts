@@ -71,6 +71,21 @@ export class JimengImageProvider implements AIProvider {
     throw new Error("JimengImage does not support text generation");
   }
 
+  /**
+   * Convert a local file path to a base64 data URI so it can be used as an ip_element URL.
+   * Jimeng ip_elements accepts both public URLs and base64 data URIs.
+   */
+  private fileToBase64DataUri(filePath: string): string | null {
+    try {
+      const buffer = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).slice(1).toLowerCase() || "png";
+      const mime = ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+      return `data:${mime};base64,${buffer.toString("base64")}`;
+    } catch {
+      return null;
+    }
+  }
+
   async generateImage(prompt: string, options?: ImageOptions): Promise<string> {
     // 解析尺寸 / 宽高比 → width / height
     let width = 1024;
@@ -98,6 +113,25 @@ export class JimengImageProvider implements AIProvider {
       width,
       height,
     };
+
+    // Add character reference images via ip_elements (subject/character consistency)
+    // Each reference image is passed as a base64 data URI with ip_adapter_scale=0.6
+    if (options?.referenceImages && options.referenceImages.length > 0) {
+      const ipElements: Array<{ url: string; ip_adapter_scale: number }> = [];
+      for (const refPath of options.referenceImages) {
+        // Skip if it looks like a URL (already a web resource)
+        if (refPath.startsWith("http://") || refPath.startsWith("https://")) {
+          ipElements.push({ url: refPath, ip_adapter_scale: 0.6 });
+        } else {
+          const dataUri = this.fileToBase64DataUri(refPath);
+          if (dataUri) ipElements.push({ url: dataUri, ip_adapter_scale: 0.6 });
+        }
+      }
+      if (ipElements.length > 0) {
+        submitBody.ip_elements = ipElements;
+        console.log(`[JimengImage] Using ${ipElements.length} character reference image(s)`);
+      }
+    }
 
     const taskId = await this.submitTask(submitBody);
     console.log(`[JimengImage] Task submitted: ${taskId}`);

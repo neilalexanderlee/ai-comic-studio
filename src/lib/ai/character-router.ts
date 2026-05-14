@@ -13,6 +13,25 @@ export type CharacterAssets = {
 };
 
 /**
+ * Semantic equivalence map: states that cover each other.
+ * If the selected tag covers the "missing" state, suppress the warning.
+ */
+const STATE_EQUIV: Record<string, string[]> = {
+  "武装": ["战斗", "战斗/Combat", "Combat", "Armed", "战斗状态"],
+  "战斗": ["武装", "武装状态", "Armed", "武装/战斗"],
+  "日常": ["Casual", "Normal", "日常状态"],
+  "Casual": ["日常", "Normal"],
+  "Combat": ["战斗", "武装", "战斗/Combat"],
+  "Armed":  ["武装", "战斗", "武装状态"],
+};
+
+function isCoveredByTag(selectedTag: string, missingState: string): boolean {
+  const covered = STATE_EQUIV[selectedTag] ?? [];
+  return covered.some(s => missingState.toLowerCase().includes(s.toLowerCase()) ||
+                           s.toLowerCase().includes(missingState.toLowerCase()));
+}
+
+/**
  * Intelligent Agentic Router that determines whether a character is in combat or casual state
  * based on the scene description.
  * It only invokes the LLM if the character has BOTH combat and beauty images to save time/cost.
@@ -120,13 +139,16 @@ export async function resolveCharacterImages(
     }
 
     if (finalPath) {
-      resolved.push({ 
-        name: c.name, 
+      // Suppress missing-state warning if the selected tag semantically covers the needed state
+      // e.g. "武装" covers "战斗" — no point warning the user
+      const effectiveMissing = missing && !isCoveredByTag(tags[0] ?? "", missing) ? missing : undefined;
+      resolved.push({
+        name: c.name,
         imagePath: finalPath,
-        missingState: missing
+        missingState: effectiveMissing
       });
-      if (missing) {
-          console.warn(`[CharacterRouter] Character "${c.name}" is missing visual state: ${missing} in scene: ${sceneDesc}`);
+      if (effectiveMissing) {
+          console.warn(`[CharacterRouter] Character "${c.name}" is missing visual state: ${effectiveMissing} in scene: ${sceneDesc}`);
       }
     }
   }

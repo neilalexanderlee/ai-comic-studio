@@ -8,7 +8,7 @@ import {
 } from "@/lib/db/schema";
 import { ensureProviderSecretsTable } from "@/lib/provider-secrets";
 import { ensureUserClientPrefsTable } from "@/lib/user-client-prefs";
-import { eq, or, sql } from "drizzle-orm";
+import { eq, or, sql, desc } from "drizzle-orm";
 
 function isReclaimDisabled() {
   const v = process.env.AI_COMIC_DISABLE_LOCAL_RECLAIM;
@@ -78,6 +78,50 @@ async function distinctLegacyOwners(): Promise<Set<string>> {
   return out;
 }
 
+/**
+ * When multiple orphan user IDs exist, pick the "richest" one —
+ * the owner with the most projects + the most recently updated project.
+ * This handles the case where the user has cleared browser data multiple times.
+ */
+async function pickBestOwner(owners: Set<string>): Promise<string | null> {
+  if (owners.size === 0) return null;
+  if (owners.size === 1) return [...owners][0];
+
+  let best: string | null = null;
+  let bestScore = -1;
+  let bestUpdated = new Date(0);
+
+  for (const uid of owners) {
+    const [{ count }] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(projects)
+      .where(eq(projects.userId, uid));
+    const projectCount = Number(count);
+
+    // Get most recently updated project for this owner
+    const [latest] = await db
+      .select({ updatedAt: projects.updatedAt })
+      .from(projects)
+      .where(eq(projects.userId, uid))
+      .orderBy(desc(projects.updatedAt))
+      .limit(1);
+
+    const updatedAt = latest?.updatedAt ?? new Date(0);
+
+    // Score: project count wins, then recency as tiebreaker
+    if (
+      projectCount > bestScore ||
+      (projectCount === bestScore && updatedAt > bestUpdated)
+    ) {
+      best = uid;
+      bestScore = projectCount;
+      bestUpdated = updatedAt;
+    }
+  }
+
+  return best;
+}
+
 async function totalLegacyRows(): Promise<number> {
   await ensureProviderSecretsTable();
   await ensureUserClientPrefsTable();
@@ -90,8 +134,10 @@ async function totalLegacyRows(): Promise<number> {
 }
 
 /**
- * 本地 SQLite、无登录：删 cookie 后把「单租户」下的项目、密钥与提示词归属迁到当前浏览器 ID。
- * 同时扩展 provider_secrets / prompt_*，避免模型密钥仍挂在旧 ID 上。
+ * 本地 SQLite、无登录：删 cookie 后把数据归属迁到当前浏览器 ID。
+ * - 只有 1 个旧 owner：直接迁移
+ * - 有多个旧 owner（多次清数据产生的孤立 UUID）：选项目数最多、最近更新的那个迁移
+ * - 所有旧 owner 的数据合并到 currentUserId 后旧行被覆盖（UPDATE … WHERE userId = prev）
  */
 export async function reclaimLocalProjectsForUser(currentUserId: string): Promise<void> {
   if (!currentUserId || isReclaimDisabled()) return;
@@ -99,64 +145,38 @@ export async function reclaimLocalProjectsForUser(currentUserId: string): Promis
   if (await currentUserHasClaims(currentUserId)) return;
 
   const owners = await distinctLegacyOwners();
+  if (owners.size === 0) return;
+
   const now = new Date();
 
-  if (owners.size > 1) return;
+  // Pick the single best owner to reclaim from; for single-owner this is identical to before
+  const prev = await pickBestOwner(owners);
+  if (!prev) return;
 
-  const anyRows = (await totalLegacyRows()) > 0;
-  if (!anyRows) return;
-
-  if (owners.size === 1) {
-    const prev = [...owners][0];
-    await db
-      .update(projects)
-      .set({ userId: currentUserId, updatedAt: now })
-      .where(or(eq(projects.userId, prev), eq(projects.userId, "")));
-
-    await db
-      .update(providerSecrets)
-      .set({ userId: currentUserId, updatedAt: now })
-      .where(or(eq(providerSecrets.userId, prev), eq(providerSecrets.userId, "")));
-
-    await db
-      .update(promptTemplates)
-      .set({ userId: currentUserId, updatedAt: now })
-      .where(or(eq(promptTemplates.userId, prev), eq(promptTemplates.userId, "")));
-
-    await db
-      .update(promptPresets)
-      .set({ userId: currentUserId })
-      .where(or(eq(promptPresets.userId, prev), eq(promptPresets.userId, "")));
-
-    await db
-      .update(userClientPrefs)
-      .set({ userId: currentUserId, updatedAt: now })
-      .where(or(eq(userClientPrefs.userId, prev), eq(userClientPrefs.userId, "")));
-    return;
-  }
+  console.log(`[Reclaim] Reassigning data from ${prev} → ${currentUserId} (${owners.size} orphan owner(s) found)`);
 
   await db
     .update(projects)
     .set({ userId: currentUserId, updatedAt: now })
-    .where(or(eq(projects.userId, ""), sql`trim(${projects.userId}) = ''`));
+    .where(or(eq(projects.userId, prev), eq(projects.userId, "")));
 
   await db
     .update(providerSecrets)
     .set({ userId: currentUserId, updatedAt: now })
-    .where(or(eq(providerSecrets.userId, ""), sql`trim(${providerSecrets.userId}) = ''`));
+    .where(or(eq(providerSecrets.userId, prev), eq(providerSecrets.userId, "")));
 
   await db
     .update(promptTemplates)
     .set({ userId: currentUserId, updatedAt: now })
-    .where(or(eq(promptTemplates.userId, ""), sql`trim(${promptTemplates.userId}) = ''`));
+    .where(or(eq(promptTemplates.userId, prev), eq(promptTemplates.userId, "")));
 
   await db
     .update(promptPresets)
     .set({ userId: currentUserId })
-    .where(or(eq(promptPresets.userId, ""), sql`trim(${promptPresets.userId}) = ''`));
+    .where(or(eq(promptPresets.userId, prev), eq(promptPresets.userId, "")));
 
   await db
     .update(userClientPrefs)
     .set({ userId: currentUserId, updatedAt: now })
-    .where(or(eq(userClientPrefs.userId, ""), sql`trim(${userClientPrefs.userId}) = ''`));
+    .where(or(eq(userClientPrefs.userId, prev), eq(userClientPrefs.userId, "")));
 }
