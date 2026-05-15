@@ -5,6 +5,52 @@ import { ulid } from "ulid";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
+/**
+ * Detect the best available CJK-capable font for FFmpeg subtitle rendering.
+ * Returns a FontName string for use in force_style, or null if none found.
+ */
+function detectChineseFont(): string {
+  const candidates = [
+    // Common Linux/Docker fonts that cover CJK
+    "Droid Sans Fallback",   // Ubuntu/Debian default, covers zh-CN
+    "Noto Sans CJK SC",      // Google Noto CJK Simplified Chinese
+    "Noto Sans SC",
+    "WenQuanYi Micro Hei",   // 文泉驿微米黑, common on Linux
+    "WenQuanYi Zen Hei",
+    "Source Han Sans CN",    // 思源黑体
+    "SimHei",                // Windows 黑体
+    "Microsoft YaHei",       // Windows 微软雅黑
+    "PingFang SC",           // macOS
+    "STHeiti",               // macOS
+    "Arial Unicode MS",      // broad unicode fallback
+    "DejaVu Sans",           // covers latin but may have CJK via Droid fallback
+  ];
+
+  try {
+    const { execSync } = require("node:child_process");
+    const fcList = execSync("fc-list :lang=zh 2>/dev/null || true", { encoding: "utf8" }) as string;
+    // Pick the first candidate that appears in fc-list output
+    for (const font of candidates) {
+      if (fcList.toLowerCase().includes(font.toLowerCase())) return font;
+    }
+    // fc-list had output — just use any font name from it
+    const firstMatch = fcList.match(/:\s*([^:]+):/);
+    if (firstMatch) return firstMatch[1].split(",")[0].trim();
+  } catch {
+    // fc-list not available — try font files directly
+    const fontPaths = [
+      "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+      "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+      "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    ];
+    for (const p of fontPaths) {
+      if (fs.existsSync(p)) return "Droid Sans Fallback";
+    }
+  }
+
+  return "sans-serif"; // last resort — works for latin, may render □ for CJK
+}
+
 interface SubtitleEntry {
   text: string;
   shotSequence: number;
@@ -68,8 +114,9 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
   const { videoPaths, subtitles, projectId, shotDurations } = params;
   const outputDir = path.resolve(uploadDir, "videos");
   fs.mkdirSync(outputDir, { recursive: true });
-  const concatOutputPath = path.resolve(outputDir, `${projectId}-concat-${ulid()}.mp4`);
-  const outputPath = path.resolve(outputDir, `${projectId}-final-${ulid()}.mp4`);
+  const fileId = ulid();
+  const concatOutputPath = path.resolve(outputDir, `${projectId}-concat-${fileId}.mp4`);
+  const outputPath = path.resolve(outputDir, `${projectId}-final-${fileId}.mp4`);
 
   // Step 1: Concatenate video clips
   if (videoPaths.length === 1) {
@@ -101,7 +148,12 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
   // Step 2: Burn in subtitles if any
   if (subtitles.length > 0) {
     const srtPath = generateSrtFile(subtitles, shotDurations, outputPath);
-    const escapedSrtPath = escapeSubtitlePath(path.resolve(srtPath));
+    const absSrtPath = path.resolve(srtPath);
+    const escapedSrtPath = escapeSubtitlePath(absSrtPath);
+    const chineseFont = detectChineseFont();
+    const forceStyle = `FontName=${chineseFont},FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=2,Shadow=1`;
+
+    console.log(`[FFmpeg] Subtitle burn — font: "${chineseFont}", srt: ${absSrtPath}`);
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -109,7 +161,7 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
           .input(concatOutputPath)
           .outputOptions([
             "-y",
-            "-vf", `subtitles='${escapedSrtPath}'`,
+            "-vf", `subtitles='${escapedSrtPath}':force_style='${forceStyle}'`,
             "-c:v", "libx264",
             "-preset", "fast",
             "-crf", "23",
@@ -118,7 +170,7 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
           .output(outputPath)
           .on("end", () => {
             fs.unlinkSync(concatOutputPath);
-            fs.unlinkSync(srtPath);
+            // Keep SRT as sidecar so users can load it in video players
             resolve();
           })
           .on("error", (err) => {
@@ -127,9 +179,8 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
           .run();
       });
     } catch (err) {
-      // Fallback: skip subtitle burn, use concat output directly
-      console.warn(`[FFmpeg] Subtitle burn failed, using concat output: ${err}`);
-      try { fs.unlinkSync(srtPath); } catch {}
+      // Subtitle burn failed — log the full error and fall back to no-subtitle video
+      console.error(`[FFmpeg] Subtitle burn failed (font="${chineseFont}"): ${err}`);
       fs.renameSync(concatOutputPath, outputPath);
     }
   } else {

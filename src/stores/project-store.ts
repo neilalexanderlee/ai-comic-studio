@@ -44,6 +44,7 @@ interface Shot {
   videoPrompt: string | null;
   status: string;
   warnings?: string | null;
+  videoResolution?: string | null;
   dialogues: Dialogue[];
 }
 

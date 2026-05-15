@@ -1584,17 +1584,20 @@ async function handleSingleVideoGenerate(
       slotContents: videoSlots,
     });
 
+    const resolution = payload?.resolution as "480p" | "720p" | undefined;
+
     const result = await videoProvider.generateVideo({
       firstFrame: shot.firstFrame,
       lastFrame: shot.lastFrame,
       prompt: videoPrompt,
       duration: effectiveDuration,
       ratio,
+      ...(resolution && { resolution }),
     });
 
     await db
       .update(shots)
-      .set({ videoUrl: result.filePath, status: "completed" })
+      .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null })
       .where(eq(shots.id, shotId));
 
     return NextResponse.json({ shotId, videoUrl: result.filePath, status: "ok" });
@@ -1647,6 +1650,7 @@ async function handleBatchVideoGenerate(
 
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const ratio = (payload?.ratio as string) || "16:9";
+  const resolution = payload?.resolution as "480p" | "720p" | undefined;
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
 
@@ -1703,11 +1707,12 @@ async function handleBatchVideoGenerate(
           prompt: videoPrompt,
           duration: effectiveDuration,
           ratio,
+          ...(resolution && { resolution }),
         });
 
         await db
           .update(shots)
-          .set({ videoUrl: result.filePath, status: "completed" })
+          .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null })
           .where(eq(shots.id, shot.id));
 
         console.log(`[BatchVideoGenerate] Shot ${shot.sequence} completed`);

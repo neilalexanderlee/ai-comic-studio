@@ -11,7 +11,7 @@ export function parseTargetDurationSeconds(text: string): number | null {
   const cnFull = text.match(/(\d+)\s*分(?:钟)?\s*(\d+)\s*秒/);
   if (cnFull) return parseInt(cnFull[1]) * 60 + parseInt(cnFull[2]);
 
-  const cnMin = text.match(/(\d+)\s*分(?:钟)(?!\s*\d)/);
+  const cnMin = text.match(/(\d+)\s*分(?:钟)?(?!\s*\d)/);
   if (cnMin) return parseInt(cnMin[1]) * 60;
 
   const cnSec = text.match(/(\d+)\s*秒/);

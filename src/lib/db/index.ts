@@ -1,8 +1,8 @@
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
 
 type DrizzleDB = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -53,98 +53,121 @@ export function execSqliteRaw(statement: string): void {
   sqlite.exec(statement);
 }
 
-function getSqliteHandle() {
-  createDb();
-  return globalForDb.sqlite as {
-    prepare: (sql: string) => { get: (...args: unknown[]) => any; all: (...args: unknown[]) => any[]; run: (...args: unknown[]) => any };
-    transaction: (fn: (rows: Array<{ hash: string; created_at: number }>) => void) => (rows: Array<{ hash: string; created_at: number }>) => void;
+type SqliteHandle = {
+  prepare: (sql: string) => {
+    get: (...args: unknown[]) => unknown;
+    all: (...args: unknown[]) => unknown[];
+    run: (...args: unknown[]) => unknown;
   };
+  // exec() runs raw SQL and supports multiple statements in one call —
+  // this is what drizzle-orm's own migrator uses internally for SQLite.
+  exec: (sql: string) => void;
+};
+
+function getSqliteHandle(): SqliteHandle {
+  createDb();
+  return globalForDb.sqlite as SqliteHandle;
 }
 
-function hasMigrationsTable(sqlite: ReturnType<typeof getSqliteHandle>) {
-  const row = sqlite
-    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='__drizzle_migrations' LIMIT 1")
-    .get();
-  return !!row;
-}
-
-function getMigrationRowCount(sqlite: ReturnType<typeof getSqliteHandle>) {
-  const row = sqlite.prepare("SELECT COUNT(*) AS count FROM __drizzle_migrations").get() as { count?: number } | undefined;
-  return Number(row?.count ?? 0);
-}
-
-function hasProjectsUserIdColumn(sqlite: ReturnType<typeof getSqliteHandle>) {
-  const cols = sqlite.prepare("PRAGMA table_info(projects)").all() as Array<{ name?: string }>;
-  return cols.some((c) => c.name === "user_id");
-}
-
-function isDuplicateColumnError(err: unknown) {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.includes("duplicate column name");
-}
-
-function backfillMigrationHistoryFromFreshDb(
-  sqlite: ReturnType<typeof getSqliteHandle>,
-  migrationsFolder: string
-) {
-  // Dynamic require to avoid loading native binary at build time
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const Database = require("better-sqlite3");
-  const { migrate } = require("drizzle-orm/better-sqlite3/migrator");
-
-  const tempPath = path.join(
-    os.tmpdir(),
-    `aicomicbuilder-migrate-${Date.now()}-${Math.random().toString(16).slice(2)}.db`
-  );
-  const tempSqlite = new Database(tempPath);
-  try {
-    tempSqlite.pragma("journal_mode = WAL");
-    tempSqlite.pragma("foreign_keys = ON");
-    const tempDb = drizzle(tempSqlite, { schema });
-    migrate(tempDb, { migrationsFolder });
-    const rows = tempSqlite
-      .prepare("SELECT hash, created_at FROM __drizzle_migrations ORDER BY created_at")
-      .all() as Array<{ hash: string; created_at: number }>;
-
-    if (rows.length === 0) return;
-    const insert = sqlite.prepare(
-      "INSERT INTO __drizzle_migrations(hash, created_at) VALUES (?, ?)"
-    );
-    const tx = sqlite.transaction((entries: Array<{ hash: string; created_at: number }>) => {
-      for (const r of entries) {
-        insert.run(r.hash, r.created_at);
-      }
-    });
-    tx(rows);
-  } finally {
-    tempSqlite.close();
-    fs.rmSync(tempPath, { force: true });
-  }
-}
-
+/**
+ * Idempotent migration runner — reads the drizzle journal and applies each
+ * migration that hasn't been recorded in __drizzle_migrations yet.
+ *
+ * Handles both:
+ *   • Fresh databases (Docker / new installs) — all migrations run cleanly.
+ *   • Legacy databases — tables/columns that already exist produce "already
+ *     exists" / "duplicate column name" errors which are silently skipped, so
+ *     the hash is still recorded and the migration won't run again.
+ *
+ * Hash computation matches drizzle-orm's own migrator (SHA-256 of raw file
+ * content), so the __drizzle_migrations table stays compatible.
+ */
 export function runMigrations() {
-  const { migrate } = require("drizzle-orm/better-sqlite3/migrator");
+  const sqlite = getSqliteHandle();
   const migrationsFolder = path.resolve("drizzle");
-  const instance = createDb();
-  try {
-    migrate(instance, { migrationsFolder });
-  } catch (err) {
-    const sqlite = getSqliteHandle();
-    const shouldBackfill =
-      isDuplicateColumnError(err) &&
-      hasMigrationsTable(sqlite) &&
-      getMigrationRowCount(sqlite) === 0 &&
-      hasProjectsUserIdColumn(sqlite);
 
-    if (!shouldBackfill) throw err;
+  // Ensure tracking table exists
+  sqlite
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS __drizzle_migrations (
+         id         INTEGER PRIMARY KEY AUTOINCREMENT,
+         hash       TEXT    NOT NULL,
+         created_at INTEGER
+       )`
+    )
+    .run();
 
-    console.warn(
-      "[DB] Detected legacy schema with empty __drizzle_migrations. Backfilling migration history..."
-    );
-    backfillMigrationHistoryFromFreshDb(sqlite, migrationsFolder);
-    migrate(instance, { migrationsFolder });
-    console.warn("[DB] Migration history backfilled.");
+  // Load journal
+  type JournalEntry = { idx: number; tag: string; breakpoints: boolean };
+  const journalPath = path.join(migrationsFolder, "meta", "_journal.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+    entries: JournalEntry[];
+  };
+
+  // Collect already-applied hashes
+  const applied = new Set<string>(
+    (
+      sqlite
+        .prepare("SELECT hash FROM __drizzle_migrations")
+        .all() as Array<{ hash: string }>
+    ).map((r) => r.hash)
+  );
+
+  for (const entry of journal.entries) {
+    const sqlFile = path.join(migrationsFolder, `${entry.tag}.sql`);
+    if (!fs.existsSync(sqlFile)) {
+      console.warn(`[DB] Migration file not found, skipping: ${entry.tag}`);
+      continue;
+    }
+
+    const content = fs.readFileSync(sqlFile, "utf8");
+    // Same hash algorithm as drizzle-orm's migrator
+    const hash = crypto.createHash("sha256").update(content).digest("hex");
+
+    if (applied.has(hash)) continue;
+
+    // Split on statement-breakpoint markers; filter empty strings.
+    // Each chunk may itself contain multiple semicolon-separated statements
+    // (e.g. migrations that do CREATE TABLE / INSERT / DROP TABLE / RENAME),
+    // so we use exec() which handles multi-statement SQL natively — exactly
+    // what drizzle-orm's SQLite migrator does internally.
+    const chunks = (
+      entry.breakpoints
+        ? content.split("--> statement-breakpoint")
+        : [content]
+    )
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    console.log(`[DB] Applying migration: ${entry.tag}`);
+
+    for (const chunk of chunks) {
+      try {
+        sqlite.exec(chunk);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Schema already present from a pre-tracking install — safe to skip
+        if (
+          msg.includes("already exists") ||
+          msg.includes("duplicate column name")
+        ) {
+          console.warn(
+            `[DB] Skipping already-applied chunk in ${entry.tag}: ${msg}`
+          );
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    sqlite
+      .prepare(
+        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+      )
+      .run(hash, Date.now());
   }
+
+  console.log("[DB] Migrations complete.");
 }
 
 // Proxy preserves the `db` export API — lazy-inits on first property access

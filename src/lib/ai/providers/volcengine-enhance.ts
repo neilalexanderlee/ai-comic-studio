@@ -3,121 +3,102 @@
  *
  * 接入火山引擎 AI MediaKit（智能处理）画质增强功能。
  * 参考文档：
- *   - 画质增强指南：https://www.volcengine.com/docs/6448/2279961
- *   - 提交画质增强任务 API：https://www.volcengine.com/docs/6448/2279230
- *   - 查询任务信息 API：https://www.volcengine.com/docs/6448/2278532
- *   - 快速入门（视频生成后处理）：https://www.volcengine.com/docs/6448/2298704
+ *   - 画质增强开发指南：https://www.volcengine.com/docs/6448/2279961
+ *   - 基础概念及准备工作（API Key 认证）：https://www.volcengine.com/docs/6448/2300661
  *
- * 认证：火山引擎 AccessKey / SecretKey（AK/SK）。
- * 与即梦 Jimeng 使用相同的 @volcengine/openapi Service 类进行签名。
+ * 认证：AI MediaKit 使用独立的 MediaKit API Key（Bearer Token 形式），
+ * 与即梦 / Seedance 的 AK/SK 体系完全不同。
+ * 在 https://console.volcengine.com/imp/ai-mediakit/tools 的 API Key 管理页面获取。
  *
  * 工作流（异步任务）：
- *   1. 提交视频 URL → 获取 task_id
- *   2. 轮询任务状态 → 获取增强后的视频 URL
+ *   1. POST /api/v1/tools/enhance-video → 返回 task_id
+ *   2. 轮询 GET /api/v1/tasks/{task_id} → status = "completed" → result.video_url
  *
  * 典型使用场景：
- *   先以 480p 生成（成本更低），再通过画质增强升至 720p，达到与直接生成 720p 接近的效果，但成本更低。
+ *   先以 480p 生成（成本更低），再通过画质增强升至 1080p，
+ *   总成本远低于直接生成高分辨率视频。
  *
- * 环境变量：
- *   VOLCENGINE_ENHANCE_ACCESS_KEY  - AI MediaKit 的 AccessKey
- *   VOLCENGINE_ENHANCE_SECRET_KEY  - AI MediaKit 的 SecretKey
- *   （若使用与 Jimeng 相同的 AK/SK 账号，可复用 JIMENG_ACCESS_KEY / JIMENG_SECRET_KEY）
+ * 环境变量（备用，优先使用 DB 中存储的用户密钥）：
+ *   VOLCENGINE_ENHANCE_API_KEY  - AI MediaKit 的 API Key
  */
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
-// @ts-ignore
-import { Service } from "@volcengine/openapi";
 
-/** AI MediaKit 画质增强任务响应结构 */
+/** AI MediaKit API 基础 URL */
+const API_BASE = "https://mediakit.cn-beijing.volces.com";
+
+/** 提交任务响应 */
 interface EnhanceSubmitResponse {
-  ResponseMetadata?: { Error?: { Message: string } };
-  /** 任务 ID（部分版本放在顶层） */
-  TaskId?: string;
-  /** 部分版本将结果放在 data 里 */
-  data?: {
-    task_id?: string;
-    TaskId?: string;
-  };
+  success?: boolean;
+  task_id?: string;
+  request_id?: string;
+  // 错误时
+  message?: string;
+  code?: number | string;
 }
 
+/** 查询任务响应 */
 interface EnhanceQueryResponse {
-  ResponseMetadata?: { Error?: { Message: string } };
-  /** 任务状态：Processing | Success | Failed */
-  Status?: string;
-  /** 增强后的视频输出 URL */
-  OutputVideoUrl?: string;
-  /** 部分版本将结果放在 data 里 */
-  data?: {
-    status?: string;
-    Status?: string;
-    output_video_url?: string;
-    OutputVideoUrl?: string;
-    task_id?: string;
-    TaskId?: string;
+  success?: boolean;
+  task_id?: string;
+  task_type?: string;
+  /** "processing" | "completed" | "failed" */
+  status?: string;
+  result?: {
+    duration?: number;
+    fps?: number;
+    resolution?: string;
+    tool_version?: string;
+    /** 增强后视频下载地址（有效期 48 小时） */
+    video_url?: string;
   };
+  expires_at?: number;
+  created_at?: number;
+  finished_at?: number;
+  request_id?: string;
+  // 错误时
+  message?: string;
+  code?: number | string;
 }
 
 export class VolcengineEnhanceProvider {
   private uploadDir: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private submitApi: (body: Record<string, unknown>) => Promise<any>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private queryApi: (body: Record<string, unknown>) => Promise<any>;
+  private apiKey: string;
 
   constructor(params?: {
-    accessKey?: string;
-    secretKey?: string;
+    apiKey?: string;
     uploadDir?: string;
-    region?: string;
   }) {
-    const accessKey =
-      params?.accessKey ||
-      process.env.VOLCENGINE_ENHANCE_ACCESS_KEY ||
-      process.env.JIMENG_ACCESS_KEY ||
-      "";
-    const secretKey =
-      params?.secretKey ||
-      process.env.VOLCENGINE_ENHANCE_SECRET_KEY ||
-      process.env.JIMENG_SECRET_KEY ||
+    this.apiKey =
+      params?.apiKey ||
+      process.env.VOLCENGINE_ENHANCE_API_KEY ||
       "";
     this.uploadDir = params?.uploadDir || process.env.UPLOAD_DIR || "./uploads";
-    const region = params?.region || "cn-north-1";
-
-    // AI MediaKit 使用 open.volcengineapi.com，服务名为 ai_media_kit
-    // 注意：若官方文档有更新，请调整 service 与 version 参数
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const svc = new (Service as any)({
-      service: "ai_media_kit",
-      version: "2024-01-01",
-      host: "open.volcengineapi.com",
-      region,
-    });
-    svc.setAccessKeyId(accessKey);
-    svc.setSecretKey(secretKey);
-
-    // 提交画质增强任务：文档 https://www.volcengine.com/docs/6448/2279230
-    this.submitApi = svc.createJSONAPI("SubmitVideoEnhanceTask", {
-      Version: "2024-01-01",
-    });
-    // 查询任务信息（通用）：文档 https://www.volcengine.com/docs/6448/2278532
-    this.queryApi = svc.createJSONAPI("GetVideoEnhanceTask", {
-      Version: "2024-01-01",
-    });
   }
 
   /**
-   * 对给定视频文件执行画质增强，返回增强后本地保存的文件路径。
+   * 对给定视频执行画质增强，返回增强后本地保存的文件路径。
    *
    * @param videoPathOrUrl 待增强视频的本地路径或可公开访问的 URL
-   * @param publicBaseUrl  当 videoPathOrUrl 是本地路径时，将其转为外网可访问 URL 的前缀
-   *                       （如 "https://yourdomain.com/uploads"），若为空则原路透传
+   * @param publicBaseUrl  当 videoPathOrUrl 是本地路径时，转为外网可访问 URL 的前缀
+   * @param options        可选参数：resolution（目标分辨率）、scene（场景）
    */
   async enhanceVideo(
     videoPathOrUrl: string,
-    publicBaseUrl?: string
+    publicBaseUrl?: string,
+    options?: {
+      resolution?: "720p" | "1080p" | "4k";
+      scene?: "aigc" | "short_series" | "ugc" | "old_film";
+      toolVersion?: "standard" | "professional";
+    }
   ): Promise<string> {
-    // 确定视频公网 URL（API 需要可访问的 URL，不接受本地路径）
+    if (!this.apiKey) {
+      throw new Error(
+        "[VolcengineEnhance] API Key 未配置。请前往「设置 → AI MediaKit」填写 API Key。"
+      );
+    }
+
     const videoUrl = this.resolvePublicUrl(videoPathOrUrl, publicBaseUrl);
     if (!videoUrl) {
       throw new Error(
@@ -128,11 +109,9 @@ export class VolcengineEnhanceProvider {
 
     console.log(`[VolcengineEnhance] Submitting enhance task for: ${videoUrl}`);
 
-    // 提交任务
-    const taskId = await this.submitTask(videoUrl);
+    const taskId = await this.submitTask(videoUrl, options);
     console.log(`[VolcengineEnhance] Task submitted: ${taskId}`);
 
-    // 轮询结果
     const enhancedUrl = await this.pollForResult(taskId);
     console.log(`[VolcengineEnhance] Enhanced video URL: ${enhancedUrl}`);
 
@@ -155,31 +134,43 @@ export class VolcengineEnhanceProvider {
   }
 
   /** 提交画质增强任务，返回 task_id */
-  private async submitTask(videoUrl: string): Promise<string> {
+  private async submitTask(
+    videoUrl: string,
+    options?: {
+      resolution?: "720p" | "1080p" | "4k";
+      scene?: "aigc" | "short_series" | "ugc" | "old_film";
+      toolVersion?: "standard" | "professional";
+    }
+  ): Promise<string> {
+    const body: Record<string, unknown> = {
+      video_url: videoUrl,
+      scene: options?.scene ?? "aigc",
+      resolution: options?.resolution ?? "1080p",
+      tool_version: options?.toolVersion ?? "standard",
+    };
+
     let response: EnhanceSubmitResponse;
     try {
-      response = await this.submitApi({
-        // 参考 https://www.volcengine.com/docs/6448/2279230
-        // 注意：如果实际 API 参数名不同（如 video_url / VideoUrl），请根据文档调整
-        VideoUrl: videoUrl,
+      const res = await fetch(`${API_BASE}/api/v1/tools/enhance-video`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify(body),
       });
+      response = (await res.json()) as EnhanceSubmitResponse;
+      if (!res.ok || response.success === false) {
+        throw new Error(
+          `HTTP ${res.status}: ${response.message ?? JSON.stringify(response)}`
+        );
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`[VolcengineEnhance] Submit SDK error: ${msg}`);
+      throw new Error(`[VolcengineEnhance] Submit API error: ${msg}`);
     }
 
-    if (response.ResponseMetadata?.Error) {
-      throw new Error(
-        `[VolcengineEnhance] Submit API error: ${response.ResponseMetadata.Error.Message}`
-      );
-    }
-
-    // 兼容不同版本的响应结构
-    const taskId =
-      response.TaskId ||
-      response.data?.task_id ||
-      response.data?.TaskId;
-
+    const taskId = response.task_id;
     if (!taskId) {
       throw new Error(
         `[VolcengineEnhance] No task_id in submit response: ${JSON.stringify(response)}`
@@ -188,9 +179,9 @@ export class VolcengineEnhanceProvider {
     return taskId;
   }
 
-  /** 轮询任务状态，返回增强后视频 URL */
+  /** 轮询任务状态，返回增强后视频 URL（result.video_url） */
   private async pollForResult(taskId: string): Promise<string> {
-    const maxAttempts = 60; // 最多等 5 分钟（60 × 5s）
+    const maxAttempts = 72; // 最多等 6 分钟（72 × 5s），标准版 RTF 6~10
     const interval = 5_000;
 
     for (let i = 0; i < maxAttempts; i++) {
@@ -198,48 +189,40 @@ export class VolcengineEnhanceProvider {
 
       let response: EnhanceQueryResponse;
       try {
-        response = await this.queryApi({ TaskId: taskId });
+        const res = await fetch(`${API_BASE}/api/v1/tasks/${taskId}`, {
+          headers: {
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+        });
+        response = (await res.json()) as EnhanceQueryResponse;
+        if (!res.ok) {
+          console.warn(
+            `[VolcengineEnhance] Poll ${i + 1} HTTP ${res.status}: ${response.message}`
+          );
+          continue;
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[VolcengineEnhance] Poll attempt ${i + 1} error: ${msg}`);
+        console.warn(`[VolcengineEnhance] Poll ${i + 1} error: ${msg}`);
         continue;
       }
 
-      if (response.ResponseMetadata?.Error) {
-        console.warn(
-          `[VolcengineEnhance] Poll API error: ${response.ResponseMetadata.Error.Message}`
-        );
-        continue;
+      const status = response.status ?? "";
+      console.log(`[VolcengineEnhance] Poll ${i + 1}: status=${status}`);
+
+      if (status === "completed" && response.result?.video_url) {
+        return response.result.video_url;
       }
 
-      // 兼容多种响应结构
-      const status =
-        response.Status ||
-        response.data?.status ||
-        response.data?.Status ||
-        "";
-      const outputUrl =
-        response.OutputVideoUrl ||
-        response.data?.output_video_url ||
-        response.data?.OutputVideoUrl;
-
-      console.log(
-        `[VolcengineEnhance] Poll ${i + 1}: status=${status}`
-      );
-
-      if ((status === "Success" || status === "success" || status === "done") && outputUrl) {
-        return outputUrl;
-      }
-
-      if (status === "Failed" || status === "failed") {
+      if (status === "failed") {
         throw new Error(
-          `[VolcengineEnhance] Enhancement task failed. Response: ${JSON.stringify(response)}`
+          `[VolcengineEnhance] Enhancement task failed. task_id=${taskId}`
         );
       }
     }
 
     throw new Error(
-      "[VolcengineEnhance] Enhancement timed out after 5 minutes"
+      `[VolcengineEnhance] Enhancement timed out after ${(maxAttempts * interval) / 60000} minutes. task_id=${taskId}`
     );
   }
 
@@ -248,7 +231,6 @@ export class VolcengineEnhanceProvider {
     videoPathOrUrl: string,
     publicBaseUrl?: string
   ): string | null {
-    // 已经是 http(s) URL，直接使用
     if (
       videoPathOrUrl.startsWith("http://") ||
       videoPathOrUrl.startsWith("https://")
@@ -256,7 +238,6 @@ export class VolcengineEnhanceProvider {
       return videoPathOrUrl;
     }
 
-    // 本地路径：需要 publicBaseUrl 拼接为可访问 URL
     const base =
       publicBaseUrl ||
       process.env.NEXT_PUBLIC_BASE_URL ||
@@ -264,11 +245,7 @@ export class VolcengineEnhanceProvider {
       "";
     if (!base) return null;
 
-    // 尝试提取相对于 uploads 目录的相对路径
-    const uploadDir = (process.env.UPLOAD_DIR || "./uploads").replace(
-      /\/+$/,
-      ""
-    );
+    const uploadDir = (process.env.UPLOAD_DIR || "./uploads").replace(/\/+$/, "");
     const relative = videoPathOrUrl.replace(uploadDir, "").replace(/^\/+/, "");
     return `${base.replace(/\/+$/, "")}/uploads/${relative}`;
   }

@@ -142,6 +142,8 @@ export const shots = sqliteTable("shots", {
     .notNull()
     .default("pending"),
   warnings: text("warnings"),
+  /** 视频生成/增强的分辨率。null = 未知（历史数据），"480p" = 已生成待增强，"720p" = 已增强或直接生成 720p */
+  videoResolution: text("video_resolution"),
 });
 
 export const dialogues = sqliteTable("dialogues", {
@@ -227,6 +229,15 @@ export const userClientPrefs = sqliteTable("user_client_prefs", {
   userId: text("user_id").primaryKey().notNull(),
   modelStoreJson: text("model_store_json").notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });

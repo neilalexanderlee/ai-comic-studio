@@ -141,6 +141,27 @@
       "when": 1747180800000,
       "tag": "0019_add_episode_target_duration",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1747267200000,
+      "tag": "0020_add_video_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1747353600000,
+      "tag": "0021_add_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1747440000000,
+      "tag": "0022_ensure_users_table",
+      "breakpoints": true
     }
   ]
 }

@@ -6,9 +6,9 @@ import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
-import { VolcengineEnhanceProvider } from "@/lib/ai/providers/volcengine-enhance";
-import { eq } from "drizzle-orm";
+import { eq, asc } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
+import { dialogues } from "@/lib/db/schema";
 
 async function getVersionedUploadDirFromPipeline(versionId: string | null | undefined): Promise<string> {
   if (!versionId) return process.env.UPLOAD_DIR || "./uploads";
@@ -28,12 +28,12 @@ export async function handleVideoGenerate(task: Task) {
     ratio?: string;
     modelConfig?: ModelConfigPayload;
     /**
-     * 是否使用画质增强工作流：
-     * 先以 480p 生成（成本更低），再通过火山 AI MediaKit 画质增强升至 720p。
-     * 需配置 VOLCENGINE_ENHANCE_ACCESS_KEY / VOLCENGINE_ENHANCE_SECRET_KEY 环境变量。
-     * 参考：https://www.volcengine.com/docs/6448/2279961
+     * 生成分辨率：
+     *   "480p" - 低成本生成，后续可通过「画质增强」按需升至 720p
+     *   "720p" - 直接生成 720p（成本较高）
+     *   undefined - 使用模型默认分辨率
      */
-    useEnhance?: boolean;
+    resolution?: "480p" | "720p";
   };
 
   const [shot] = await db
@@ -67,6 +67,19 @@ export async function handleVideoGenerate(task: Task) {
     .set({ status: "generating" })
     .where(eq(shots.id, payload.shotId));
 
+  // Fetch dialogues for this shot to include in video prompt (lip sync / voiceover cues)
+  const shotDialogues = await db
+    .select({
+      text: dialogues.text,
+      characterName: characters.name,
+      visualHint: characters.visualHint,
+      sequence: dialogues.sequence,
+    })
+    .from(dialogues)
+    .innerJoin(characters, eq(dialogues.characterId, characters.id))
+    .where(eq(dialogues.shotId, payload.shotId))
+    .orderBy(asc(dialogues.sequence));
+
   const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
   const prompt = buildVideoPrompt({
     videoScript,
@@ -76,15 +89,14 @@ export async function handleVideoGenerate(task: Task) {
     duration: effectiveDuration,
     characters: projectCharacters,
     slotContents: videoSlots,
+    dialogues: shotDialogues.length > 0
+      ? shotDialogues.map((d) => ({
+          characterName: d.characterName,
+          text: d.text,
+          visualHint: d.visualHint ?? undefined,
+        }))
+      : undefined,
   });
-
-  // 画质增强工作流：先以 480p 生成再增强至 720p（降低成本）
-  // 普通工作流：直接以目标分辨率生成
-  const useEnhance =
-    payload.useEnhance === true ||
-    process.env.VOLCENGINE_ENHANCE_ENABLED === "true";
-
-  const generationResolution = useEnhance ? "480p" : undefined;
 
   const result = await videoProvider.generateVideo({
     firstFrame: shot.firstFrame,
@@ -92,39 +104,17 @@ export async function handleVideoGenerate(task: Task) {
     prompt,
     duration: effectiveDuration,
     ratio: payload.ratio ?? "16:9",
-    ...(generationResolution && { resolution: generationResolution }),
+    ...(payload.resolution && { resolution: payload.resolution }),
   });
-
-  let finalVideoPath = result.filePath;
-
-  // 画质增强后处理
-  if (useEnhance) {
-    try {
-      console.log(
-        `[VideoGenerate] Starting quality enhancement for shot ${payload.shotId}`
-      );
-      const enhancer = new VolcengineEnhanceProvider({
-        uploadDir: versionedUploadDir,
-      });
-      finalVideoPath = await enhancer.enhanceVideo(result.filePath);
-      console.log(
-        `[VideoGenerate] Enhancement complete: ${finalVideoPath}`
-      );
-    } catch (enhanceErr: unknown) {
-      const msg =
-        enhanceErr instanceof Error ? enhanceErr.message : String(enhanceErr);
-      // 增强失败时降级为原始 480p 视频，不阻塞整体流程
-      console.error(
-        `[VideoGenerate] Enhancement failed, falling back to 480p: ${msg}`
-      );
-      finalVideoPath = result.filePath;
-    }
-  }
 
   await db
     .update(shots)
-    .set({ videoUrl: finalVideoPath, status: "completed" })
+    .set({
+      videoUrl: result.filePath,
+      status: "completed",
+      videoResolution: payload.resolution ?? null,
+    })
     .where(eq(shots.id, payload.shotId));
 
-  return { videoPath: finalVideoPath };
+  return { videoPath: result.filePath };
 }

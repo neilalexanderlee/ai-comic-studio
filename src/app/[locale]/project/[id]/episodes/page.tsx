@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { Layers, Plus, Loader2, Users, X, Upload, FileUp, Merge, Download } from "lucide-react";
+import { Layers, Plus, Loader2, Users, X, Upload, FileUp, Merge, Download, Timer } from "lucide-react";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,7 @@ export default function EpisodesPage({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [merging, setMerging] = useState(false);
   const [mergedVideoUrl, setMergedVideoUrl] = useState<string | null>(null);
+  const [recalculating, setRecalculating] = useState(false);
 
   useEffect(() => {
     fetchEpisodes(projectId);
@@ -118,6 +119,26 @@ export default function EpisodesPage({
     }
   }
 
+  async function handleRecalcDuration() {
+    setRecalculating(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/episodes/recalc-duration`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "重新计算时长失败");
+        return;
+      }
+      await fetchEpisodes(projectId);
+      toast.success(`已更新 ${data.updated} 集的目标时长`);
+    } catch {
+      toast.error("网络错误，请重试");
+    } finally {
+      setRecalculating(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[400px] items-center justify-center">
@@ -147,6 +168,18 @@ export default function EpisodesPage({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleRecalcDuration}
+            disabled={recalculating || episodes.length === 0}
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {recalculating ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Timer className="h-4 w-4" />
+            )}
+            重算时长
+          </button>
           <Link
             href={`/${locale}/project/${projectId}/import`}
             className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"

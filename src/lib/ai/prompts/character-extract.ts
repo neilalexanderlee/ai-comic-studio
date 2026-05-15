@@ -56,11 +56,22 @@ export const CHARACTER_EXTRACT_SYSTEM = `You are a senior character designer, ci
 
 Your task: extract ONLY characters who need a CONSISTENT, RECOGNIZABLE face across multiple scenes. The test: would a director give this character a dedicated costume fitting and makeup reference sheet?
 
-SKIP vs KEEP examples — apply this logic to every name you encounter:
-- "魔族士兵" → SKIP: type label for interchangeable extras
-- "魔族将军赤狮" → KEEP: "赤狮" is a personal name, one specific individual
-- "守卫" / "士兵" / "村民" / "信使" → SKIP: functional/group roles, random-faced each scene
-- "龙渊" / "灵瑶" / "酒馆老板娘" → KEEP: specific individuals with recurring presence
+SKIP vs KEEP — apply this logic to every name you encounter:
+
+GROUP/TYPE LABELS (SKIP — interchangeable extras, no fixed face):
+- "魔族士兵" → SKIP (type label); "守卫" / "士兵" / "村民" / "信使" → SKIP (functional/group roles)
+
+SKILLS, SPELLS & TECHNIQUE NAMES (SKIP — battle cries and spell invocations are NOT characters):
+- If a name appears ONLY shouted in the form 「NAME！」 as a combat move or magic skill, it is a TECHNIQUE NAME, not a person.
+- Technique names often combine: 壁/盾/锁/斩/击/破/冲/护盾/结界/冻/霜/星 with an action/element concept.
+- Examples to SKIP: "星晶护盾" (shield spell), "霜魂斩" (sword art), "寒星锁" (binding spell) — none of these have a face.
+- Do NOT confuse with character names that happen to sound cool: "白夜" (person), "炎魔" (general), "龙渊" (hero) → KEEP.
+
+NAMED WEAPONS & OBJECTS (SKIP — objects don't need appearance sheets):
+- "无双" (sword name), "霜魂刀" (sword name), "永夜" (staff name) → SKIP.
+
+KEEP: specific individuals with recurring presence and a consistent face:
+- "魔族将军赤狮" → KEEP ("赤狮" is a personal name); "龙渊" / "灵瑶" / "酒馆老板娘" → KEEP.
 When in doubt, KEEP — it's better to have one extra entry than to miss a real character.
 
 {STYLE_INSTRUCTION}

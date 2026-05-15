@@ -88,6 +88,9 @@ export default function ImportPage({
   // Step 3 result
   const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
 
+  // Step 4 option: replace existing episodes instead of appending
+  const [replaceEpisodes, setReplaceEpisodes] = useState(false);
+
   // History mode
   const [historyMode, setHistoryMode] = useState(false);
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
@@ -287,6 +290,8 @@ export default function ImportPage({
         body: JSON.stringify({
           episodes,
           characters: characters.filter((_, i) => selectedCharIdxs.has(i)),
+          replaceEpisodes,
+          fullScript: fullText || undefined,
         }),
       });
       if (!res.ok) {
@@ -586,6 +591,23 @@ export default function ImportPage({
                 {t("confirmAndGenerate")}
               </Button>
             </div>
+            {/* Replace mode toggle */}
+            <label className="flex items-center gap-2.5 cursor-pointer select-none w-fit">
+              <input
+                type="checkbox"
+                checked={replaceEpisodes}
+                onChange={(e) => setReplaceEpisodes(e.target.checked)}
+                className="accent-primary h-4 w-4 rounded"
+              />
+              <span className="text-sm text-[--text-secondary]">
+                替换已有集数（保留角色和图片，清除旧分镜）
+              </span>
+            </label>
+            {replaceEpisodes && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                ⚠️ 将删除项目中全部已有集数及其分镜/版本数据，角色档案与图片不受影响。
+              </div>
+            )}
             <p className="text-sm text-[--text-muted]">{t("reviewEpisodesHint")}</p>
             <div className="space-y-3">
               {episodes.map((ep, idx) => (

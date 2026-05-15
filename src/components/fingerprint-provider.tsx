@@ -74,6 +74,11 @@ export function FingerprintProvider({
 
   useEffect(() => {
     async function sync() {
+      // If the user is logged in with a real account (ai_comic_auth cookie exists),
+      // the anonymous fingerprint is no longer needed — stop syncing it.
+      const hasAuthCookie = document.cookie.includes("ai_comic_auth=");
+      if (hasAuthCookie) return;
+
       const lsUid = localStorage.getItem(STORAGE_KEY);
       const cookieUid = readCookie(COOKIE_NAME);
       const idbUid = await idbGet();

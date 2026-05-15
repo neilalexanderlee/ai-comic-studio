@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { projects, episodes, characters, episodeCharacters } from "@/lib/db/schema";
-import { eq, and, max } from "drizzle-orm";
+import { eq, and, max, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { addImportLog, canonicalCharacterNameKey } from "@/lib/import-utils";
@@ -44,12 +44,33 @@ export async function POST(
   const body = (await request.json()) as {
     episodes: EpisodeData[];
     characters: CharacterData[];
+    /** When true: delete all existing episodes (cascade-deletes shots/versions) before inserting.
+     *  Characters are NEVER deleted — their images/descriptions are always preserved. */
+    replaceEpisodes?: boolean;
+    /** Full raw script text — if provided, saved to projects.script so recalc-duration etc. work. */
+    fullScript?: string;
   };
 
   await addImportLog(
     projectId, 4, "running",
-    `开始创建 ${body.episodes.length} 集和 ${body.characters.length} 个角色`
+    `开始创建 ${body.episodes.length} 集和 ${body.characters.length} 个角色${body.replaceEpisodes ? "（替换模式：清除旧集数）" : ""}`
   );
+
+  // 0. (Optional) Replace mode: delete all existing episodes & their cascaded data
+  if (body.replaceEpisodes) {
+    const existingEps = await db
+      .select({ id: episodes.id })
+      .from(episodes)
+      .where(eq(episodes.projectId, projectId));
+    if (existingEps.length > 0) {
+      const ids = existingEps.map((e) => e.id);
+      await db.delete(episodes).where(inArray(episodes.id, ids));
+      await addImportLog(
+        projectId, 4, "running",
+        `已清除旧集数 ${existingEps.length} 集（分镜/版本数据一并删除，角色与图片保留）`
+      );
+    }
+  }
 
   // 1. Upsert characters: reuse existing records (preserving images) when name matches,
   //    only insert truly new characters. This makes reimport safe.
@@ -99,13 +120,26 @@ export async function POST(
     `角色处理完成：复用已有角色 ${reusedCount} 个（图片保留），新建 ${createdCount} 个`
   );
 
-  // 2. Create episodes
-  const [seqResult] = await db
-    .select({ maxSeq: max(episodes.sequence) })
-    .from(episodes)
-    .where(eq(episodes.projectId, projectId));
+  // 1b. Update project global script if provided (enables recalc-duration etc.)
+  if (body.fullScript?.trim()) {
+    await db
+      .update(projects)
+      .set({ script: body.fullScript.trim() })
+      .where(eq(projects.id, projectId));
+    await addImportLog(projectId, 4, "running", "项目全局剧本已同步更新");
+  }
 
-  let seq = (seqResult?.maxSeq ?? 0) + 1;
+  // 2. Create episodes
+  let seq: number;
+  if (body.replaceEpisodes) {
+    seq = 1; // fresh start after clearing
+  } else {
+    const [seqResult] = await db
+      .select({ maxSeq: max(episodes.sequence) })
+      .from(episodes)
+      .where(eq(episodes.projectId, projectId));
+    seq = (seqResult?.maxSeq ?? 0) + 1;
+  }
 
   const created = [];
   for (const ep of body.episodes) {

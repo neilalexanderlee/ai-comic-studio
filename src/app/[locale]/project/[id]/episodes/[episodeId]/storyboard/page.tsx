@@ -78,6 +78,7 @@ export default function EpisodeStoryboardPage() {
   const [generatingFramesOverwrite, setGeneratingFramesOverwrite] = useState(false);
   const [generatingVideosOverwrite, setGeneratingVideosOverwrite] = useState(false);
   const [videoRatio, setVideoRatio] = useState("16:9");
+  const [videoGenerationResolution, setVideoGenerationResolution] = useState<"480p" | "720p">("480p");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [versions, setVersions] = useState<StoryboardVersion[]>([]);
   const [openDrawerShotId, setOpenDrawerShotId] = useState<string | null>(null);
@@ -341,7 +342,7 @@ export default function EpisodeStoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_video_generate",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
+          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, resolution: videoGenerationResolution },
           modelConfig: getModelConfig(),
           episodeId: useProjectStore.getState().currentEpisodeId,
         }),
@@ -867,6 +868,22 @@ export default function EpisodeStoryboardPage() {
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">4</span>
             <InlineModelPicker capability="video" />
             <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
+            {/* 分辨率选择器：480p 成本低，可后续手动画质增强；720p 一步到位 */}
+            <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
+              {(["480p", "720p"] as const).map((res) => (
+                <button
+                  key={res}
+                  onClick={() => setVideoGenerationResolution(res)}
+                  className={`px-2.5 py-1.5 font-medium transition-colors ${
+                    videoGenerationResolution === res
+                      ? "bg-primary text-white"
+                      : "text-[--text-secondary] hover:bg-[--surface]"
+                  }`}
+                >
+                  {res}
+                </button>
+              ))}
+            </div>
             <Button
               onClick={() =>
                 generationMode === "reference"
@@ -1001,6 +1018,8 @@ export default function EpisodeStoryboardPage() {
                   : shot.status
               }
               warnings={shot.warnings}
+              videoResolution={shot.videoResolution}
+              videoGenerationResolution={videoGenerationResolution}
               dialogues={shot.dialogues || []}
               onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
               generationMode={generationMode}

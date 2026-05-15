@@ -26,16 +26,22 @@ export function buildImportCharacterExtractSystem(visualStyle = "auto"): string 
 RULES:
 1. Extract ONLY characters who need a CONSISTENT, RECOGNIZABLE face across multiple scenes — characters that a director would give a dedicated costume fitting and makeup reference sheet.
 2. A character qualifies if it has a PERSONAL IDENTITY: a real name, a distinct personality, or a role where the same individual recurs and must look the same every time.
-3. SKIP characters whose "name" is actually a TYPE or GROUP LABEL — even if they appear frequently. A type label describes a category of interchangeable people, not one specific person. Examples of what to SKIP vs KEEP:
-   - "魔族士兵" → SKIP (type label, any number of interchangeable soldiers)
-   - "魔族将军赤狮" → KEEP (personal name "赤狮", specific individual)
-   - "人族斥候" → SKIP (type label)
-   - "龙渊" → KEEP (personal name)
-   - "村民" / "百姓" / "路人" → SKIP (crowd types)
-   - "酒馆老板娘" → KEEP (specific individual with recurring role and personality)
-   - "守卫" / "士兵" / "卫兵" → SKIP (interchangeable background roles)
-   - "信使" / "传令兵" → SKIP (functional role, not a person)
-   The key question: is there ONE specific person this name always refers to, with a face worth remembering?
+3. SKIP characters whose "name" is actually a TYPE, GROUP LABEL, or NON-CHARACTER ENTITY — even if they appear frequently:
+   a) TYPE/GROUP LABELS — a category of interchangeable people, not one specific person:
+      - "魔族士兵" → SKIP (type label, interchangeable soldiers)
+      - "人族斥候" → SKIP (type label)
+      - "村民" / "百姓" / "路人" → SKIP (crowd types)
+      - "守卫" / "士兵" / "卫兵" → SKIP (interchangeable background roles)
+      - "信使" / "传令兵" → SKIP (functional role, not a person)
+   b) SKILLS, SPELLS, ABILITIES, AND TECHNIQUE NAMES — words shouted during combat or magic use are NOT characters:
+      - If a name appears ONLY in the pattern 「NAME！」 or 「NAME！」 shouted as a battle cry or spell invocation, it is a SKILL NAME, not a character.
+      - Skills often contain words like: 壁/盾/锁/斩/击/破/冲/炮/结界/护盾/刺/爆/裂/冻/燃/霜/星/龙/魂 combined with an action concept.
+      - Examples to SKIP: "星晶护盾" (magic shield skill), "霜魂斩" (sword technique), "寒星锁" (binding spell), "永夜壁" (barrier skill)
+      - KEEP proper character names even if they sound action-like: "龙渊" (character), "白夜" (character), "炎魔" (general's title)
+   c) WEAPONS AND OBJECTS — even named ones are not characters:
+      - "永夜" (staff name) → SKIP; "无双" (sword name) → SKIP; "霜魂刀" (sword name) → SKIP
+   The key question: is there ONE specific PERSON this name always refers to, with a FACE worth remembering?
+   KEEP examples: "魔族将军赤狮" → KEEP (personal name "赤狮"); "龙渊" → KEEP; "酒馆老板娘" → KEEP (recurring individual)
 3. Count approximate appearances/mentions for each character
 4. Merge obvious aliases: "小明" and "明哥" are the same person; "老板娘" and "酒馆老板娘（矮人）" describing the same role are the same person — output ONE entry. When unsure, prefer the more descriptive name.
 5. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.

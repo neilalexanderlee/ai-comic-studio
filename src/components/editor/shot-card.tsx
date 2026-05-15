@@ -33,6 +33,7 @@ import {
   Upload,
   Trash2,
   ClipboardCopy,
+  Wand2,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
@@ -71,6 +72,9 @@ interface ShotCardProps {
   batchGeneratingVideoPrompts?: boolean;
   batchGeneratingVideos?: boolean;
   warnings?: string | null;
+  videoResolution?: string | null;
+  /** 生成视频时使用的分辨率，传递给后端 */
+  videoGenerationResolution?: "480p" | "720p";
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -159,6 +163,8 @@ export function ShotCard({
   batchGeneratingVideoPrompts = false,
   batchGeneratingVideos = false,
   warnings,
+  videoResolution,
+  videoGenerationResolution,
 }: ShotCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -191,6 +197,7 @@ export function ShotCard({
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
+  const [enhancingVideo, setEnhancingVideo] = useState(false);
 
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -330,7 +337,11 @@ export function ShotCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: generationMode === "reference" ? "single_reference_video" : "single_video_generate",
-          payload: { shotId: id, ratio: videoRatio },
+          payload: {
+            shotId: id,
+            ratio: videoRatio,
+            ...(videoGenerationResolution && { resolution: videoGenerationResolution }),
+          },
           modelConfig: getModelConfig(),
         }),
       });
@@ -339,6 +350,24 @@ export function ShotCard({
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
     setGeneratingVideo(false);
+  }
+
+  async function handleEnhanceVideo() {
+    setEnhancingVideo(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/enhance`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "画质增强失败");
+      }
+      toast.success("画质增强完成，视频已升级至 720p");
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "画质增强失败");
+    }
+    setEnhancingVideo(false);
   }
 
   async function handleRewriteText() {
@@ -851,23 +880,54 @@ export function ShotCard({
                   <VideoIcon className="h-4 w-4 text-[--text-primary] translate-x-0.5" />
                 </div>
               </div>
+              {/* Resolution badge */}
+              {videoResolution && (
+                <div className={`absolute top-1.5 right-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                  videoResolution === "720p"
+                    ? "bg-emerald-600/90 text-white"
+                    : "bg-amber-500/90 text-white"
+                }`}>
+                  {videoResolution}
+                </div>
+              )}
             </div>
           )}
-          <Button
-            size="xs"
-            variant={nextStep === "video" ? "default" : "outline"}
-            onClick={handleGenerateVideo}
-            disabled={generatingVideo || batchGeneratingVideos || isGenerating || (generationMode === "keyframe" && !hasFramePair)}
-          >
-            {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
-              ? <Loader2 className="h-3 w-3 animate-spin" />
-              : <VideoIcon className="h-3 w-3" />
-            }
-            {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
-              ? t("common.generating")
-              : hasVideo ? t("shot.regenerateVideo") : t("project.generateVideo")
-            }
-          </Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button
+              size="xs"
+              variant={nextStep === "video" ? "default" : "outline"}
+              onClick={handleGenerateVideo}
+              disabled={generatingVideo || batchGeneratingVideos || isGenerating || enhancingVideo || (generationMode === "keyframe" && !hasFramePair)}
+            >
+              {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <VideoIcon className="h-3 w-3" />
+              }
+              {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
+                ? t("common.generating")
+                : hasVideo ? t("shot.regenerateVideo") : t("project.generateVideo")
+              }
+              {videoGenerationResolution && (
+                <span className="ml-1 rounded bg-white/20 px-1 text-[10px] font-bold">{videoGenerationResolution}</span>
+              )}
+            </Button>
+            {/* 画质增强按钮：仅当已有视频且分辨率为 480p（或未知）时显示 */}
+            {hasVideo && videoResolution !== "720p" && (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleEnhanceVideo}
+                disabled={enhancingVideo || generatingVideo || batchGeneratingVideos || isGenerating}
+                className="border-violet-300 text-violet-700 hover:bg-violet-50"
+              >
+                {enhancingVideo
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <Wand2 className="h-3 w-3" />
+                }
+                {enhancingVideo ? "增强中…" : "画质增强↑720p"}
+              </Button>
+            )}
+          </div>
         </StepRow>
 
       </div>
