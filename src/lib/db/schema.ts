@@ -146,6 +146,18 @@ export const shots = sqliteTable("shots", {
   videoResolution: text("video_resolution"),
 });
 
+/** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */
+export const shotVideoHistory = sqliteTable("shot_video_history", {
+  id: text("id").primaryKey(),
+  shotId: text("shot_id")
+    .notNull()
+    .references(() => shots.id, { onDelete: "cascade" }),
+  videoUrl: text("video_url").notNull(),
+  resolution: text("resolution"),       // "480p" | "720p" | null
+  label: text("label"),                 // "生成" | "增强↑720p" 等
+  createdAt: integer("created_at").notNull(), // Unix ms
+});
+
 export const dialogues = sqliteTable("dialogues", {
   id: text("id").primaryKey(),
   shotId: text("shot_id")

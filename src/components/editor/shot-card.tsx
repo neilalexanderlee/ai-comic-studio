@@ -34,6 +34,8 @@ import {
   Trash2,
   ClipboardCopy,
   Wand2,
+  History,
+  RotateCcw,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
@@ -216,6 +218,22 @@ export function ShotCard({
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const uploadFieldRef = useRef<string | null>(null);
 
+  // 视频版本历史
+  type HistoryEntry = { id: string; videoUrl: string; resolution: string | null; label: string | null; createdAt: number };
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [revertingId, setRevertingId] = useState<string | null>(null);
+
+  // 右键菜单
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    window.addEventListener("click", close, { once: true });
+    return () => window.removeEventListener("click", close);
+  }, [ctxMenu]);
+
   const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
 
@@ -368,6 +386,41 @@ export function ShotCard({
       toast.error(err instanceof Error ? err.message : "画质增强失败");
     }
     setEnhancingVideo(false);
+  }
+
+  async function handleOpenHistory() {
+    setCtxMenu(null);
+    setHistoryOpen(true);
+    setHistoryLoading(true);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/video-history`);
+      const data = await res.json();
+      setHistoryList(data.history ?? []);
+    } catch {
+      toast.error("加载历史失败");
+    }
+    setHistoryLoading(false);
+  }
+
+  async function handleRevertHistory(historyId: string) {
+    setRevertingId(historyId);
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/video-history`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ historyId }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "回退失败");
+      }
+      toast.success("已恢复该历史版本");
+      setHistoryOpen(false);
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "回退失败");
+    }
+    setRevertingId(null);
   }
 
   async function handleRewriteText() {
@@ -873,6 +926,7 @@ export function ShotCard({
               className="group relative mb-2.5 w-full overflow-hidden rounded-xl border border-[--border-subtle] bg-black cursor-pointer"
               style={{ aspectRatio: "16/9" }}
               onClick={() => setPreviewSrc(uploadUrl(videoUrl!))}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY }); }}
             >
               <video className="h-full w-full object-contain" src={uploadUrl(videoUrl!)} />
               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
@@ -890,6 +944,10 @@ export function ShotCard({
                   {videoResolution}
                 </div>
               )}
+              {/* 右键提示角标 */}
+              <div className="absolute bottom-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <span className="rounded bg-black/50 px-1.5 py-0.5 text-[9px] text-white/70">右键查看历史版本</span>
+              </div>
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
@@ -1010,6 +1068,89 @@ export function ShotCard({
           </div>
         </div>
       )}
+
+      {/* 右键菜单 */}
+      {ctxMenu && (
+        <div
+          className="fixed z-[100] min-w-[140px] rounded-lg border border-[--border-subtle] bg-white py-1 shadow-xl"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[--text-primary] hover:bg-[--surface] transition-colors"
+            onClick={handleOpenHistory}
+          >
+            <History className="h-3.5 w-3.5 text-[--text-muted]" />
+            版本历史
+          </button>
+        </div>
+      )}
+
+      {/* 历史版本 Dialog */}
+      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-4 w-4" />
+              视频历史版本
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 space-y-2">
+            {historyLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-[--text-muted]" />
+              </div>
+            ) : historyList.length === 0 ? (
+              <p className="py-6 text-center text-sm text-[--text-muted]">暂无历史版本</p>
+            ) : (
+              historyList.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center gap-3 rounded-lg border border-[--border-subtle] p-2.5"
+                >
+                  {/* 缩略图 */}
+                  <div className="h-14 w-24 flex-shrink-0 overflow-hidden rounded-md bg-black">
+                    <video
+                      src={uploadUrl(entry.videoUrl)}
+                      className="h-full w-full object-contain"
+                      muted
+                    />
+                  </div>
+                  {/* 信息 */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-[--text-primary] truncate">
+                      {entry.label ?? "视频"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] text-[--text-muted]">
+                      {new Date(entry.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      {entry.resolution && (
+                        <span className={`ml-1.5 rounded px-1 py-px font-bold ${entry.resolution === "720p" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
+                          {entry.resolution}
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  {/* 恢复按钮 */}
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => handleRevertHistory(entry.id)}
+                    disabled={revertingId === entry.id}
+                    className="flex-shrink-0"
+                  >
+                    {revertingId === entry.id
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <RotateCcw className="h-3 w-3" />
+                    }
+                    恢复
+                  </Button>
+                </div>
+              ))
+            )}
+            <p className="pt-1 text-center text-[10px] text-[--text-muted]">最多保留 5 个历史版本，超出时自动清理最旧的</p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

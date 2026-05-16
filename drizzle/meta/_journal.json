@@ -162,6 +162,13 @@
       "when": 1747440000000,
       "tag": "0022_ensure_users_table",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1747526400000,
+      "tag": "0023_add_shot_video_history",
+      "breakpoints": true
     }
   ]
 }

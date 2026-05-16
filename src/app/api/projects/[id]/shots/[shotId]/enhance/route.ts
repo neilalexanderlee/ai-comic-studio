@@ -13,6 +13,7 @@ import { shots, storyboardVersions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { VolcengineEnhanceProvider } from "@/lib/ai/providers/volcengine-enhance";
 import { getProviderSecret } from "@/lib/provider-secrets";
+import { saveVideoToHistory } from "@/lib/video/video-history";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import path from "path";
 
@@ -88,6 +89,9 @@ export async function POST(
     const enhancer = new VolcengineEnhanceProvider({ uploadDir, apiKey });
 
     const enhancedPath = await enhancer.enhanceVideo(shot.videoUrl);
+
+    // 把 480p 旧视频存入历史（超出 5 条时自动删除最旧文件）
+    await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "增强↑720p 前");
 
     await db
       .update(shots)

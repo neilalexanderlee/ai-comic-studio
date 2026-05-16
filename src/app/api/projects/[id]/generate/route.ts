@@ -28,6 +28,7 @@ import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-ge
 import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
 import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { assembleVideo } from "@/lib/video/ffmpeg";
+import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
 import { extractShotsFromScript } from "@/lib/storyboard/extract-shot-script";
 import {
@@ -1595,6 +1596,9 @@ async function handleSingleVideoGenerate(
       ...(resolution && { resolution }),
     });
 
+    // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
+    await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "重新生成前");
+
     await db
       .update(shots)
       .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null })
@@ -1709,6 +1713,9 @@ async function handleBatchVideoGenerate(
           ratio,
           ...(resolution && { resolution }),
         });
+
+        // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
+        await saveVideoToHistory(shot.id, shot.videoUrl, shot.videoResolution, "批量重新生成前");
 
         await db
           .update(shots)
