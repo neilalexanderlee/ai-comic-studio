@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
+import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions, shotVideoHistory } from "@/lib/db/schema";
 import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
@@ -208,9 +208,9 @@ export async function DELETE(
     }
   }
 
-  // Shot frames and videos
+  // Shot frames, videos, and history videos
   const projectShots = await db
-    .select({ firstFrame: shots.firstFrame, lastFrame: shots.lastFrame, sceneRefFrame: shots.sceneRefFrame, videoUrl: shots.videoUrl, referenceVideoUrl: shots.referenceVideoUrl })
+    .select({ id: shots.id, firstFrame: shots.firstFrame, lastFrame: shots.lastFrame, sceneRefFrame: shots.sceneRefFrame, videoUrl: shots.videoUrl, referenceVideoUrl: shots.referenceVideoUrl })
     .from(shots)
     .where(eq(shots.projectId, id));
 
@@ -220,6 +220,15 @@ export async function DELETE(
     tryDeleteFile(shot.sceneRefFrame);
     tryDeleteFile(shot.videoUrl);
     tryDeleteFile(shot.referenceVideoUrl);
+
+    // 清理历史视频文件（DB 记录因 CASCADE 自动删，但文件需要手动清理）
+    const historyEntries = await db
+      .select({ videoUrl: shotVideoHistory.videoUrl })
+      .from(shotVideoHistory)
+      .where(eq(shotVideoHistory.shotId, shot.id));
+    for (const entry of historyEntries) {
+      tryDeleteFile(entry.videoUrl);
+    }
   }
 
   // 2. Delete DB record — cascade handles all child tables

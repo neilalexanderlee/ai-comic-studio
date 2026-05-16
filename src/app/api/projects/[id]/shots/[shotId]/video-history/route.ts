@@ -59,11 +59,12 @@ export async function POST(
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
 
-  // 1. 把当前 videoUrl 存入历史（如果存在）
-  await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "回退前保存");
-
-  // 2. 从历史表中删除目标条目（它将成为当前版本）
+  // 1. 先从历史表摘出目标条目（必须在 saveVideoToHistory 之前！）
+  //    否则 trim 可能把目标文件当作最旧条目删掉
   await db.delete(shotVideoHistory).where(eq(shotVideoHistory.id, historyId));
+
+  // 2. 把当前 videoUrl 存入历史（trim 现在不会碰到目标文件）
+  await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "回退前保存");
 
   // 3. 写回 shot
   await db
