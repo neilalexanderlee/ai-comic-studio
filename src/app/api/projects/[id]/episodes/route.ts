@@ -4,10 +4,11 @@ import { projects, episodes, shots, characters, episodeCharacters, characterAsse
 import { eq, asc, and, max, isNotNull, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
-async function resolveProject(id: string, userId: string) {
-  await reclaimLocalProjectsForUser(userId);
+async function resolveProject(id: string, userId: string, isAuthenticated: boolean) {
+  if (!isAuthenticated) await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)
@@ -21,7 +22,7 @@ export async function GET(
 ) {
   const { id } = await params;
   const userId = getUserIdFromRequest(request);
-  const project = await resolveProject(id, userId);
+  const project = await resolveProject(id, userId, getAuthUserIdFromRequest(request) !== null);
 
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -97,7 +98,7 @@ export async function POST(
 ) {
   const { id } = await params;
   const userId = getUserIdFromRequest(request);
-  const project = await resolveProject(id, userId);
+  const project = await resolveProject(id, userId, getAuthUserIdFromRequest(request) !== null);
 
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

@@ -3,10 +3,11 @@ import { db } from "@/lib/db";
 import { projects, episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
-async function resolveProject(id: string, userId: string) {
-  await reclaimLocalProjectsForUser(userId);
+async function resolveProject(id: string, userId: string, isAuthenticated: boolean) {
+  if (!isAuthenticated) await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)
@@ -20,7 +21,7 @@ export async function PUT(
 ) {
   const { id } = await params;
   const userId = getUserIdFromRequest(request);
-  const project = await resolveProject(id, userId);
+  const project = await resolveProject(id, userId, getAuthUserIdFromRequest(request) !== null);
 
   if (!project) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

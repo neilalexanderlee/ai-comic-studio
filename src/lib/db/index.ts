@@ -70,6 +70,31 @@ function getSqliteHandle(): SqliteHandle {
 }
 
 /**
+ * 对指定表执行参数化 UPDATE，返回实际更新行数。
+ * 专为 migrate-data 等需要安全参数绑定的场景设计。
+ * 内部使用 better-sqlite3 prepared statement，避免 drizzle Proxy 层的类型歧义。
+ */
+export function runParameterizedUpdate(
+  table: string,
+  set: Record<string, string>,
+  where: Record<string, string>
+): number {
+  const sqlite = getSqliteHandle() as unknown as {
+    prepare: (sql: string) => { run: (...args: string[]) => { changes: number } };
+  };
+  const setClauses = Object.keys(set).map((k) => `"${k}" = ?`).join(", ");
+  const whereClauses = Object.keys(where).map((k) => `"${k}" = ?`).join(" AND ");
+  const params = [...Object.values(set), ...Object.values(where)];
+  try {
+    const stmt = sqlite.prepare(`UPDATE "${table}" SET ${setClauses} WHERE ${whereClauses}`);
+    const result = stmt.run(...params);
+    return result.changes;
+  } catch {
+    return -1; // 表不存在等错误，由调用方处理
+  }
+}
+
+/**
  * Idempotent migration runner — reads the drizzle journal and applies each
  * migration that hasn't been recorded in __drizzle_migrations yet.
  *

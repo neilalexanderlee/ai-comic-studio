@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import {
   getModelStorePrefs,
@@ -12,7 +13,9 @@ export async function GET(request: Request) {
   if (!userId) {
     return NextResponse.json(null);
   }
-  await reclaimLocalProjectsForUser(userId);
+  if (!getAuthUserIdFromRequest(request)) {
+    await reclaimLocalProjectsForUser(userId);
+  }
   const data = await getModelStorePrefs(userId);
   return NextResponse.json(data);
 }
@@ -28,7 +31,9 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  await reclaimLocalProjectsForUser(userId);
+  if (!getAuthUserIdFromRequest(request)) {
+    await reclaimLocalProjectsForUser(userId);
+  }
   await upsertModelStorePrefs(userId, body);
   return NextResponse.json({ ok: true });
 }

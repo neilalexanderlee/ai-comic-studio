@@ -3,43 +3,23 @@
  *
  * 注册新账号，注册成功后自动登录（设置 httpOnly cookie）。
  *
- * Body: { username, password, migrateFromUserId? }
- *   migrateFromUserId — 若传入，将该匿名 ID 下的所有数据迁移到新账号
+ * Body: { username, password }
+ *   注意：匿名数据迁移由客户端在注册成功后调用 /api/auth/migrate-data 完成，
+ *   不再由本路由直接处理（避免 SQL 注入风险）。
  *
  * Response: { ok: true, userId, username }
  */
 import { NextRequest, NextResponse } from "next/server";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { hashPassword, makeSetCookieHeader } from "@/lib/auth";
 
-/** 将旧匿名 userId 下的所有数据批量迁移到新 userId */
-async function migrateAnonymousData(oldId: string, newId: string) {
-  const tables = [
-    "projects",
-    "provider_secrets",
-    "prompt_templates",
-    "prompt_presets",
-    "user_client_prefs",
-  ];
-  for (const table of tables) {
-    try {
-      await db.run(
-        sql.raw(`UPDATE "${table}" SET user_id = '${newId}' WHERE user_id = '${oldId}'`)
-      );
-    } catch {
-      // 表可能不存在或字段名不同，静默跳过
-    }
-  }
-}
-
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
     username?: string;
     password?: string;
-    migrateFromUserId?: string;
   };
 
   const username = body.username?.trim();
@@ -73,12 +53,7 @@ export async function POST(req: NextRequest) {
     createdAt: new Date(),
   });
 
-  // 迁移旧匿名数据（如果提供了旧 ID）
-  const migrateFrom = body.migrateFromUserId?.trim();
-  if (migrateFrom && migrateFrom !== userId) {
-    await migrateAnonymousData(migrateFrom, userId);
-  }
-
+  // 匿名数据迁移由客户端调用 /api/auth/migrate-data 完成（带参数绑定，无注入风险）
   const res = NextResponse.json({ ok: true, userId, username });
   res.headers.set("Set-Cookie", makeSetCookieHeader(userId));
   return res;

@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import { getTranslations } from "next-intl/server";
 import { cookies } from "next/headers";
+import { parseCookieValue, AUTH_COOKIE } from "@/lib/auth";
 import { ProjectCard } from "@/components/project-card";
 import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { Clapperboard } from "lucide-react";
@@ -11,9 +12,19 @@ import { Clapperboard } from "lucide-react";
 export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
   const cookieStore = await cookies();
-  const userId = cookieStore.get("ai_comic_uid")?.value ?? "";
 
-  if (userId) {
+  // Prefer the signed auth cookie (logged-in users) over the anonymous fingerprint.
+  // ai_comic_auth is HttpOnly so it's invisible to JS, but readable here server-side.
+  const authRaw = cookieStore.get(AUTH_COOKIE)?.value;
+  const authUserId = authRaw ? parseCookieValue(authRaw) : null;
+  const anonUserId = cookieStore.get("ai_comic_uid")?.value ?? "";
+  const userId = authUserId ?? anonUserId;
+  const isAuthenticated = Boolean(authUserId);
+
+  // Reclaim is for anonymous users only — when logged in, migrate-data handles
+  // data migration at login time. Running reclaim for an auth user who just
+  // deleted their last project would incorrectly steal their provider_secrets.
+  if (userId && !isAuthenticated) {
     await reclaimLocalProjectsForUser(userId);
   }
 

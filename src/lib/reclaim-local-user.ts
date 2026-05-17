@@ -5,6 +5,7 @@ import {
   promptTemplates,
   providerSecrets,
   userClientPrefs,
+  users,
 } from "@/lib/db/schema";
 import { ensureProviderSecretsTable } from "@/lib/provider-secrets";
 import { ensureUserClientPrefsTable } from "@/lib/user-client-prefs";
@@ -54,7 +55,7 @@ async function currentUserHasClaims(userId: string): Promise<boolean> {
   return Number(ucc) > 0;
 }
 
-/** 各表中出现的非空 user_id 并集 */
+/** 各表中出现的非空 user_id 并集（排除认证账号 ID，防止 reclaim 误搬已登录用户的数据） */
 async function distinctLegacyOwners(): Promise<Set<string>> {
   await ensureProviderSecretsTable();
   await ensureUserClientPrefsTable();
@@ -74,6 +75,10 @@ async function distinctLegacyOwners(): Promise<Set<string>> {
 
   const uu = await db.selectDistinct({ userId: userClientPrefs.userId }).from(userClientPrefs);
   for (const r of uu) if (isNonEmptyUid(r.userId)) out.add(r.userId);
+
+  // 排除所有认证账号的 ID — reclaim 只能操作匿名数据
+  const authRows = await db.selectDistinct({ id: users.id }).from(users);
+  for (const r of authRows) out.delete(r.id);
 
   return out;
 }

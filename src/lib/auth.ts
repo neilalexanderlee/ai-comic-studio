@@ -16,7 +16,17 @@ export const AUTH_COOKIE = "ai_comic_auth";
 const COOKIE_MAX_AGE = 365 * 24 * 60 * 60; // 1 年
 
 function getSecret(): string {
-  return process.env.AUTH_SECRET ?? "ai-comic-builder-dev-secret-please-change";
+  const secret = process.env.AUTH_SECRET ?? "ai-comic-builder-dev-secret-please-change";
+  if (
+    process.env.NODE_ENV === "production" &&
+    secret === "ai-comic-builder-dev-secret-please-change"
+  ) {
+    throw new Error(
+      "[auth] AUTH_SECRET must be set in production. " +
+        "Using the default dev secret is a security risk."
+    );
+  }
+  return secret;
 }
 
 // ─── Cookie 签名 ──────────────────────────────────────────────────────────────

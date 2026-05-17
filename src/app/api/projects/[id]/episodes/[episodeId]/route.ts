@@ -12,14 +12,16 @@ import {
 } from "@/lib/db/schema";
 import { eq, asc, and, or, isNull, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 async function resolveProjectAndEpisode(
   projectId: string,
   episodeId: string,
-  userId: string
+  userId: string,
+  isAuthenticated: boolean
 ) {
-  await reclaimLocalProjectsForUser(userId);
+  if (!isAuthenticated) await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)
@@ -46,7 +48,8 @@ export async function GET(
   const { project, episode } = await resolveProjectAndEpisode(
     id,
     episodeId,
-    userId
+    userId,
+    getAuthUserIdFromRequest(request) !== null
   );
 
   if (!project || !episode) {
@@ -162,7 +165,8 @@ export async function PATCH(
   const { project, episode } = await resolveProjectAndEpisode(
     id,
     episodeId,
-    userId
+    userId,
+    getAuthUserIdFromRequest(request) !== null
   );
 
   if (!project || !episode) {
@@ -210,7 +214,8 @@ export async function DELETE(
   const { project, episode } = await resolveProjectAndEpisode(
     id,
     episodeId,
-    userId
+    userId,
+    getAuthUserIdFromRequest(request) !== null
   );
 
   if (!project || !episode) {
