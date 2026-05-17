@@ -46,11 +46,15 @@ export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams) &
   resolution?: string;
   /** Character/style reference images for consistency (e.g. Veo 3.1 referenceImages) */
   referenceImages?: string[];
+  /** Called as soon as a provider has a reusable remote result URL, before local download. */
+  onRemoteResult?: (result: { videoUrl: string; taskId?: string }) => Promise<void> | void;
 };
 
 export interface VideoGenerateResult {
   filePath: string;
   lastFrameUrl?: string;
+  remoteVideoUrl?: string;
+  remoteTaskId?: string;
 }
 
 export interface VideoProvider {

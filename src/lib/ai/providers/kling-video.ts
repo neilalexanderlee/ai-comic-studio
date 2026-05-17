@@ -1,8 +1,7 @@
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
 import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
-import { ulid } from "ulid";
+import { downloadVideoWithRetry } from "./download-with-retry";
 
 function generateKlingToken(accessKey: string, secretKey: string): string {
   const now = Math.floor(Date.now() / 1000);
@@ -192,18 +191,14 @@ export class KlingVideoProvider implements VideoProvider {
 
     const taskType = "firstFrame" in params ? "image2video" : "text2video";
     const videoUrl = await this.pollForResult(taskId, taskType);
+    await params.onRemoteResult?.({ videoUrl, taskId });
 
-    // Download video
-    const videoRes = await fetch(videoUrl);
-    const buffer = Buffer.from(await videoRes.arrayBuffer());
-    const filename = `${ulid()}.mp4`;
-    const dir = path.join(this.uploadDir, "videos");
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    fs.writeFileSync(filepath, buffer);
+    const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
+      logPrefix: "KlingVideoDownload",
+    });
 
     console.log(`[Kling Video] Saved to ${filepath}`);
-    return { filePath: filepath };
+    return { filePath: filepath, remoteVideoUrl: videoUrl, remoteTaskId: taskId };
   }
 
   private async pollForResult(

@@ -169,6 +169,20 @@
       "when": 1747526400000,
       "tag": "0023_add_shot_video_history",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1779000000000,
+      "tag": "0024_add_remote_video_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1779000001000,
+      "tag": "0025_add_remote_video_state",
+      "breakpoints": true
     }
   ]
 }

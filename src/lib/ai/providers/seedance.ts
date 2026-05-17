@@ -120,12 +120,13 @@ export class SeedanceProvider implements VideoProvider {
     console.log(`[Seedance] Task submitted: ${submitResult.id}`);
 
     const { videoUrl, lastFrameUrl } = await this.pollForResult(submitResult.id);
+    await params.onRemoteResult?.({ videoUrl, taskId: submitResult.id });
 
     const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
       logPrefix: "SeedanceDownload",
     });
 
-    return { filePath: filepath, lastFrameUrl };
+    return { filePath: filepath, lastFrameUrl, remoteVideoUrl: videoUrl, remoteTaskId: submitResult.id };
   }
 
   /** 首尾帧模式：提供第一帧和最后一帧图片 */

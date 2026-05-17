@@ -6,6 +6,8 @@ import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
+import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
 import { eq, asc } from "drizzle-orm";
 import type { Task } from "@/lib/task-queue";
 import { dialogues } from "@/lib/db/schema";
@@ -67,6 +69,35 @@ export async function handleVideoGenerate(task: Task) {
     .set({ status: "generating" })
     .where(eq(shots.id, payload.shotId));
 
+  if (!shot.videoUrl && isRemoteVideoReusable({
+    url: shot.remoteVideoUrl,
+    status: shot.remoteVideoStatus,
+    expiresAt: shot.remoteVideoExpiresAt,
+  })) {
+    try {
+      const resumedVideoPath = await downloadVideoWithRetry(shot.remoteVideoUrl!, versionedUploadDir, {
+        logPrefix: "PipelineRemoteVideoDownload",
+      });
+      await db
+        .update(shots)
+        .set({
+          videoUrl: resumedVideoPath,
+          status: "completed",
+          remoteVideoStatus: "downloaded",
+          remoteVideoLastDownloadAt: new Date(),
+        })
+        .where(eq(shots.id, payload.shotId));
+      return { videoPath: resumedVideoPath, resumedFromRemoteUrl: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`[PipelineRemoteVideoDownload] Re-download failed, generating a new video instead: ${message}`);
+      await db
+        .update(shots)
+        .set({ remoteVideoStatus: "download_failed", remoteVideoLastDownloadAt: new Date() })
+        .where(eq(shots.id, payload.shotId));
+    }
+  }
+
   // Fetch dialogues for this shot to include in video prompt (lip sync / voiceover cues)
   const shotDialogues = await db
     .select({
@@ -105,6 +136,18 @@ export async function handleVideoGenerate(task: Task) {
     duration: effectiveDuration,
     ratio: payload.ratio ?? "16:9",
     ...(payload.resolution && { resolution: payload.resolution }),
+    onRemoteResult: async ({ videoUrl, taskId }) => {
+      await db
+        .update(shots)
+        .set({
+          remoteVideoUrl: videoUrl,
+          remoteVideoTaskId: taskId ?? null,
+          remoteVideoStatus: "available",
+          remoteVideoCreatedAt: new Date(),
+          remoteVideoExpiresAt: getRemoteVideoExpiry(),
+        })
+        .where(eq(shots.id, payload.shotId));
+    },
   });
 
   await db

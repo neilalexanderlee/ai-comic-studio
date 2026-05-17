@@ -1008,6 +1008,10 @@ export default function EpisodeStoryboardPage() {
               sceneRefFrame={shot.sceneRefFrame}
               videoPrompt={shot.videoPrompt}
               videoUrl={generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl}
+              remoteVideoUrl={generationMode === "reference" ? shot.remoteReferenceVideoUrl : shot.remoteVideoUrl}
+              remoteVideoStatus={generationMode === "reference" ? shot.remoteReferenceVideoStatus : shot.remoteVideoStatus}
+              remoteVideoExpiresAt={generationMode === "reference" ? shot.remoteReferenceVideoExpiresAt : shot.remoteVideoExpiresAt}
+              remoteVideoLastDownloadAt={generationMode === "reference" ? shot.remoteReferenceVideoLastDownloadAt : shot.remoteVideoLastDownloadAt}
               status={
                 generationMode === "reference"
                   ? shot.status === "generating"

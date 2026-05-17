@@ -155,13 +155,14 @@ export class JimengVideoProvider implements VideoProvider {
     console.log(`[JimengVideo] Task submitted: ${taskId}`);
 
     const videoUrl = await this.pollForResult(taskId, reqKey);
+    await params.onRemoteResult?.({ videoUrl, taskId });
 
     const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
       logPrefix: "JimengVideoDownload",
     });
 
     console.log(`[JimengVideo] Saved to ${filepath}`);
-    return { filePath: filepath };
+    return { filePath: filepath, remoteVideoUrl: videoUrl, remoteTaskId: taskId };
   }
 
   private async submitTask(body: Record<string, unknown>): Promise<string> {
@@ -195,34 +196,36 @@ export class JimengVideoProvider implements VideoProvider {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
 
+      let response: Awaited<ReturnType<typeof this.pollApi>>;
       try {
-        const response = await this.pollApi(body);
-
-        if (response.ResponseMetadata?.Error) {
-          throw new Error(
-            `Jimeng Video poll error: ${response.ResponseMetadata.Error.Message}`
-          );
-        }
-
-        const status = response.data?.status as string | undefined;
-        console.log(`[JimengVideo] Poll ${i + 1}: status=${status}`);
-
-        if (status === "done" || status === "success") {
-          const videoUrls = response.data?.video_urls as string[] | undefined;
-          if (!videoUrls || videoUrls.length === 0) {
-            throw new Error("Jimeng Video: no video_urls in result");
-          }
-          return videoUrls[0];
-        }
-
-        if (status === "failed") {
-          throw new Error(
-            `Jimeng Video generation failed: ${(response.data?.status_msg as string) || "unknown"}`
-          );
-        }
+        response = await this.pollApi(body);
       } catch (error: unknown) {
         const msg = error instanceof Error ? error.message : String(error);
         console.warn(`[JimengVideo] Poll attempt ${i + 1} failed: ${msg}`);
+        continue;
+      }
+
+      if (response.ResponseMetadata?.Error) {
+        const msg = response.ResponseMetadata.Error.Message;
+        console.warn(`[JimengVideo] Poll attempt ${i + 1} failed: ${msg}`);
+        continue;
+      }
+
+      const status = response.data?.status as string | undefined;
+      console.log(`[JimengVideo] Poll ${i + 1}: status=${status}`);
+
+      if (status === "done" || status === "success") {
+        const videoUrls = response.data?.video_urls as string[] | undefined;
+        if (!videoUrls || videoUrls.length === 0) {
+          throw new Error("Jimeng Video: no video_urls in result");
+        }
+        return videoUrls[0];
+      }
+
+      if (status === "failed") {
+        throw new Error(
+          `Jimeng Video generation failed: ${(response.data?.status_msg as string) || "unknown"}`
+        );
       }
     }
 

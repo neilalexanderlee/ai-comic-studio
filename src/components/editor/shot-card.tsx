@@ -61,6 +61,10 @@ interface ShotCardProps {
   firstFrame: string | null;
   lastFrame: string | null;
   videoUrl: string | null;
+  remoteVideoUrl?: string | null;
+  remoteVideoStatus?: string | null;
+  remoteVideoExpiresAt?: string | Date | null;
+  remoteVideoLastDownloadAt?: string | Date | null;
   sceneRefFrame?: string | null;
   videoPrompt?: string | null;
   status: string;
@@ -152,6 +156,10 @@ export function ShotCard({
   firstFrame,
   lastFrame,
   videoUrl,
+  remoteVideoUrl,
+  remoteVideoStatus,
+  remoteVideoExpiresAt,
+  remoteVideoLastDownloadAt,
   sceneRefFrame,
   videoPrompt,
   status,
@@ -243,6 +251,18 @@ export function ShotCard({
   const hasFramePair = !!(firstFrame && lastFrame);
   const hasVideoPrompt = !!videoPrompt;
   const hasVideo = !!videoUrl;
+  const remoteExpiresAtMs = remoteVideoExpiresAt ? new Date(remoteVideoExpiresAt).getTime() : null;
+  const hasRecoverableRemoteVideo =
+    !!remoteVideoUrl &&
+    remoteVideoStatus !== "expired" &&
+    (!remoteExpiresAtMs || remoteExpiresAtMs > Date.now()) &&
+    !hasVideo;
+  const remoteExpiryLabel = remoteExpiresAtMs
+    ? new Date(remoteExpiresAtMs).toLocaleString()
+    : "未知";
+  const remoteLastAttemptLabel = remoteVideoLastDownloadAt
+    ? new Date(remoteVideoLastDownloadAt).toLocaleString()
+    : null;
   const isGenerating = status === "generating";
 
   // Step states
@@ -951,6 +971,19 @@ export function ShotCard({
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
+            {hasRecoverableRemoteVideo && (
+              <div
+                className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-medium text-sky-700"
+                title={
+                  remoteVideoStatus === "download_failed"
+                    ? `远程结果仍在，可优先重新下载；最近尝试：${remoteLastAttemptLabel ?? "暂无"}；预计有效至：${remoteExpiryLabel}`
+                    : `已有远程结果，生成时会优先恢复下载；预计有效至：${remoteExpiryLabel}`
+                }
+              >
+                <RotateCcw className="h-3 w-3" />
+                {remoteVideoStatus === "download_failed" ? "可重下远程结果" : "可恢复远程结果"}
+              </div>
+            )}
             <Button
               size="xs"
               variant={nextStep === "video" ? "default" : "outline"}

@@ -37,6 +37,8 @@ import {
   type PersistableShot,
 } from "@/lib/storyboard/persist-storyboard-version";
 import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted-shots";
+import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
+import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
 
 export const maxDuration = 300;
 
@@ -95,6 +97,59 @@ async function getVersionedUploadDir(versionId: string | null | undefined): Prom
     .where(eq(storyboardVersions.id, versionId));
   if (!version) return process.env.UPLOAD_DIR || "./uploads";
   return path.join(process.env.UPLOAD_DIR || "./uploads", "projects", version.projectId, version.label);
+}
+
+async function resumeRemoteVideoIfAvailable(params: {
+  shotId: string;
+  remoteUrl: string | null | undefined;
+  remoteStatus: string | null | undefined;
+  remoteExpiresAt: Date | null | undefined;
+  uploadDir: string;
+  mode: "keyframe" | "reference";
+}): Promise<string | null> {
+  if (!isRemoteVideoReusable({
+    url: params.remoteUrl,
+    status: params.remoteStatus,
+    expiresAt: params.remoteExpiresAt,
+  })) {
+    if (params.remoteUrl && params.remoteExpiresAt && params.remoteExpiresAt <= new Date()) {
+      await db
+        .update(shots)
+        .set(
+          params.mode === "keyframe"
+            ? { remoteVideoStatus: "expired" }
+            : { remoteReferenceVideoStatus: "expired" }
+        )
+        .where(eq(shots.id, params.shotId));
+    }
+    return null;
+  }
+  try {
+    const filePath = await downloadVideoWithRetry(params.remoteUrl!, params.uploadDir, {
+      logPrefix: params.mode === "keyframe" ? "RemoteVideoDownload" : "RemoteReferenceVideoDownload",
+    });
+    await db
+      .update(shots)
+      .set(
+        params.mode === "keyframe"
+          ? { videoUrl: filePath, status: "completed", remoteVideoStatus: "downloaded", remoteVideoLastDownloadAt: new Date() }
+          : { referenceVideoUrl: filePath, status: "completed", remoteReferenceVideoStatus: "downloaded", remoteReferenceVideoLastDownloadAt: new Date() }
+      )
+      .where(eq(shots.id, params.shotId));
+    return filePath;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[RemoteVideoResume] Re-download failed, generating a new video instead: ${message}`);
+    await db
+      .update(shots)
+      .set(
+        params.mode === "keyframe"
+          ? { remoteVideoStatus: "download_failed", remoteVideoLastDownloadAt: new Date() }
+          : { remoteReferenceVideoStatus: "download_failed", remoteReferenceVideoLastDownloadAt: new Date() }
+      )
+      .where(eq(shots.id, params.shotId));
+    return null;
+  }
 }
 
 function extractErrorMessage(err: unknown): string {
@@ -1550,6 +1605,20 @@ async function handleSingleVideoGenerate(
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
+    if (!shot.videoUrl && shot.remoteVideoUrl) {
+      const resumedPath = await resumeRemoteVideoIfAvailable({
+        shotId,
+        remoteUrl: shot.remoteVideoUrl,
+        remoteStatus: shot.remoteVideoStatus,
+        remoteExpiresAt: shot.remoteVideoExpiresAt,
+        uploadDir: versionedUploadDir,
+        mode: "keyframe",
+      });
+      if (resumedPath) {
+        return NextResponse.json({ shotId, videoUrl: resumedPath, status: "ok", resumedFromRemoteUrl: true });
+      }
+    }
+
     const ratio = (payload?.ratio as string) || "16:9";
 
     const videoModelId = modelConfig?.video?.modelId;
@@ -1594,6 +1663,18 @@ async function handleSingleVideoGenerate(
       duration: effectiveDuration,
       ratio,
       ...(resolution && { resolution }),
+      onRemoteResult: async ({ videoUrl, taskId }) => {
+        await db
+          .update(shots)
+          .set({
+            remoteVideoUrl: videoUrl,
+            remoteVideoTaskId: taskId ?? null,
+            remoteVideoStatus: "available",
+            remoteVideoCreatedAt: new Date(),
+            remoteVideoExpiresAt: getRemoteVideoExpiry(),
+          })
+          .where(eq(shots.id, shotId));
+      },
     });
 
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
@@ -1669,6 +1750,19 @@ async function handleBatchVideoGenerate(
     eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; videoUrl?: string; error?: string }> => {
       try {
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
+        if (!shot.videoUrl && shot.remoteVideoUrl) {
+          const resumedPath = await resumeRemoteVideoIfAvailable({
+            shotId: shot.id,
+            remoteUrl: shot.remoteVideoUrl,
+            remoteStatus: shot.remoteVideoStatus,
+            remoteExpiresAt: shot.remoteVideoExpiresAt,
+            uploadDir: versionedUploadDir,
+            mode: "keyframe",
+          });
+          if (resumedPath) {
+            return { shotId: shot.id, sequence: shot.sequence, status: "ok", videoUrl: resumedPath };
+          }
+        }
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
           .from(dialogues)
@@ -1712,6 +1806,18 @@ async function handleBatchVideoGenerate(
           duration: effectiveDuration,
           ratio,
           ...(resolution && { resolution }),
+          onRemoteResult: async ({ videoUrl, taskId }) => {
+            await db
+              .update(shots)
+              .set({
+                remoteVideoUrl: videoUrl,
+                remoteVideoTaskId: taskId ?? null,
+                remoteVideoStatus: "available",
+                remoteVideoCreatedAt: new Date(),
+                remoteVideoExpiresAt: getRemoteVideoExpiry(),
+              })
+              .where(eq(shots.id, shot.id));
+          },
         });
 
         // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
@@ -2009,6 +2115,20 @@ async function handleSingleReferenceVideo(
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
+    if (!shot.referenceVideoUrl && shot.remoteReferenceVideoUrl) {
+      const resumedPath = await resumeRemoteVideoIfAvailable({
+        shotId,
+        remoteUrl: shot.remoteReferenceVideoUrl,
+        remoteStatus: shot.remoteReferenceVideoStatus,
+        remoteExpiresAt: shot.remoteReferenceVideoExpiresAt,
+        uploadDir: versionedUploadDir,
+        mode: "reference",
+      });
+      if (resumedPath) {
+        return NextResponse.json({ shotId, referenceVideoUrl: resumedPath, status: "ok", resumedFromRemoteUrl: true });
+      }
+    }
+
     // Step 1: Reuse existing scene ref frame, or generate a new one (Toonflow-style)
     let sceneFramePath = shot.sceneRefFrame ?? null;
     if (!sceneFramePath) {
@@ -2084,6 +2204,18 @@ async function handleSingleReferenceVideo(
       duration: effectiveDuration,
       ratio,
       referenceImages: charRefs.map((c) => c.imagePath),
+      onRemoteResult: async ({ videoUrl, taskId }) => {
+        await db
+          .update(shots)
+          .set({
+            remoteReferenceVideoUrl: videoUrl,
+            remoteReferenceVideoTaskId: taskId ?? null,
+            remoteReferenceVideoStatus: "available",
+            remoteReferenceVideoCreatedAt: new Date(),
+            remoteReferenceVideoExpiresAt: getRemoteVideoExpiry(),
+          })
+          .where(eq(shots.id, shotId));
+      },
     });
 
     await db
@@ -2168,6 +2300,19 @@ async function handleBatchReferenceVideo(
     eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; referenceVideoUrl?: string; error?: string }> => {
       try {
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
+        if (!shot.referenceVideoUrl && shot.remoteReferenceVideoUrl) {
+          const resumedPath = await resumeRemoteVideoIfAvailable({
+            shotId: shot.id,
+            remoteUrl: shot.remoteReferenceVideoUrl,
+            remoteStatus: shot.remoteReferenceVideoStatus,
+            remoteExpiresAt: shot.remoteReferenceVideoExpiresAt,
+            uploadDir: versionedUploadDir,
+            mode: "reference",
+          });
+          if (resumedPath) {
+            return { shotId: shot.id, sequence: shot.sequence, status: "ok", referenceVideoUrl: resumedPath };
+          }
+        }
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
           .from(dialogues)
@@ -2264,6 +2409,18 @@ async function handleBatchReferenceVideo(
           duration: effectiveDuration,
           ratio,
           referenceImages: charRefs.map((c) => c.imagePath),
+          onRemoteResult: async ({ videoUrl, taskId }) => {
+            await db
+              .update(shots)
+              .set({
+                remoteReferenceVideoUrl: videoUrl,
+                remoteReferenceVideoTaskId: taskId ?? null,
+                remoteReferenceVideoStatus: "available",
+                remoteReferenceVideoCreatedAt: new Date(),
+                remoteReferenceVideoExpiresAt: getRemoteVideoExpiry(),
+              })
+              .where(eq(shots.id, shot.id));
+          },
         });
 
         await db

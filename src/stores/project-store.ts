@@ -39,6 +39,14 @@ interface Shot {
   lastFrame: string | null;
   videoUrl: string | null;
   referenceVideoUrl: string | null;
+  remoteVideoUrl: string | null;
+  remoteVideoStatus: string | null;
+  remoteVideoExpiresAt: string | null;
+  remoteVideoLastDownloadAt: string | null;
+  remoteReferenceVideoUrl: string | null;
+  remoteReferenceVideoStatus: string | null;
+  remoteReferenceVideoExpiresAt: string | null;
+  remoteReferenceVideoLastDownloadAt: string | null;
   lastFrameUrl: string | null;
   sceneRefFrame: string | null;
   videoPrompt: string | null;
