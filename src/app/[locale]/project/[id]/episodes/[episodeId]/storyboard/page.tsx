@@ -36,6 +36,7 @@ import { ShotKanban } from "@/components/editor/shot-kanban";
 import { PromptEditButton } from "@/components/prompt-templates/prompt-edit-button";
 import { NewVersionDialog } from "@/components/editor/new-version-dialog";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import {
   Dialog,
   DialogContent,
@@ -91,6 +92,7 @@ export default function EpisodeStoryboardPage() {
   const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
+  const [resplitConfirmOpen, setResplitConfirmOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
@@ -103,6 +105,9 @@ export default function EpisodeStoryboardPage() {
   } | null>(null);
 
   const currentEpisodeId = useProjectStore((s) => s.currentEpisodeId);
+  // Also read episodeId directly from the URL — the store value may be null on first render
+  const urlParams = useParams();
+  const urlEpisodeId = urlParams?.episodeId as string | undefined;
   const episodeStoreEpisodes = useEpisodeStore((s) => s.episodes);
   const fetchEpisodes = useEpisodeStore((s) => s.fetchEpisodes);
 
@@ -124,11 +129,13 @@ export default function EpisodeStoryboardPage() {
   }
 
   async function handleDeleteVersion(versionId: string) {
-    if (!project || !currentEpisodeId) return;
+    // Prefer URL episodeId (always available) over Zustand store value (may be null on first render)
+    const episodeId = urlEpisodeId || currentEpisodeId;
+    if (!project || !episodeId) return;
     setDeletingVersion(true);
     try {
       await apiFetch(
-        `/api/projects/${project.id}/episodes/${currentEpisodeId}/versions/${versionId}`,
+        `/api/projects/${project.id}/episodes/${episodeId}/versions/${versionId}`,
         { method: "DELETE" }
       );
       // Switch to another version before refreshing
@@ -137,7 +144,7 @@ export default function EpisodeStoryboardPage() {
       setSelectedVersionId(nextId);
       setVersions(remaining);
       setDeleteVersionId(null);
-      await fetchProject(project.id, currentEpisodeId, nextId ?? undefined);
+      await fetchProject(project.id, episodeId, nextId ?? undefined);
       toast.success("版本已删除");
     } catch {
       toast.error("删除失败，请重试");
@@ -501,7 +508,10 @@ export default function EpisodeStoryboardPage() {
                 status?: string;
               };
               if (event.status === "error") hasError = true;
-              if (event.shotId && (event.status === "ok" || event.status === "skipped")) {
+              // frame_ok: 帧生成完成，立即刷新页面展示首尾帧
+              // ok: 整个分镜（帧+视频）完成
+              // skipped: 已跳过
+              if (event.shotId && (event.status === "ok" || event.status === "frame_ok" || event.status === "skipped")) {
                 fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
               }
               if (event.type === "done") break;
@@ -822,7 +832,16 @@ export default function EpisodeStoryboardPage() {
               {t("project.previewExtract")}
             </Button>
             <Button
-              onClick={() => handleGenerateShotsWithMode(true)}
+              onClick={() => {
+                const hasGeneratedContent = project?.shots?.some(
+                  (s) => s.firstFrame || s.videoUrl
+                );
+                if (hasGeneratedContent) {
+                  setResplitConfirmOpen(true);
+                } else {
+                  handleGenerateShotsWithMode(true);
+                }
+              }}
               disabled={anyGenerating}
               variant="ghost"
               size="sm"
@@ -1095,7 +1114,7 @@ export default function EpisodeStoryboardPage() {
         />
       ) : (
         <div className="space-y-3">
-          {project.shots.map((shot) => (
+          {project.shots.map((shot, index) => (
             <ShotCard
               key={shot.id}
               id={shot.id}
@@ -1138,6 +1157,7 @@ export default function EpisodeStoryboardPage() {
               batchGeneratingFrames={generationMode === "reference" ? generatingSceneFrames : generatingFrames}
               batchGeneratingVideoPrompts={generatingVideoPrompts}
               batchGeneratingVideos={generatingVideos}
+              prevSeedanceLastFrame={index > 0 ? project.shots[index - 1]?.seedanceLastFrame : null}
             />
           ))}
         </div>
@@ -1201,6 +1221,45 @@ export default function EpisodeStoryboardPage() {
               >
                 {deletingVersion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                 {deletingVersion ? "删除中..." : "确认删除"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* AI重拆分镜确认弹窗 */}
+      <Dialog open={resplitConfirmOpen} onOpenChange={(open) => { if (!open) setResplitConfirmOpen(false); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RefreshCw className="h-4 w-4 text-primary" />
+              AI 重拆分镜
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            {/* 关键提示：结构化剧本应该用"生成分镜"而不是"AI重拆分镜" */}
+            <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2.5 space-y-1.5">
+              <p className="text-xs font-semibold text-blue-800">💡 剧本已包含分镜结构？</p>
+              <p className="text-xs text-blue-700">
+                如果你的剧本里已经写好了时间码（如 <code className="bg-blue-100 px-1 rounded">0:00-0:11|场景标题</code>）、首帧、尾帧、videoScript 等字段，请点击<strong>取消</strong>，然后用顶部的「<Sparkles className="inline h-3 w-3" /> 生成分镜」按钮——它会直接读取你剧本里写好的内容，不需要 AI 重新分。
+              </p>
+            </div>
+            <p className="text-sm text-[--text-secondary]">
+              AI 重拆分镜会让 AI <strong>从零</strong>重新解析剧本，创建一个<strong>新版本</strong>。当前已生成的帧和视频不会丢失，可在顶部版本标签切回查看。
+            </p>
+            <p className="text-xs text-amber-700 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+              新版本需要重新生成帧和视频。如果只想调整个别分镜的提示词，建议直接在卡片里手动编辑。
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setResplitConfirmOpen(false)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => { setResplitConfirmOpen(false); handleGenerateShotsWithMode(true); }}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                确认用 AI 重拆分
               </Button>
             </div>
           </div>

@@ -142,7 +142,12 @@ export async function handleVideoGenerate(task: Task) {
     startFrameDesc: shot.startFrameDesc ?? undefined,
     endFrameDesc: shot.endFrameDesc ?? undefined,
     duration: effectiveDuration,
-    characters: projectCharacters,
+    // 传入 description 以保留角色服装信息，防止视频模型自行发挥服装
+    characters: projectCharacters.map((c) => ({
+      name: c.name,
+      visualHint: c.visualHint,
+      description: c.description,
+    })),
     slotContents: videoSlots,
     dialogues: shotDialogues.length > 0
       ? shotDialogues.map((d) => ({

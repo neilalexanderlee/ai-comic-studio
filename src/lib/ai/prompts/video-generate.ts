@@ -1,11 +1,46 @@
 import { getPromptDefinition } from "./registry";
 
-type CharacterRef = { name: string; visualHint?: string | null };
+export type CharacterRef = { name: string; visualHint?: string | null; description?: string | null };
 
-function buildCharacterLine(characters?: CharacterRef[]): string | null {
-  const withHints = (characters ?? []).filter((c) => c.visualHint);
-  if (!withHints.length) return null;
-  return withHints.map((c) => `${c.name}（${c.visualHint}）`).join("，");
+/**
+ * 从 Seedream 角色描述中提取适用于 Seedance 视频提示词的外貌/服装信息。
+ * Seedream 描述格式：「日本现代2D动漫风格...——【体态】...【面部】...【服装】...」
+ * 视频提示词只需要【体态】【服装】的关键信息，去掉画风前缀。
+ */
+function extractAppearanceForVideo(description: string): string {
+  if (!description) return "";
+  // 找到第一个【】标记，去掉 Seedream 画风前缀
+  const firstMarker = description.indexOf("【");
+  const content = firstMarker > 0 ? description.slice(firstMarker) : description;
+  // 截取合理长度，避免视频提示词过长
+  return content.slice(0, 200).trimEnd();
+}
+
+function buildCharacterSection(characters?: CharacterRef[]): string[] {
+  const valid = (characters ?? []).filter((c) => c.name && (c.visualHint || c.description));
+  if (!valid.length) return [];
+
+  if (valid.length === 1) {
+    const c = valid[0];
+    const hint = c.visualHint ? `（${c.visualHint}）` : "";
+    const appearance = c.description ? extractAppearanceForVideo(c.description) : "";
+    if (appearance) return [`角色形象：${c.name}${hint}：${appearance}`, ``];
+    return [`角色形象：${c.name}${hint}`, ``];
+  }
+
+  // 多角色：换行列表格式，方便 Seedance 区分
+  const lines = [`角色形象：`];
+  for (const c of valid) {
+    const hint = c.visualHint ? `（${c.visualHint}）` : "";
+    const appearance = c.description ? extractAppearanceForVideo(c.description) : "";
+    if (appearance) {
+      lines.push(`- ${c.name}${hint}：${appearance}`);
+    } else {
+      lines.push(`- ${c.name}${hint}`);
+    }
+  }
+  lines.push(``);
+  return lines;
 }
 
 /**
@@ -53,6 +88,8 @@ export function buildReferenceVideoPrompt(params: {
   characters?: CharacterRef[];
   dialogues?: DialogueEntry[];
   slotContents?: Record<string, string>;
+  /** 项目画风标签，用于注入画风锁定前缀（如 "日本现代2D动漫风格，8K高清，赛璐珞渲染——"）*/
+  visualStyleTag?: string;
 }): string {
   const lines: string[] = [];
 
@@ -61,11 +98,13 @@ export function buildReferenceVideoPrompt(params: {
     lines.push(``);
   }
 
-  const charLine = buildCharacterLine(params.characters);
-  if (charLine) {
-    lines.push(`角色形象：${charLine}。`);
+  // 画风硬锁前缀
+  if (params.visualStyleTag) {
+    lines.push(`【画风硬锁】${params.visualStyleTag}严禁写实风格。严禁3D CG风格。`);
     lines.push(``);
   }
+
+  lines.push(...buildCharacterSection(params.characters));
 
   lines.push(params.videoScript);
 
@@ -86,6 +125,7 @@ export function buildReferenceVideoPrompt(params: {
     const offScreenLabel = extractLabel(dialogueFormatText, "画外旁白", "【画外音】");
 
     lines.push(``);
+    lines.push(`NOTE: The following are the ONLY lines of speech. Do not repeat or infer additional dialogue from the scene description above.`);
     for (const d of params.dialogues) {
       if (d.offscreen) {
         // 画外音：可附加声音属性
@@ -114,6 +154,8 @@ export function buildVideoPrompt(params: {
   characters?: CharacterRef[];
   dialogues?: DialogueEntry[];
   slotContents?: Record<string, string>;
+  /** 项目画风标签，用于注入画风锁定前缀（如 "日本现代2D动漫风格，8K高清，赛璐珞渲染——"）*/
+  visualStyleTag?: string;
 }): string {
   const lines: string[] = [];
 
@@ -122,11 +164,13 @@ export function buildVideoPrompt(params: {
     lines.push(``);
   }
 
-  const charLine = buildCharacterLine(params.characters);
-  if (charLine) {
-    lines.push(`角色形象：${charLine}。`);
+  // 画风硬锁前缀（注入为最高优先级约束，防止视频模型漂移到写实风格）
+  if (params.visualStyleTag) {
+    lines.push(`【画风硬锁】${params.visualStyleTag}严禁写实风格。严禁3D CG风格。`);
     lines.push(``);
   }
+
+  lines.push(...buildCharacterSection(params.characters));
 
   // Interpolation header from slot or registry default
   const interpolationHeader = resolveSlot(
@@ -177,7 +221,10 @@ export function buildVideoPrompt(params: {
     const onScreenLabel = extractLabel(dialogueFormatText, "画内对白", "【对白口型】");
     const offScreenLabel = extractLabel(dialogueFormatText, "画外旁白", "【画外音】");
 
+    // Add a disambiguation note so the model doesn't double-voice dialogue that
+    // may also appear as prose in the videoScript above.
     lines.push(``);
+    lines.push(`NOTE: The following are the ONLY lines of speech. Do not repeat or infer additional dialogue from the scene description above.`);
     for (const d of params.dialogues) {
       if (d.offscreen) {
         const voiceSuffix = d.voiceHint ? `（${d.voiceHint}）` : "";

@@ -58,9 +58,24 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
 }
 
 /**
- * Filter characters to only those whose name appears in the shot's text fields.
+ * 提取角色名的「基础名」：去掉括号及其内容。
+ * 例如："龙渊（10岁）" → "龙渊"，"灵瑶（8岁）" → "灵瑶"
+ * 用于双向模糊匹配：脚本里写"龙渊"能匹配到"龙渊（10岁）"的角色资产。
+ */
+function extractBaseName(name: string): string {
+  // 去掉中文括号/英文括号及其内容
+  return name.replace(/[（(][^）)]*[）)]/g, "").trim();
+}
+
+/**
+ * Filter characters to only those whose name (or base name) appears in the shot's text fields.
  * Prevents passing irrelevant character reference images to the image model.
- * Falls back to all characters if none match (e.g., scene with no named characters).
+ * Falls back to empty array if none match (e.g., scene with no named characters).
+ *
+ * Matching rules (any one passes):
+ *   1. Full name in text: text contains "龙渊（10岁）"
+ *   2. Base name in text: text contains "龙渊" (matches both adult and child variants)
+ *   3. Text name in full name: character name starts with a token found in text
  */
 function filterShotCharacters<T extends { name: string }>(
   shotText: string,
@@ -68,9 +83,16 @@ function filterShotCharacters<T extends { name: string }>(
 ): T[] {
   if (!shotText || allCharacters.length === 0) return allCharacters;
   const text = shotText.toLowerCase();
-  const matched = allCharacters.filter((c) =>
-    c.name && text.includes(c.name.toLowerCase())
-  );
+  const matched = allCharacters.filter((c) => {
+    if (!c.name) return false;
+    const fullName = c.name.toLowerCase();
+    const baseName = extractBaseName(c.name).toLowerCase();
+    // Full name match
+    if (text.includes(fullName)) return true;
+    // Base name match (e.g. "龙渊" matches "龙渊（10岁）")
+    if (baseName && text.includes(baseName)) return true;
+    return false;
+  });
   // If no character names found in text, return empty array (no char refs needed)
   return matched;
 }
@@ -744,12 +766,14 @@ async function handleShotSplitStream(
   options?: { forceAi?: boolean }
 ) {
   let script: string | null = null;
+  let targetDurationSeconds: number | null = null;
   if (episodeId) {
     const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
     if (!episode) {
       return NextResponse.json({ error: "Episode not found" }, { status: 404 });
     }
     script = episode.script ?? null;
+    targetDurationSeconds = episode.targetDurationSeconds ?? null;
   } else {
     const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
     if (!project) {
@@ -846,11 +870,31 @@ async function handleShotSplitStream(
     });
   }
 
+  // Pre-compute scene count per chunk for proportional duration distribution
+  const chunkSceneCounts = sceneChunks.map(
+    (chunk) => chunk.split("\n").filter((l) => sceneRe.test(l.trim())).length
+  );
+  const totalSceneCount = chunkSceneCounts.reduce((s, n) => s + n, 0);
+  if (targetDurationSeconds) {
+    console.log(`[ShotSplit] Target duration: ${targetDurationSeconds}s across ${sceneChunks.length} chunk(s), totalScenes=${totalSceneCount}`);
+  }
+
   // Process chunks concurrently
   let lastError: string | null = null;
   const chunkResults = await Promise.all(
     sceneChunks.map(async (chunk, idx) => {
-      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints);
+      // Distribute the episode target duration proportionally by scene count
+      let chunkTargetDuration: number | null = null;
+      if (targetDurationSeconds && totalSceneCount > 0) {
+        const chunkSceneCount = chunkSceneCounts[idx] ?? 0;
+        // Give each chunk a proportional share; if no scene markers, split evenly
+        const ratio = chunkSceneCount > 0
+          ? chunkSceneCount / totalSceneCount
+          : 1 / sceneChunks.length;
+        chunkTargetDuration = Math.round(targetDurationSeconds * ratio);
+        console.log(`[ShotSplit] Chunk ${idx + 1}: ${chunkSceneCount} scenes → targetDuration=${chunkTargetDuration}s`);
+      }
+      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration);
       try {
         const result = await generateText({
           model,
@@ -1474,13 +1518,22 @@ async function handleSingleFrameGenerate(
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
 
-  const characterDescriptions = projectCharacters
+  // Filter to only the characters mentioned in this shot's text —
+  // avoids injecting every episode character's reference image into unrelated frames.
+  const shotText = [shot.prompt, shot.startFrameDesc, shot.motionScript, shot.videoScript]
+    .filter(Boolean)
+    .join(" ");
+  const shotCharacters = filterShotCharacters(shotText, projectCharacters);
+  // Fall back to all episode characters only if none matched (e.g. pure action shot with no names)
+  const charsForFrame = shotCharacters.length > 0 ? shotCharacters : projectCharacters;
+
+  const characterDescriptions = charsForFrame
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
   const resolvedChars = await resolveCharacterImages(
     shot.prompt || "",
-    projectCharacters,
+    charsForFrame,
     modelConfig?.text,
     userId,
     projectId
@@ -1537,9 +1590,86 @@ async function handleSingleFrameGenerate(
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
+  // Fetch project visualStyle for art-style lock (same as batch/chain generation)
+  const [singleProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const singleVisualStyleTag = (() => {
+    const style = singleProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
+  // Clean cameraDirection (remove markdown bold markers)
+  const singleCleanedCamera = shot.cameraDirection?.replace(/^\*+\s*/, "").replace(/\*+$/, "").trim() || undefined;
+
+  // Include visualHint in character descriptions (same as batch/chain generation)
+  const characterDescriptionsWithHints = charsForFrame
+    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+    .join("\n");
+
+  // frameTarget: "first" = only regenerate firstFrame; "last" = only lastFrame; "both" = default
+  const frameTarget = (payload?.frameTarget as "first" | "last" | "both") ?? "both";
+
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
+    if (frameTarget === "first") {
+      // Regenerate first frame only (ignore previous shot continuity — user explicitly asked for fresh)
+      const firstPrompt = buildFirstFramePrompt({
+        sceneDescription: shot.prompt || "",
+        startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+        characterDescriptions: characterDescriptionsWithHints,
+        visualStyleTag: singleVisualStyleTag,
+        cameraDirection: singleCleanedCamera,
+        slotContents: frameFirstSlots,
+      });
+      const firstFramePath = await ai.generateImage(firstPrompt, {
+        ...imageOpts,
+        quality: "hd",
+        referenceImages: charRefImages,
+      });
+      await db
+        .update(shots)
+        .set({ firstFrame: firstFramePath, status: "completed" })
+        .where(eq(shots.id, shotId));
+      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
+    }
+
+    if (frameTarget === "last") {
+      // Regenerate last frame only, using existing firstFrame as reference
+      const existingFirstFrame = shot.firstFrame;
+      if (!existingFirstFrame) {
+        await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
+        return NextResponse.json({ error: "首帧不存在，请先生成首帧" }, { status: 400 });
+      }
+      const lastPrompt = buildLastFramePrompt({
+        sceneDescription: shot.prompt || "",
+        endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+        characterDescriptions: characterDescriptionsWithHints,
+        firstFramePath: existingFirstFrame,
+        visualStyleTag: singleVisualStyleTag,
+        cameraDirection: singleCleanedCamera,
+        slotContents: frameLastSlots,
+      });
+      const lastFramePath = await ai.generateImage(lastPrompt, {
+        ...imageOpts,
+        quality: "hd",
+        referenceImages: [existingFirstFrame, ...charRefImages],
+      });
+      await db
+        .update(shots)
+        .set({ lastFrame: lastFramePath, status: "completed" })
+        .where(eq(shots.id, shotId));
+      // Sync next shot's firstFrame
+      if (nextShot) {
+        await db.update(shots).set({ firstFrame: lastFramePath }).where(eq(shots.id, nextShot.id));
+      }
+      return NextResponse.json({ shotId, lastFrame: lastFramePath, status: "ok" });
+    }
+
+    // frameTarget === "both" (default)
     // Reuse previous shot's lastFrame directly — no need to regenerate
     let firstFramePath: string;
     if (previousShot?.lastFrame) {
@@ -1548,7 +1678,9 @@ async function handleSingleFrameGenerate(
       const firstPrompt = buildFirstFramePrompt({
         sceneDescription: shot.prompt || "",
         startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-        characterDescriptions,
+        characterDescriptions: characterDescriptionsWithHints,
+        visualStyleTag: singleVisualStyleTag,
+        cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
       firstFramePath = await ai.generateImage(firstPrompt, {
@@ -1561,8 +1693,10 @@ async function handleSingleFrameGenerate(
     const lastPrompt = buildLastFramePrompt({
       sceneDescription: shot.prompt || "",
       endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-      characterDescriptions,
+      characterDescriptions: characterDescriptionsWithHints,
       firstFramePath,
+      visualStyleTag: singleVisualStyleTag,
+      cameraDirection: singleCleanedCamera,
       slotContents: frameLastSlots,
     });
     const lastFramePath = await ai.generateImage(lastPrompt, {
@@ -1635,6 +1769,17 @@ async function handleSingleVideoGenerate(
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
 
+  // Project visualStyle → style lock tag for video prompt
+  const [singleVideoProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const singleVideoStyleTag = (() => {
+    const style = singleVideoProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
@@ -1685,6 +1830,7 @@ async function handleSingleVideoGenerate(
       characters: shotCharacters,
       dialogues: dialogueList.length > 0 ? dialogueList : undefined,
       slotContents: videoSlots,
+      visualStyleTag: singleVideoStyleTag,
     });
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
@@ -1766,6 +1912,17 @@ async function handleBatchVideoGenerate(
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
+  // Project visualStyle → style lock tag for video prompts
+  const [batchVideoProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const batchVideoStyleTag = (() => {
+    const style = batchVideoProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const ratio = (payload?.ratio as string) || "16:9";
   const resolution = payload?.resolution as "480p" | "720p" | undefined;
@@ -1830,6 +1987,7 @@ async function handleBatchVideoGenerate(
           characters: batchCharacters,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
           slotContents: videoSlots,
+          visualStyleTag: batchVideoStyleTag,
         });
 
         const result = await videoProvider.generateVideo({
@@ -2086,15 +2244,24 @@ async function handleBatchChainGenerate(
             };
           });
 
+          // 只传与本镜头相关的角色（过滤无关角色），并附带 description 以保留服装信息
+          const shotCharsForVideo = filterShotCharacters(videoScript, chainCharacters);
+          const videoCharacters = (shotCharsForVideo.length > 0 ? shotCharsForVideo : chainCharacters).map((c) => ({
+            name: c.name,
+            visualHint: c.visualHint,
+            description: c.description,
+          }));
+
           const videoPrompt = shot.videoPrompt || buildVideoPrompt({
             videoScript,
             cameraDirection: cleanedCamera,
             startFrameDesc: shot.startFrameDesc ?? undefined,
             endFrameDesc: shot.endFrameDesc ?? undefined,
             duration: effectiveDuration,
-            characters: chainCharacters,
+            characters: videoCharacters,
             dialogues: dialogueList.length > 0 ? dialogueList : undefined,
             slotContents: videoSlots,
+            visualStyleTag: chainVisualStyleTag,
           });
 
           const videoResult = await videoProvider.generateVideo({
@@ -2462,6 +2629,17 @@ async function handleSingleReferenceVideo(
   const ratio = (payload?.ratio as string) || "16:9";
   const refVideoSlots = await resolveSlotContents("ref_video_generate", { userId, projectId });
 
+  // Project visualStyle → style lock tag
+  const [singleRefVideoProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const singleRefVideoStyleTag = (() => {
+    const style = singleRefVideoProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
@@ -2542,6 +2720,7 @@ async function handleSingleReferenceVideo(
           characters: projectCharacters,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
           slotContents: refVideoSlots,
+          visualStyleTag: singleRefVideoStyleTag,
         });
       }
     }
@@ -2639,6 +2818,17 @@ async function handleBatchReferenceVideo(
   const ratio = (payload?.ratio as string) || "16:9";
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const refVideoSlots = await resolveSlotContents("ref_video_generate", { userId, projectId });
+
+  // Project visualStyle → style lock tag
+  const [batchRefVideoProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const batchRefVideoStyleTag = (() => {
+    const style = batchRefVideoProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
 
   await Promise.all(
     eligible.map((shot) =>
@@ -2747,6 +2937,7 @@ async function handleBatchReferenceVideo(
               characters: projectCharacters,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: refVideoSlots,
+              visualStyleTag: batchRefVideoStyleTag,
             });
           }
         }

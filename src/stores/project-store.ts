@@ -53,6 +53,7 @@ interface Shot {
   status: string;
   warnings?: string | null;
   videoResolution?: string | null;
+  seedanceLastFrame?: string | null;
   dialogues: Dialogue[];
 }
 
@@ -105,9 +106,15 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       url = `/api/projects/${id}${versionId ? `?versionId=${versionId}` : ""}`;
     }
 
-    const res = await apiFetch(url);
-    const data = await res.json();
-    set({ project: data, loading: false, currentEpisodeId: episodeId ?? null });
+    try {
+      const res = await apiFetch(url);
+      const data = await res.json();
+      set({ project: data, loading: false, currentEpisodeId: episodeId ?? null });
+    } catch (err) {
+      // Reset loading state so UI doesn't get stuck on spinner
+      set({ loading: false });
+      throw err;
+    }
   },
 
   updateIdea: (idea: string) => {

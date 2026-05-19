@@ -21,7 +21,9 @@ export default function ProjectLayout({
   const { project, loading, fetchProject } = useProjectStore();
 
   useEffect(() => {
-    fetchProject(id);
+    fetchProject(id).catch((err) => {
+      console.error("[ProjectLayout] fetchProject failed:", err);
+    });
   }, [id, fetchProject]);
 
   if (loading || !project) {

@@ -18,7 +18,9 @@ export default function EpisodeLayout({
   const { project, loading, fetchProject } = useProjectStore();
 
   useEffect(() => {
-    fetchProject(id, episodeId);
+    fetchProject(id, episodeId).catch((err) => {
+      console.error("[EpisodeLayout] fetchProject failed:", err);
+    });
   }, [id, episodeId, fetchProject]);
 
   if (loading || !project) {

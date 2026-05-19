@@ -81,6 +81,8 @@ interface ShotCardProps {
   videoResolution?: string | null;
   /** 生成视频时使用的分辨率，传递给后端 */
   videoGenerationResolution?: "480p" | "720p";
+  /** 上一镜 Seedance 生成视频的真实尾帧，可直接用作本镜首帧（跳过 Seedream 重新生成） */
+  prevSeedanceLastFrame?: string | null;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -175,6 +177,7 @@ export function ShotCard({
   warnings,
   videoResolution,
   videoGenerationResolution,
+  prevSeedanceLastFrame,
 }: ShotCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -203,6 +206,7 @@ export function ShotCard({
 
   // Generation state
   const [generatingFrames, setGeneratingFrames] = useState(false);
+  const [generatingFrameTarget, setGeneratingFrameTarget] = useState<"first" | "last" | null>(null);
   const [generatingSceneFrame, setGeneratingSceneFrame] = useState(false);
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
@@ -288,6 +292,18 @@ export function ShotCard({
     });
   }
 
+  const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
+  async function handleAdoptPrevSeedanceFrame() {
+    if (!prevSeedanceLastFrame) return;
+    setAdoptingPrevFrame(true);
+    try {
+      await patchShot({ firstFrame: prevSeedanceLastFrame });
+      onUpdate();
+    } finally {
+      setAdoptingPrevFrame(false);
+    }
+  }
+
   async function handleSplitShot() {
     if (!durationOverLimit) return;
     setSplittingShot(true);
@@ -316,7 +332,7 @@ export function ShotCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "single_frame_generate",
-          payload: { shotId: id, ratio: videoRatio },
+          payload: { shotId: id, ratio: videoRatio, frameTarget: "both" },
           modelConfig: getModelConfig(),
         }),
       });
@@ -325,6 +341,28 @@ export function ShotCard({
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
     setGeneratingFrames(false);
+  }
+
+  async function handleGenerateOneFrame(target: "first" | "last") {
+    if (!imageGuard()) return;
+    setGeneratingFrames(true);
+    setGeneratingFrameTarget(target);
+    try {
+      await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_frame_generate",
+          payload: { shotId: id, ratio: videoRatio, frameTarget: target },
+          modelConfig: getModelConfig(),
+        }),
+      });
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+    }
+    setGeneratingFrames(false);
+    setGeneratingFrameTarget(null);
   }
 
   async function handleGenerateSceneFrame() {
@@ -864,6 +902,19 @@ export function ShotCard({
                         <Trash2 className="h-2.5 w-2.5" />
                       </button>
                     )}
+                    {generationMode !== "reference" && (fieldName === "firstFrame" || fieldName === "lastFrame") && (
+                      <button
+                        onClick={() => handleGenerateOneFrame(fieldName === "firstFrame" ? "first" : "last")}
+                        disabled={generatingFrames || generatingVideo || batchGeneratingFrames}
+                        title={fieldName === "firstFrame" ? "单独重新生成首帧" : "单独重新生成尾帧"}
+                        className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
+                      >
+                        {generatingFrames && generatingFrameTarget === (fieldName === "firstFrame" ? "first" : "last")
+                          ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                          : <RefreshCw className="h-2.5 w-2.5" />
+                        }
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -893,6 +944,21 @@ export function ShotCard({
             >
               <ClipboardCopy className="h-3 w-3" />
               {t("shot.externalFrameHelper")}
+            </Button>
+          )}
+          {generationMode !== "reference" && prevSeedanceLastFrame && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={handleAdoptPrevSeedanceFrame}
+              disabled={adoptingPrevFrame || generatingFrames || generatingVideo || batchGeneratingFrames}
+              title="将上一镜视频的真实尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
+            >
+              {adoptingPrevFrame
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <span className="text-[10px]">↑</span>
+              }
+              承接上一镜尾帧
             </Button>
           )}
         </StepRow>
