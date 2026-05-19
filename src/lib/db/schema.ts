@@ -60,6 +60,13 @@ export const characters = sqliteTable("characters", {
   name: text("name").notNull(),
   description: text("description").default(""),
   visualHint: text("visual_hint").default(""),
+  /**
+   * 声音属性描述（Seedance 1.5-pro 官方公式）：
+   * 性别 + 年龄区间 + 声音属性 + 语速 + 情绪基线
+   * 示例："男性，约25岁，声音低沉沙哑，语速缓慢，情绪压抑克制"
+   * 由角色提取 AI 根据角色描述自动生成，也可在 UI 手动编辑。
+   */
+  voiceHint: text("voice_hint").default(""),
   referenceImage: text("reference_image"),
   beautyImage: text("beauty_image"),
   combatImage: text("combat_image"),
@@ -123,7 +130,11 @@ export const shots = sqliteTable("shots", {
   cameraDirection: text("camera_direction").default("static"),
   duration: integer("duration").notNull().default(10),
   firstFrame: text("first_frame"),
+  /** 首帧图片的公网临时 URL（图片生成 API 直接返回），用于 Seedance 视频生成请求，避免 base64 */
+  firstFrameRemoteUrl: text("first_frame_remote_url"),
   lastFrame: text("last_frame"),
+  /** 尾帧图片的公网临时 URL（图片生成 API 直接返回），用于 Seedance 视频生成请求，避免 base64 */
+  lastFrameRemoteUrl: text("last_frame_remote_url"),
   videoUrl: text("video_url"),
   referenceVideoUrl: text("reference_video_url"),
   remoteVideoUrl: text("remote_video_url"),
@@ -156,6 +167,12 @@ export const shots = sqliteTable("shots", {
   warnings: text("warnings"),
   /** 视频生成/增强的分辨率。null = 未知（历史数据），"480p" = 已生成待增强，"720p" = 已增强或直接生成 720p */
   videoResolution: text("video_resolution"),
+  /**
+   * Seedance 视频的真实尾帧（本地文件路径）。
+   * 由 video-generate pipeline 在视频生成后立即从 lastFrameUrl 下载并保存。
+   * 用途：下一镜的 frame-generate 优先用此作为 previousLastFrame，比 AI 生成的 lastFrame 更连贯。
+   */
+  seedanceLastFrame: text("seedance_last_frame"),
 });
 
 /** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */
@@ -181,6 +198,12 @@ export const dialogues = sqliteTable("dialogues", {
   text: text("text").notNull(),
   audioUrl: text("audio_url"),
   sequence: integer("sequence").notNull().default(0),
+  /**
+   * 声音属性描述，用于 Seedance 1.5-pro 声音生成（官方公式）：
+   * 性别 + 年龄区间 + 声音属性 + 语速 + 情绪基线
+   * 示例："男性，约25岁，声音低沉沙哑，语速缓慢，情绪压抑克制"
+   */
+  voiceHint: text("voice_hint"),
 });
 
 export const importLogs = sqliteTable("import_logs", {

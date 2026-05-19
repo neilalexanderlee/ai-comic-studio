@@ -80,13 +80,11 @@ export class VolcengineEnhanceProvider {
   /**
    * 对给定视频执行画质增强，返回增强后本地保存的文件路径。
    *
-   * @param videoPathOrUrl 待增强视频的本地路径或可公开访问的 URL
-   * @param publicBaseUrl  当 videoPathOrUrl 是本地路径时，转为外网可访问 URL 的前缀
-   * @param options        可选参数：resolution（目标分辨率）、scene（场景）
+   * @param videoUrl 待增强视频的公网可访问 URL
+   * @param options  可选参数：resolution（目标分辨率）、scene（场景）
    */
   async enhanceVideo(
-    videoPathOrUrl: string,
-    publicBaseUrl?: string,
+    videoUrl: string,
     options?: {
       resolution?: "720p" | "1080p" | "4k";
       scene?: "aigc" | "short_series" | "ugc" | "old_film";
@@ -96,14 +94,6 @@ export class VolcengineEnhanceProvider {
     if (!this.apiKey) {
       throw new Error(
         "[VolcengineEnhance] API Key 未配置。请前往「设置 → AI MediaKit」填写 API Key。"
-      );
-    }
-
-    const videoUrl = this.resolvePublicUrl(videoPathOrUrl, publicBaseUrl);
-    if (!videoUrl) {
-      throw new Error(
-        "[VolcengineEnhance] Cannot resolve public URL for video. " +
-          "Set NEXT_PUBLIC_BASE_URL or pass publicBaseUrl to provide an accessible URL."
       );
     }
 
@@ -181,7 +171,7 @@ export class VolcengineEnhanceProvider {
 
   /** 轮询任务状态，返回增强后视频 URL（result.video_url） */
   private async pollForResult(taskId: string): Promise<string> {
-    const maxAttempts = 72; // 最多等 6 分钟（72 × 5s），标准版 RTF 6~10
+    const maxAttempts = 120; // 最多等 10 分钟（120 × 5s），标准版 RTF 6~10；专业版由 enhance/route maxDuration=300 保护
     const interval = 5_000;
 
     for (let i = 0; i < maxAttempts; i++) {
@@ -226,27 +216,4 @@ export class VolcengineEnhanceProvider {
     );
   }
 
-  /** 将本地路径或 URL 解析为可公开访问的 URL */
-  private resolvePublicUrl(
-    videoPathOrUrl: string,
-    publicBaseUrl?: string
-  ): string | null {
-    if (
-      videoPathOrUrl.startsWith("http://") ||
-      videoPathOrUrl.startsWith("https://")
-    ) {
-      return videoPathOrUrl;
-    }
-
-    const base =
-      publicBaseUrl ||
-      process.env.NEXT_PUBLIC_BASE_URL ||
-      process.env.VOLCENGINE_ENHANCE_BASE_URL ||
-      "";
-    if (!base) return null;
-
-    const uploadDir = (process.env.UPLOAD_DIR || "./uploads").replace(/\/+$/, "");
-    const relative = videoPathOrUrl.replace(uploadDir, "").replace(/^\/+/, "");
-    return `${base.replace(/\/+$/, "")}/uploads/${relative}`;
-  }
 }

@@ -12,7 +12,7 @@
  *
  * Seedance 2.0 参数说明（官方确认）：
  *   - duration：支持 5 / 10 / 15 秒（Seedance 2.0 最高 15s；1.5 最高 12s；1.0-lite 最高 5s）
- *   - resolution：视频分辨率，支持 "480p" | "720p" | "1080p" | "2K"
+ *   - resolution：视频分辨率，支持 "480p" | "720p" | "1080p"（Seedance 2.0 fast 不支持 1080p）
  *
  * 支持的生成模式：
  *   - 首尾帧模式（firstFrame + lastFrame）
@@ -76,28 +76,89 @@ export class SeedanceProvider implements VideoProvider {
       params?.uploadDir || process.env.UPLOAD_DIR || "./uploads";
   }
 
+  /**
+   * 获取服务层级：优先使用调用方传入的值，其次读取环境变量 SEEDANCE_SERVICE_TIER，默认不传（即 auto）。
+   * 'flex' 模式成本降低约 50%，但生成时间更长，适合非实时批量任务。
+   */
+  private resolveServiceTier(requested?: 'auto' | 'flex'): string | undefined {
+    const tier = requested ?? (process.env.SEEDANCE_SERVICE_TIER as 'auto' | 'flex' | undefined);
+    if (tier === 'flex') return 'flex';
+    return undefined; // 不传则使用 API 默认（auto）
+  }
+
   async generateVideo(params: VideoGenerateParams): Promise<VideoGenerateResult> {
-    const body =
-      "firstFrame" in params
+    const isKeyframe = "firstFrame" in params;
+    const buildBody = (useRemoteUrls: boolean) => {
+      const body = isKeyframe
         ? this.buildKeyframeBody(
-            params as VideoGenerateParams & { firstFrame: string; lastFrame: string }
+            useRemoteUrls
+              ? (params as VideoGenerateParams & { firstFrame: string; lastFrame: string; firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string })
+              : { ...(params as VideoGenerateParams & { firstFrame: string; lastFrame: string }), firstFrameRemoteUrl: undefined, lastFrameRemoteUrl: undefined }
           )
         : this.buildReferenceBody(
             params as VideoGenerateParams & { initialImage: string }
           );
+      if (params.resolution) (body as Record<string, unknown>).resolution = params.resolution;
+      const serviceTier = this.resolveServiceTier(params.serviceTier);
+      if (serviceTier) (body as Record<string, unknown>).service_tier = serviceTier;
+      return body;
+    };
 
-    // Seedance 2.0 新增 resolution 参数
-    if (params.resolution) {
-      (body as Record<string, unknown>).resolution = params.resolution;
-    }
+    const kfParams = params as VideoGenerateParams & { firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string };
+    const hasRemoteUrls = isKeyframe && !!(kfParams.firstFrameRemoteUrl || kfParams.lastFrameRemoteUrl);
 
+    const body = buildBody(true /* useRemoteUrls */);
     console.log(
       `[Seedance] Submitting task: model=${body.model}, ` +
         `duration=${body.duration}, ratio=${body.ratio}` +
-        (params.resolution ? `, resolution=${params.resolution}` : "")
+        (params.resolution ? `, resolution=${params.resolution}` : "") +
+        (hasRemoteUrls ? ", frames=remoteUrl" : ", frames=base64")
     );
 
-    const submitResponse = await fetch(
+    let taskId: string;
+    try {
+      taskId = await this.submitBody(body);
+    } catch (err) {
+      if (hasRemoteUrls) {
+        // 提交被拒（HTTP 4xx/5xx），URL 可能已过期，降级为 base64 重试
+        // 注：提交失败不消耗任何 token，因为任务尚未创建
+        console.warn(`[Seedance] Remote URL submit failed, retrying with base64 fallback:`, err);
+        taskId = await this.submitBody(buildBody(false /* base64 */));
+        console.log(`[Seedance] Fallback task submitted: ${taskId}`);
+      } else {
+        throw err;
+      }
+    }
+
+    let videoUrl: string;
+    let lastFrameUrl: string | undefined;
+    try {
+      ({ videoUrl, lastFrameUrl } = await this.pollForResult(taskId));
+    } catch (err) {
+      if (hasRemoteUrls) {
+        // 任务创建成功但执行失败，可能是 Seedance 拉取远端图片时 URL 已过期
+        // 重新以 base64 提交（不计费的失败任务不影响此次重试的 token 消耗）
+        console.warn(`[Seedance] Task ${taskId} failed (possibly expired URL), retrying with base64 fallback:`, err);
+        const fallbackTaskId = await this.submitBody(buildBody(false /* base64 */));
+        console.log(`[Seedance] Fallback task submitted: ${fallbackTaskId}`);
+        ({ videoUrl, lastFrameUrl } = await this.pollForResult(fallbackTaskId));
+      } else {
+        throw err;
+      }
+    }
+
+    await params.onRemoteResult?.({ videoUrl, taskId });
+
+    const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
+      logPrefix: "SeedanceDownload",
+    });
+
+    return { filePath: filepath, lastFrameUrl, remoteVideoUrl: videoUrl, remoteTaskId: taskId };
+  }
+
+  /** 提交请求体，返回任务 ID */
+  private async submitBody(body: Record<string, unknown>): Promise<string> {
+    const response = await fetch(
       `${this.baseUrl}/contents/generations/tasks`,
       {
         method: "POST",
@@ -108,67 +169,73 @@ export class SeedanceProvider implements VideoProvider {
         body: JSON.stringify(body),
       }
     );
-
-    if (!submitResponse.ok) {
-      const errText = await submitResponse.text();
-      throw new Error(
-        `Seedance submit failed: ${submitResponse.status} ${errText}`
-      );
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Seedance submit failed: ${response.status} ${errText}`);
     }
+    const result = (await response.json()) as { id: string };
+    console.log(`[Seedance] Task submitted: ${result.id}`);
+    return result.id;
+  }
 
-    const submitResult = (await submitResponse.json()) as { id: string };
-    console.log(`[Seedance] Task submitted: ${submitResult.id}`);
-
-    const { videoUrl, lastFrameUrl } = await this.pollForResult(submitResult.id);
-    await params.onRemoteResult?.({ videoUrl, taskId: submitResult.id });
-
-    const filepath = await downloadVideoWithRetry(videoUrl, this.uploadDir, {
-      logPrefix: "SeedanceDownload",
-    });
-
-    return { filePath: filepath, lastFrameUrl, remoteVideoUrl: videoUrl, remoteTaskId: submitResult.id };
+  /**
+   * 将时长值转换为 API 参数。
+   * - duration > 0：直接传入秒数
+   * - duration === -1：不传（让 Seedance 2.0 自动选择最优时长）
+   * - duration <= 0（其他）：回退到 5 秒
+   */
+  private resolveDuration(duration: number): number | undefined {
+    if (duration === -1) return undefined;   // auto
+    if (duration > 0) return duration;
+    return 5;                                 // fallback
   }
 
   /** 首尾帧模式：提供第一帧和最后一帧图片 */
   private buildKeyframeBody(
-    params: VideoGenerateParams & { firstFrame: string; lastFrame: string }
+    params: VideoGenerateParams & { firstFrame: string; lastFrame: string; firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string }
   ): Record<string, unknown> {
-    return {
+    const dur = this.resolveDuration(params.duration);
+    const body: Record<string, unknown> = {
       model: this.model,
       content: [
         { type: "text", text: params.prompt },
         {
           type: "image_url",
-          image_url: { url: toDataUrl(params.firstFrame) },
+          // 优先使用图片生成 API 返回的公网 URL，省去本地读文件+base64 编码
+          image_url: { url: params.firstFrameRemoteUrl ?? toDataUrl(params.firstFrame) },
           role: "first_frame",
         },
         {
           type: "image_url",
-          image_url: { url: toDataUrl(params.lastFrame) },
+          image_url: { url: params.lastFrameRemoteUrl ?? toDataUrl(params.lastFrame) },
           role: "last_frame",
         },
       ],
-      duration: params.duration || 5,
       ratio: params.ratio || "16:9",
+      return_last_frame: true,
       watermark: false,
     };
+    if (dur !== undefined) body.duration = dur;
+    return body;
   }
 
   /** 参考图模式：使用单张初始图片（角色参考图或上一镜头的最后帧） */
   private buildReferenceBody(
     params: VideoGenerateParams & { initialImage: string }
   ): Record<string, unknown> {
-    return {
+    const dur = this.resolveDuration(params.duration);
+    const body: Record<string, unknown> = {
       model: this.model,
       content: [
         { type: "text", text: params.prompt },
         { type: "image_url", image_url: { url: toImageUrl(params.initialImage) } },
       ],
-      duration: params.duration || 5,
       ratio: params.ratio || "16:9",
       return_last_frame: true,
       watermark: false,
     };
+    if (dur !== undefined) body.duration = dur;
+    return body;
   }
 
   private async pollForResult(

@@ -91,7 +91,8 @@ JSON array only — no markdown fences, no commentary:
     "name": "Most specific / most frequently used name for this character",
     "aliases": ["other names or titles this character is called in the screenplay"],
     "description": "Full visual specification — single paragraph, all requirements below",
-    "visualHint": "2–4 word visual identifier for dialogue labels (e.g. 银发金瞳, red coat auburn hair). Must be instantly recognizable at a glance — focus on the most distinctive physical trait(s).",
+    "visualHint": "Compact visual identifier used in dialogue labels and prompt annotations. Include the character's most distinctive traits: outfit color/material, hair color/style, eye color, and signature weapon or accessory if any. Aim for 4–10 Chinese characters or equivalent (e.g. 黑甲银纹无双剑琥珀眼, 暗红旗袍露指拳套, 白发白和服霜魂刀). Must be instantly recognizable at a glance.",
+    "voiceHint": "Voice characteristic description following Seedance formula: 性别+年龄区间+声音属性+语速+情绪基线. Infer from character gender, age, personality, and role. Example: '男性，约25岁，声音低沉沙哑，语速缓慢，情绪压抑克制'. Write in Chinese. Max 30 characters.",
     "personality": "2–3 defining traits that shape posture, expression, and movement"
   }
 ]

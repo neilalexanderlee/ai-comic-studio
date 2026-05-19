@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { episodes, projects } from "@/lib/db/schema";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
+import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import {
   buildShotEnrichSystem,
@@ -32,7 +33,8 @@ async function enrichExtractedShots(
   shots: ExtractedShot[],
   episodeTitle: string,
   characterHints: Array<{ name: string; visualHint: string }>,
-  ai: ReturnType<typeof resolveAIProvider>
+  ai: ReturnType<typeof resolveAIProvider>,
+  visualStyleTag?: string
 ): Promise<ExtractedShot[]> {
   // Identify shots needing enrichment
   const needsEnrichment = shots
@@ -64,7 +66,8 @@ async function enrichExtractedShots(
       const enrichPrompt = buildShotEnrichPrompt(
         inputs,
         { title: episodeTitle },
-        characterHints
+        characterHints,
+        visualStyleTag
       );
 
       const raw = await ai.generateText(enrichPrompt, {
@@ -123,6 +126,7 @@ export async function handleShotSplit(task: Task) {
   let screenplay = payload.screenplay;
   let targetDurationSeconds: number | null = null;
   let episodeTitle = "";
+  let projectVisualStyle: string | null = null;
 
   if (!screenplay) {
     if (payload.episodeId) {
@@ -139,10 +143,11 @@ export async function handleShotSplit(task: Task) {
       episodeTitle = episode?.title ?? "";
     } else {
       const [project] = await db
-        .select({ script: projects.script })
+        .select({ script: projects.script, visualStyle: projects.visualStyle })
         .from(projects)
         .where(eq(projects.id, payload.projectId));
       screenplay = project?.script ?? "";
+      projectVisualStyle = project?.visualStyle ?? null;
     }
   } else if (payload.episodeId) {
     // screenplay was passed directly (e.g. from generate route), but still fetch duration + title
@@ -153,6 +158,21 @@ export async function handleShotSplit(task: Task) {
     targetDurationSeconds = episode?.targetDurationSeconds ?? null;
     episodeTitle = episode?.title ?? "";
   }
+
+  // Always fetch project visualStyle if not already loaded above
+  if (!projectVisualStyle) {
+    const [proj] = await db
+      .select({ visualStyle: projects.visualStyle })
+      .from(projects)
+      .where(eq(projects.id, payload.projectId));
+    projectVisualStyle = proj?.visualStyle ?? null;
+  }
+
+  // Resolve the human-readable style tag (e.g. "日本现代2D动漫风格，8K高清…")
+  const visualStyleTag = (() => {
+    if (!projectVisualStyle) return undefined;
+    return VISUAL_STYLE_PRESETS[projectVisualStyle]?.tag ?? undefined;
+  })();
 
   const projectCharacters = await getShotCharacters(
     payload.projectId,
@@ -190,7 +210,8 @@ export async function handleShotSplit(task: Task) {
         shotsToSave as unknown as ExtractedShot[],
         episodeTitle,
         characterHints,
-        ai
+        ai,
+        visualStyleTag
       );
       shotsToSave = enriched as typeof shotsToSave;
     }
@@ -213,7 +234,8 @@ export async function handleShotSplit(task: Task) {
       screenplay,
       characterDescriptions,
       characterVisualHints,
-      targetDurationSeconds
+      targetDurationSeconds,
+      visualStyleTag
     ),
     { systemPrompt, temperature: 0.5 }
   );

@@ -72,6 +72,8 @@ export default function EpisodeStoryboardPage() {
   const [generating, setGenerating] = useState(false);
   const [generatingFrames, setGeneratingFrames] = useState(false);
   const [generatingVideos, setGeneratingVideos] = useState(false);
+  const [generatingChain, setGeneratingChain] = useState(false);
+  const [generatingChainOverwrite, setGeneratingChainOverwrite] = useState(false);
   const [generatingSceneFrames, setGeneratingSceneFrames] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
   const [sceneFramesOverwrite, setSceneFramesOverwrite] = useState(false);
@@ -183,7 +185,7 @@ export default function EpisodeStoryboardPage() {
   const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
   const hasReferenceImages = charactersWithRefs.length > 0;
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingSceneFrames || generatingVideoPrompts;
+  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -448,6 +450,73 @@ export default function EpisodeStoryboardPage() {
 
     setGeneratingVideosOverwrite(false);
     setGeneratingVideos(false);
+    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+  }
+
+  // 链式生成：每个分镜依次执行 首帧 → 尾帧 → 视频，尾帧直接链入下一镜首帧
+  async function handleBatchChainGenerate(overwrite = false) {
+    if (!project) return;
+    if (!imageGuard()) return;
+    if (!videoGuard()) return;
+    setGeneratingChainOverwrite(overwrite);
+    setGeneratingChain(true);
+
+    let hasError = false;
+    try {
+      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_chain_generate",
+          payload: {
+            ratio: videoRatio,
+            overwrite,
+            versionId: selectedVersionId,
+            resolution: videoGenerationResolution,
+          },
+          modelConfig: getModelConfig(),
+          episodeId: useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+
+      // SSE 流式读取：每完成一个分镜立即刷新
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!dataLine) continue;
+            try {
+              const event = JSON.parse(dataLine.slice(6)) as {
+                type?: string;
+                shotId?: string;
+                status?: string;
+              };
+              if (event.status === "error") hasError = true;
+              if (event.shotId && (event.status === "ok" || event.status === "skipped")) {
+                fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+              }
+              if (event.type === "done") break;
+            } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Batch chain generate error:", err);
+      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+    }
+
+    if (hasError) toast.warning(t("common.batchPartialFailed"));
+    setGeneratingChainOverwrite(false);
+    setGeneratingChain(false);
     fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
   }
 
@@ -843,6 +912,42 @@ export default function EpisodeStoryboardPage() {
               </>
             )}
           </div>
+
+          {/* Row 2.5: Chain generate (keyframe mode only) — frames + video per shot, sequential */}
+          {generationMode === "keyframe" && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]" style={{ fontSize: "8px" }}>⛓</span>
+              <Button
+                onClick={() => handleBatchChainGenerate(false)}
+                disabled={anyGenerating || totalShots === 0}
+                variant={generatingChain && !generatingChainOverwrite ? "default" : "outline"}
+                size="sm"
+                className="gap-1.5 border-dashed"
+                title="链式生成：逐镜依次生成首帧→尾帧→视频，视频末帧直接作为下一镜首帧（更高连贯性）"
+              >
+                {generatingChain && !generatingChainOverwrite ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <VideoIcon className="h-3.5 w-3.5" />
+                )}
+                {generatingChain && !generatingChainOverwrite ? t("common.generating") : "链式生成（帧+视频）"}
+              </Button>
+              <Button
+                onClick={() => handleBatchChainGenerate(true)}
+                disabled={anyGenerating || totalShots === 0}
+                variant="ghost"
+                size="icon"
+                title="强制重新链式生成全部分镜（覆盖）"
+              >
+                {generatingChain && generatingChainOverwrite ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+              </Button>
+              <span className="text-xs text-[--text-muted]">逐镜顺序生成，视频末帧直链下一镜</span>
+            </div>
+          )}
 
           {/* Row 3: Video prompts */}
           <div className="flex items-center gap-2 flex-wrap">

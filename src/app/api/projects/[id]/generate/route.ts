@@ -12,7 +12,7 @@ import { enqueueTask } from "@/lib/task-queue";
 import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
-import { buildCharacterExtractPrompt } from "@/lib/ai/prompts/character-extract";
+import { buildCharacterExtractPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
@@ -261,6 +261,10 @@ export async function POST(
 
   if (action === "batch_video_generate") {
     return handleBatchVideoGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+  }
+
+  if (action === "batch_chain_generate") {
+    return handleBatchChainGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
   }
 
   if (action === "single_scene_frame") {
@@ -1286,9 +1290,21 @@ async function handleBatchFrameGenerate(
     frameCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
   }
 
+  // Build character descriptions with visualHint for better frame anchoring
   const characterDescriptions = frameCharacters
-    .map((c) => `${c.name}: ${c.description}`)
+    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
+
+  // Fetch project visualStyle for style lock injection
+  const [batchProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const batchVisualStyleTag = (() => {
+    const style = batchProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
 
@@ -1296,7 +1312,7 @@ async function handleBatchFrameGenerate(
   const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
   const skipCount = allShots.length - needProcess.length;
 
-  console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}`);
+  console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}, style: ${batchVisualStyleTag || "auto"}`);
 
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
@@ -1307,14 +1323,14 @@ async function handleBatchFrameGenerate(
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
-    userId, projectId, skipCount,
+    userId, projectId, skipCount, batchVisualStyleTag,
   };
 
   // SSE streaming via ReadableStream start() — Next.js App Router idiomatic pattern
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const { allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
-              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount } = loopCtx;
+      const { allShots, copiedFirstFrame, overwrite, frameCharacters,
+              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag } = loopCtx;
 
       function emit(data: object) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
@@ -1328,10 +1344,14 @@ async function handleBatchFrameGenerate(
         const shot = allShots[i];
 
         if (!overwrite && shot.firstFrame && shot.lastFrame) {
-          previousLastFrame = shot.lastFrame;
+          // Prefer seedanceLastFrame (actual video last frame) for chain continuity
+          previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
           continue;
         }
+
+        // Clean camera direction (strip ** prefix, same as frame-generate pipeline)
+        const cleanedCamera = (shot.cameraDirection || "static").replace(/^\s*\*{1,2}\s*/, "").trim();
 
         const startTime = Date.now();
         try {
@@ -1346,10 +1366,16 @@ async function handleBatchFrameGenerate(
             const shotChars = filterShotCharacters(shotText, frameCharacters);
             const resolvedChars = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
             await saveShotWarnings(shot.id, resolvedChars);
+            // Build character descriptions with visualHint for characters in THIS shot
+            const shotCharDesc = shotChars
+              .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+              .join("\n");
             const firstPrompt = buildFirstFramePrompt({
               sceneDescription: shot.prompt || "",
               startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-              characterDescriptions,
+              characterDescriptions: shotCharDesc,
+              visualStyleTag: batchVisualStyleTag,
+              cameraDirection: cleanedCamera,
               slotContents: frameFirstSlots,
             });
             firstFramePath = await ai.generateImage(firstPrompt, {
@@ -1367,11 +1393,17 @@ async function handleBatchFrameGenerate(
           const shotChars2 = filterShotCharacters(shotText2, frameCharacters);
           const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
           await saveShotWarnings(shot.id, resolvedChars2);
+          // Build character descriptions with visualHint for characters in THIS shot
+          const shotCharDesc2 = shotChars2
+            .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+            .join("\n");
           const lastPrompt = buildLastFramePrompt({
             sceneDescription: shot.prompt || "",
             endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-            characterDescriptions,
+            characterDescriptions: shotCharDesc2,
             firstFramePath,
+            visualStyleTag: batchVisualStyleTag,
+            cameraDirection: cleanedCamera,
             slotContents: frameLastSlots,
           });
           const lastFramePath = await ai.generateImage(lastPrompt, {
@@ -1382,6 +1414,7 @@ async function handleBatchFrameGenerate(
           });
 
           await db.update(shots).set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" }).where(eq(shots.id, shot.id));
+          // Use AI-generated lastFrame for chain (no seedanceLastFrame yet at this stage)
           previousLastFrame = lastFramePath;
           okCount++;
 
@@ -1839,6 +1872,323 @@ async function handleBatchVideoGenerate(
   );
 
   return NextResponse.json({ results });
+}
+
+// --- batch_chain_generate: per-shot sequential frame→video pipeline (full chain mode) ---
+// Each shot: generate firstFrame (or use seedanceLastFrame from prev) → lastFrame → video
+// → download actual seedanceLastFrame → pass directly as next shot's firstFrame (no Seedream re-gen)
+
+async function handleBatchChainGenerate(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string
+) {
+  if (!modelConfig?.image) {
+    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
+  }
+  if (!modelConfig?.video) {
+    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
+  }
+
+  const batchVersionId = payload?.versionId as string | undefined;
+  const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
+  const ratio = (payload?.ratio as string) || "16:9";
+  const resolution = payload?.resolution as "480p" | "720p" | undefined;
+
+  const shotWhereConditions = [eq(shots.projectId, projectId)];
+  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
+  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
+
+  const allShots = await db
+    .select()
+    .from(shots)
+    .where(and(...shotWhereConditions))
+    .orderBy(asc(shots.sequence));
+
+  if (allShots.length === 0) {
+    return NextResponse.json({ results: [], message: "No shots found" });
+  }
+
+  const versionedUploadDir = batchVersionId
+    ? await getVersionedUploadDir(batchVersionId)
+    : process.env.UPLOAD_DIR || "./uploads";
+
+  // Fetch characters
+  let chainCharacters: typeof characters.$inferSelect[];
+  if (episodeId) {
+    const linkedIds = await db
+      .select({ characterId: episodeCharacters.characterId })
+      .from(episodeCharacters)
+      .where(eq(episodeCharacters.episodeId, episodeId));
+    chainCharacters = linkedIds.length > 0
+      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
+      : [];
+  } else {
+    chainCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
+  }
+
+  // Project visualStyle → style lock tag
+  const [chainProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const chainVisualStyleTag = (() => {
+    const style = chainProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
+  // Providers
+  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
+  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
+  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
+
+  // Slot contents
+  const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
+  const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
+  const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
+
+  const overwrite = payload?.overwrite === true;
+  const skipCount = allShots.filter((s) =>
+    !overwrite && s.firstFrame && s.lastFrame && s.videoUrl
+  ).length;
+
+  console.log(
+    `[BatchChainGenerate] Total: ${allShots.length} shots, style: ${chainVisualStyleTag || "auto"}, resolution: ${resolution || "default"}`
+  );
+
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      function emit(data: object) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+
+      // seedanceLastFrame from prev shot feeds directly into next shot's firstFrame
+      let chainPreviousFrame: string | undefined;
+      let okCount = 0;
+      let errCount = 0;
+
+      for (let i = 0; i < allShots.length; i++) {
+        const shot = allShots[i];
+
+        // Skip if fully generated and overwrite not requested
+        if (!overwrite && shot.firstFrame && shot.lastFrame && shot.videoUrl) {
+          // Still advance the chain using best available last frame
+          chainPreviousFrame = shot.seedanceLastFrame || shot.lastFrame || undefined;
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
+          continue;
+        }
+
+        const startTime = Date.now();
+        const cleanedCamera = (shot.cameraDirection || "static").replace(/^\s*\*{1,2}\s*/, "").trim();
+
+        try {
+          await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id));
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "frame_start" });
+
+          // ── STEP 1: firstFrame ────────────────────────────────────────────────
+          let firstFramePath: string;
+
+          if (i === 0 || !chainPreviousFrame) {
+            // First shot: generate firstFrame with Seedream
+            const shotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
+            const shotChars = filterShotCharacters(shotText, chainCharacters);
+            const resolvedChars = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
+            await saveShotWarnings(shot.id, resolvedChars);
+            const shotCharDesc = shotChars
+              .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+              .join("\n");
+            const firstPrompt = buildFirstFramePrompt({
+              sceneDescription: shot.prompt || "",
+              startFrameDesc: shot.startFrameDesc || shot.prompt || "",
+              characterDescriptions: shotCharDesc,
+              visualStyleTag: chainVisualStyleTag,
+              cameraDirection: cleanedCamera,
+              slotContents: frameFirstSlots,
+            });
+            firstFramePath = await imageProvider.generateImage(firstPrompt, {
+              ...imageOpts,
+              quality: "hd",
+              referenceImages: resolvedChars.map((c) => c.imagePath),
+              referenceLabels: resolvedChars.map((c) => c.name),
+            });
+          } else {
+            // Non-first shots: use seedanceLastFrame from previous shot directly
+            // This is the true last frame of the generated video — higher continuity quality
+            firstFramePath = chainPreviousFrame;
+          }
+
+          // ── STEP 2: lastFrame ────────────────────────────────────────────────
+          const shotText2 = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
+          const shotChars2 = filterShotCharacters(shotText2, chainCharacters);
+          const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
+          if (i === 0) await saveShotWarnings(shot.id, resolvedChars2);
+          const shotCharDesc2 = shotChars2
+            .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+            .join("\n");
+          const lastPrompt = buildLastFramePrompt({
+            sceneDescription: shot.prompt || "",
+            endFrameDesc: shot.endFrameDesc || shot.prompt || "",
+            characterDescriptions: shotCharDesc2,
+            firstFramePath,
+            visualStyleTag: chainVisualStyleTag,
+            cameraDirection: cleanedCamera,
+            slotContents: frameLastSlots,
+          });
+          const lastFramePath = await imageProvider.generateImage(lastPrompt, {
+            ...imageOpts,
+            quality: "hd",
+            referenceImages: [firstFramePath, ...resolvedChars2.map((c) => c.imagePath)],
+            referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
+          });
+
+          // Persist frames immediately
+          await db.update(shots)
+            .set({ firstFrame: firstFramePath, lastFrame: lastFramePath })
+            .where(eq(shots.id, shot.id));
+
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "frame_ok", firstFrame: firstFramePath, lastFrame: lastFramePath });
+
+          // ── STEP 3: video ────────────────────────────────────────────────────
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "video_start" });
+
+          const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
+
+          // Fetch dialogues for voiceHint
+          const shotDialogues = await db
+            .select({
+              text: dialogues.text,
+              characterId: dialogues.characterId,
+              sequence: dialogues.sequence,
+              charVoiceHint: characters.voiceHint,
+              dialogueVoiceHint: dialogues.voiceHint,
+            })
+            .from(dialogues)
+            .innerJoin(characters, eq(dialogues.characterId, characters.id))
+            .where(eq(dialogues.shotId, shot.id))
+            .orderBy(asc(dialogues.sequence));
+
+          const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
+          const dialogueList = shotDialogues.map((d) => {
+            const char = chainCharacters.find((c) => c.id === d.characterId);
+            const characterName = char?.name ?? "Unknown";
+            const onScreen = isCharacterOnScreen(characterName, videoScript, shot.startFrameDesc);
+            return {
+              characterName,
+              text: d.text,
+              offscreen: !onScreen,
+              visualHint: onScreen ? (char?.visualHint || undefined) : undefined,
+              voiceHint: (d.dialogueVoiceHint || d.charVoiceHint) ?? undefined,
+            };
+          });
+
+          const videoPrompt = shot.videoPrompt || buildVideoPrompt({
+            videoScript,
+            cameraDirection: cleanedCamera,
+            startFrameDesc: shot.startFrameDesc ?? undefined,
+            endFrameDesc: shot.endFrameDesc ?? undefined,
+            duration: effectiveDuration,
+            characters: chainCharacters,
+            dialogues: dialogueList.length > 0 ? dialogueList : undefined,
+            slotContents: videoSlots,
+          });
+
+          const videoResult = await videoProvider.generateVideo({
+            firstFrame: firstFramePath,
+            lastFrame: lastFramePath,
+            prompt: videoPrompt,
+            duration: effectiveDuration,
+            ratio,
+            ...(resolution && { resolution }),
+            onRemoteResult: async ({ videoUrl, taskId }) => {
+              await db.update(shots)
+                .set({
+                  remoteVideoUrl: videoUrl,
+                  remoteVideoTaskId: taskId ?? null,
+                  remoteVideoStatus: "available",
+                  remoteVideoCreatedAt: new Date(),
+                  remoteVideoExpiresAt: getRemoteVideoExpiry(),
+                })
+                .where(eq(shots.id, shot.id));
+            },
+          });
+
+          // ── STEP 4: download seedanceLastFrame for next shot ─────────────────
+          let seedanceLastFramePath: string | null = null;
+          if (videoResult.lastFrameUrl) {
+            try {
+              const fs = await import("node:fs");
+              const nodePath = await import("node:path");
+              const frameRes = await fetch(videoResult.lastFrameUrl);
+              if (frameRes.ok) {
+                const buffer = Buffer.from(await frameRes.arrayBuffer());
+                const framesDir = nodePath.join(versionedUploadDir, "frames");
+                fs.mkdirSync(framesDir, { recursive: true });
+                const framePath = nodePath.join(framesDir, `${shot.id}_chain_lastframe.png`);
+                fs.writeFileSync(framePath, buffer);
+                seedanceLastFramePath = framePath;
+                console.log(`[BatchChainGenerate] Shot ${shot.sequence}: saved seedance last frame → ${framePath}`);
+              }
+            } catch (frameErr) {
+              console.warn(`[BatchChainGenerate] Shot ${shot.sequence}: failed to download last frame:`, frameErr);
+            }
+          }
+
+          // Persist video + seedanceLastFrame
+          await saveVideoToHistory(shot.id, shot.videoUrl, shot.videoResolution, "链式批量重新生成前");
+          await db.update(shots)
+            .set({
+              videoUrl: videoResult.filePath,
+              status: "completed",
+              videoResolution: resolution ?? null,
+              ...(seedanceLastFramePath && { seedanceLastFrame: seedanceLastFramePath }),
+            })
+            .where(eq(shots.id, shot.id));
+
+          // Next shot's firstFrame = actual video last frame (seedanceLastFrame) if available,
+          // otherwise fall back to AI-generated lastFrame
+          chainPreviousFrame = seedanceLastFramePath || lastFramePath;
+
+          okCount++;
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.log(`[BatchChainGenerate] Shot ${shot.sequence}/${allShots.length} done (${elapsed}s)`);
+          emit({
+            shotId: shot.id,
+            sequence: shot.sequence,
+            status: "ok",
+            firstFrame: firstFramePath,
+            lastFrame: lastFramePath,
+            videoUrl: videoResult.filePath,
+          });
+
+        } catch (err) {
+          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+          console.error(`[BatchChainGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
+          await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
+          // Break the chain — can't continue with an unknown last frame
+          chainPreviousFrame = undefined;
+          errCount++;
+          emit({ shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) });
+        }
+      }
+
+      console.log(`[BatchChainGenerate] Done: ${okCount} ok, ${errCount} errors, ${skipCount} skipped`);
+      emit({ type: "done", okCount, errCount, skipCount });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 // --- single_scene_frame: generate Toonflow-style scene reference frame only ---

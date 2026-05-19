@@ -1,9 +1,11 @@
 import path from "path";
+import fs from "fs";
 import { db } from "@/lib/db";
-import { shots, characters, storyboardVersions } from "@/lib/db/schema";
+import { shots, characters, storyboardVersions, projects } from "@/lib/db/schema";
 import { resolveVideoProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
+import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
@@ -52,6 +54,17 @@ export async function handleVideoGenerate(task: Task) {
     .select()
     .from(characters)
     .where(eq(characters.projectId, shot.projectId));
+
+  // 读取项目画风，注入视频 prompt（锁定动画风格，防止视频生成漂移）
+  const [project] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, shot.projectId));
+  const visualStyleTag = (() => {
+    const style = project?.visualStyle;
+    if (!style) return "";
+    return VISUAL_STYLE_PRESETS[style]?.tag ?? "";
+  })();
 
   const versionedUploadDir = await getVersionedUploadDirFromPipeline(shot.versionId);
   const videoProvider = resolveVideoProvider(payload.modelConfig, versionedUploadDir);
@@ -104,6 +117,8 @@ export async function handleVideoGenerate(task: Task) {
       text: dialogues.text,
       characterName: characters.name,
       visualHint: characters.visualHint,
+      charVoiceHint: characters.voiceHint,   // character-level voice (auto-generated at extraction)
+      dialogueVoiceHint: dialogues.voiceHint, // per-line override (manual, optional)
       sequence: dialogues.sequence,
     })
     .from(dialogues)
@@ -112,9 +127,18 @@ export async function handleVideoGenerate(task: Task) {
     .orderBy(asc(dialogues.sequence));
 
   const videoScript = shot.videoScript || shot.motionScript || shot.prompt || "";
+
+  // 清理运镜字段 ** 前缀（与 frame-generate 保持一致）
+  const cleanCamera = (shot.cameraDirection || "static").replace(/^\s*\*{1,2}\s*/, "").trim();
+
+  // 如有项目画风标签，前置注入到视频脚本中作为风格锁
+  const styledVideoScript = visualStyleTag
+    ? `【画风】${visualStyleTag}\n\n${videoScript}`
+    : videoScript;
+
   const prompt = buildVideoPrompt({
-    videoScript,
-    cameraDirection: shot.cameraDirection || "static",
+    videoScript: styledVideoScript,
+    cameraDirection: cleanCamera,
     startFrameDesc: shot.startFrameDesc ?? undefined,
     endFrameDesc: shot.endFrameDesc ?? undefined,
     duration: effectiveDuration,
@@ -125,6 +149,8 @@ export async function handleVideoGenerate(task: Task) {
           characterName: d.characterName,
           text: d.text,
           visualHint: d.visualHint ?? undefined,
+          // Per-line voiceHint takes priority; falls back to character-level voiceHint
+          voiceHint: (d.dialogueVoiceHint || d.charVoiceHint) ?? undefined,
         }))
       : undefined,
   });
@@ -132,6 +158,8 @@ export async function handleVideoGenerate(task: Task) {
   const result = await videoProvider.generateVideo({
     firstFrame: shot.firstFrame,
     lastFrame: shot.lastFrame,
+    firstFrameRemoteUrl: shot.firstFrameRemoteUrl ?? undefined,
+    lastFrameRemoteUrl: shot.lastFrameRemoteUrl ?? undefined,
     prompt,
     duration: effectiveDuration,
     ratio: payload.ratio ?? "16:9",
@@ -150,14 +178,38 @@ export async function handleVideoGenerate(task: Task) {
     },
   });
 
+  // Download Seedance's true last frame (the actual last frame of the generated video).
+  // This provides higher-quality continuity anchoring for the NEXT shot's frame generation
+  // compared to the AI-generated `lastFrame` image used as input.
+  let seedanceLastFramePath: string | null = null;
+  if (result.lastFrameUrl) {
+    try {
+      const frameRes = await fetch(result.lastFrameUrl);
+      if (frameRes.ok) {
+        const buffer = Buffer.from(await frameRes.arrayBuffer());
+        const frameFilename = `${shot.id}_seedance_lastframe.png`;
+        const framesDir = path.join(versionedUploadDir, "frames");
+        fs.mkdirSync(framesDir, { recursive: true });
+        const framePath = path.join(framesDir, frameFilename);
+        fs.writeFileSync(framePath, buffer);
+        seedanceLastFramePath = framePath;
+        console.log(`[VideoGenerate] Saved Seedance last frame: ${framePath}`);
+      }
+    } catch (err) {
+      // Non-fatal: log and continue — video itself was saved successfully
+      console.warn(`[VideoGenerate] Failed to download Seedance last frame:`, err);
+    }
+  }
+
   await db
     .update(shots)
     .set({
       videoUrl: result.filePath,
       status: "completed",
       videoResolution: payload.resolution ?? null,
+      ...(seedanceLastFramePath && { seedanceLastFrame: seedanceLastFramePath }),
     })
     .where(eq(shots.id, payload.shotId));
 
-  return { videoPath: result.filePath };
+  return { videoPath: result.filePath, seedanceLastFrame: seedanceLastFramePath ?? undefined };
 }

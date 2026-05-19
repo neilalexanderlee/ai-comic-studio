@@ -5,6 +5,20 @@ export function buildFirstFramePrompt(params: {
   startFrameDesc: string;
   characterDescriptions: string;
   previousLastFrame?: string;
+  /**
+   * 项目画风标签（来自 projects.visualStyle → VISUAL_STYLE_PRESETS[style].tag）。
+   * 例如："日本现代2D动漫风格，8K高清，纯色背景，赛璐珞渲染，清晰线稿——"
+   * 注入为 prompt 首行，锁定画风，防止模型漂移为写实风。
+   */
+  visualStyleTag?: string;
+  /**
+   * 运镜方向（来自 shot.cameraDirection，已去除 ** 前缀）。
+   * 例如："crane up — 镜头从地面麦秸缓缓升起"
+   * 指定首帧应采用的构图视角，确保帧与视频运动逻辑一致。
+   */
+  cameraDirection?: string;
+  /** 分镜段标题（来自 shot.sceneTitle），提供构图语义。 */
+  sceneTitle?: string;
   slotContents?: Record<string, string>;
 }): string {
   const def = getPromptDefinition("frame_generate_first");
@@ -14,22 +28,44 @@ export function buildFirstFramePrompt(params: {
       startFrameDesc: params.startFrameDesc,
       characterDescriptions: params.characterDescriptions,
       previousLastFrame: params.previousLastFrame,
+      visualStyleTag: params.visualStyleTag,
+      cameraDirection: params.cameraDirection,
+      sceneTitle: params.sceneTitle,
     });
   }
 
-  // Fallback: hardcoded English prompt (should not be reached if registry is intact)
+  // Fallback: hardcoded prompt (should not be reached if registry is intact)
   const lines: string[] = [];
 
-  lines.push(`Create the OPENING FRAME of this shot as a single high-quality image.`);
+  // 画风硬锁（最高优先级）
+  if (params.visualStyleTag) {
+    lines.push(`视频静帧画面。${params.visualStyleTag}生成此镜头的首帧——构图稳定，主体清晰，专为视频帧插值优化。`);
+  } else {
+    lines.push(`视频静帧画面。Create the OPENING FRAME of this shot as a single high-quality image optimized for video frame interpolation.`);
+  }
   lines.push(``);
   lines.push(`=== CRITICAL: ART STYLE (HIGHEST PRIORITY) ===`);
-  lines.push(`Read the CHARACTER DESCRIPTIONS and SCENE DESCRIPTION below. They specify or imply an art style.`);
-  lines.push(`You MUST match that exact art style. Do NOT default to photorealism.`);
-  lines.push(`- If descriptions mention 动漫/漫画/anime/manga/卡通/cartoon → produce anime/manga-style illustration`);
-  lines.push(`- If descriptions mention 写实/真人/photorealistic → produce photorealistic image`);
-  lines.push(`- If reference images are attached, their visual style is the ground truth — match it exactly`);
-  lines.push(`- The art style of the output MUST be consistent with the character reference images`);
+  if (params.visualStyleTag) {
+    lines.push(`【强制画风】本项目画风已由制作方锁定为：${params.visualStyleTag}`);
+    lines.push(`严禁输出写实照片风格。严禁输出3D渲染风格。必须严格遵守上述画风标签。`);
+  } else {
+    lines.push(`Read the CHARACTER DESCRIPTIONS and SCENE DESCRIPTION below. They specify or imply an art style.`);
+    lines.push(`You MUST match that exact art style. Do NOT default to photorealism.`);
+    lines.push(`- If descriptions mention 动漫/漫画/anime/manga/卡通/cartoon → produce anime/manga-style illustration`);
+    lines.push(`- If descriptions mention 写实/真人/photorealistic → produce photorealistic image`);
+    lines.push(`- If reference images are attached, their visual style is the ground truth — match it exactly`);
+  }
   lines.push(``);
+  if (params.sceneTitle) {
+    lines.push(`=== 分镜段落 ===`);
+    lines.push(params.sceneTitle);
+    lines.push(``);
+  }
+  if (params.cameraDirection) {
+    lines.push(`=== 运镜与构图视角 ===`);
+    lines.push(`按以下运镜方式构图首帧：${params.cameraDirection}`);
+    lines.push(``);
+  }
   lines.push(`=== SCENE ENVIRONMENT ===`);
   lines.push(params.sceneDescription);
   lines.push(``);
@@ -75,6 +111,12 @@ export function buildLastFramePrompt(params: {
   endFrameDesc: string;
   characterDescriptions: string;
   firstFramePath: string;
+  /** 项目画风标签（同 buildFirstFramePrompt），锁定尾帧画风一致性。 */
+  visualStyleTag?: string;
+  /** 运镜方向，用于指定尾帧构图视角。 */
+  cameraDirection?: string;
+  /** 分镜段标题，提供语义上下文。 */
+  sceneTitle?: string;
   slotContents?: Record<string, string>;
 }): string {
   const def = getPromptDefinition("frame_generate_last");
@@ -83,19 +125,31 @@ export function buildLastFramePrompt(params: {
       sceneDescription: params.sceneDescription,
       endFrameDesc: params.endFrameDesc,
       characterDescriptions: params.characterDescriptions,
+      visualStyleTag: params.visualStyleTag,
+      cameraDirection: params.cameraDirection,
+      sceneTitle: params.sceneTitle,
     });
   }
 
-  // Fallback: hardcoded English prompt (should not be reached if registry is intact)
+  // Fallback: hardcoded prompt (should not be reached if registry is intact)
   const lines: string[] = [];
 
-  lines.push(`Create the CLOSING FRAME of this shot as a single high-quality image.`);
+  if (params.visualStyleTag) {
+    lines.push(`视频静帧画面。${params.visualStyleTag}生成此镜头的尾帧——构图稳定，姿态完整，专为视频帧插值优化。`);
+  } else {
+    lines.push(`视频静帧画面。Create the CLOSING FRAME of this shot as a single high-quality image optimized for video frame interpolation.`);
+  }
   lines.push(``);
   lines.push(`=== CRITICAL: ART STYLE (HIGHEST PRIORITY) ===`);
-  lines.push(`You MUST match the EXACT art style of the first frame image (attached).`);
-  lines.push(`If the first frame is anime/manga style → this frame MUST also be anime/manga style.`);
-  lines.push(`If the first frame is photorealistic → this frame MUST also be photorealistic.`);
-  lines.push(`Do NOT change or mix art styles. This is non-negotiable.`);
+  if (params.visualStyleTag) {
+    lines.push(`【强制画风】本项目画风已锁定：${params.visualStyleTag}`);
+    lines.push(`你同时必须精确匹配已附带的首帧图像的画风。严禁在画风之间切换。`);
+  } else {
+    lines.push(`You MUST match the EXACT art style of the first frame image (attached).`);
+    lines.push(`If the first frame is anime/manga style → this frame MUST also be anime/manga style.`);
+    lines.push(`If the first frame is photorealistic → this frame MUST also be photorealistic.`);
+    lines.push(`Do NOT change or mix art styles. This is non-negotiable.`);
+  }
   lines.push(``);
   lines.push(`=== SCENE ENVIRONMENT ===`);
   lines.push(params.sceneDescription);

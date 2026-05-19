@@ -137,6 +137,8 @@ export class JimengImageProvider implements AIProvider {
     console.log(`[JimengImage] Task submitted: ${taskId}`);
 
     const imageUrl = await this.pollForResult(taskId);
+    // 在下载前把公网 URL 回传给调用方，可直接用于 Seedance 视频生成请求
+    options?.onRemoteUrl?.(imageUrl);
 
     // 下载并保存到本地
     const imageRes = await fetch(imageUrl);

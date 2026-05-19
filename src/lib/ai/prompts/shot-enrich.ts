@@ -73,8 +73,13 @@ export function buildShotEnrichPrompt(
     title: string;
     sceneDescription?: string;
   },
-  characterHints: Array<{ name: string; visualHint: string }>
+  characterHints: Array<{ name: string; visualHint: string }>,
+  visualStyleTag?: string
 ): string {
+  const styleBlock = visualStyleTag
+    ? `\n⚠️ 画风硬锁（最高优先级）：本项目画风已锁定为"${visualStyleTag}"。startFrameDesc 和 endFrameDesc 必须体现此画风，严禁写实/3D渲染风格。\n`
+    : "";
+
   const hintBlock = characterHints.length > 0
     ? `\n角色视觉标识符（必须在 videoScript 中按此格式使用）：\n${characterHints.map((c) => `${c.name}：${c.visualHint}`).join("\n")}\n`
     : "";
@@ -93,7 +98,7 @@ export function buildShotEnrichPrompt(
   }).join("\n\n---\n\n");
 
   return `集数背景：${episodeContext.title}${episodeContext.sceneDescription ? `\n场景：${episodeContext.sceneDescription}` : ""}
-${hintBlock}
+${styleBlock}${hintBlock}
 以下是需要补全的分镜数据（共 ${shots.length} 个）：
 
 ${shotsBlock}

@@ -864,10 +864,10 @@ const FIRST_FRAME_REFERENCE_RULES = `=== 参考图（角色设定图）===
 const FIRST_FRAME_RENDERING_QUALITY = `=== 渲染 ===
 材质：符合画风的丰富细节
 光线：具有动机的电影级布光。使用轮廓光分离角色。
-背景：完整渲染的详细环境。不要空白或抽象背景。
+背景：【强制必须】渲染完整、精细的背景环境。严禁白色/灰色/纯色背景。背景必须与场景描述一致，展现完整的地点、建筑或自然景观。
 角色：精确匹配参考图的外貌和画风。表情生动，姿态自然有动感。
-构图：电影级取景，明确的视觉焦点和景深。
-禁止：无文字叠加、无水印、无UI元素、无字幕条。`;
+构图：电影级取景，明确的视觉焦点和景深。角色不超过画面70%，背景环境必须可见。
+禁止：无文字叠加、无水印、无UI元素、无字幕条。无白色或纯色背景。`;
 
 const FIRST_FRAME_CONTINUITY_RULES = `=== 连续性要求 ===
 此镜头紧接上一个镜头。附带的参考中包含上一个镜头的尾帧。保持视觉连续性：
@@ -898,20 +898,60 @@ const frameGenerateFirstDef: PromptDefinition = {
       (params?.characterDescriptions as string) ?? "";
     const previousLastFrame =
       (params?.previousLastFrame as string) ?? "";
+    // 新增：项目画风标签（如 "日本现代2D动漫风格，8K高清，赛璐珞渲染——"）
+    const visualStyleTag =
+      (params?.visualStyleTag as string) ?? "";
+    // 新增：运镜方向（已清理 ** 前缀），用于指导构图视角
+    const cameraDirection =
+      (params?.cameraDirection as string) ?? "";
+    // 新增：分镜段标题，提供构图语义上下文
+    const sceneTitle =
+      (params?.sceneTitle as string) ?? "";
 
     const lines: string[] = [];
-    lines.push(`生成此镜头的首帧，作为一张高质量图像。`);
+
+    // 首行：画风硬锁（最高优先级）
+    if (visualStyleTag) {
+      lines.push(`视频静帧画面。【画风硬锁】${visualStyleTag}生成此镜头的首帧——构图稳定，主体清晰，专为视频帧插值优化。`);
+    } else {
+      lines.push(`视频静帧画面。生成此镜头的首帧，作为一张高质量视频开场静帧——构图稳定，主体清晰，专为视频帧插值优化。`);
+    }
     lines.push("");
-    lines.push(r("style_matching"));
+
+    // 画风匹配（内嵌画风硬锁覆盖 slot）
+    if (visualStyleTag) {
+      lines.push(`=== 【强制】画风锁定（最高优先级，不可覆盖）===`);
+      lines.push(`本项目画风标签：${visualStyleTag}`);
+      lines.push(`严禁输出写实照片风格。严禁输出3D CG风格。必须严格遵守上述画风标签，忽略任何与此矛盾的指令。`);
+    } else {
+      lines.push(r("style_matching"));
+    }
     lines.push("");
-    lines.push(`=== 场景环境 ===`);
-    lines.push(sceneDescription);
+
+    // 分镜段标题（构图语义）
+    if (sceneTitle) {
+      lines.push(`=== 分镜段落 ===`);
+      lines.push(sceneTitle);
+      lines.push("");
+    }
+
+    // 运镜构图视角
+    if (cameraDirection) {
+      lines.push(`=== 运镜与构图视角（首帧必须匹配此视角）===`);
+      lines.push(cameraDirection);
+      lines.push("");
+    }
+
+    lines.push(`=== 【强制】背景场景（最高优先级，必须渲染）===`);
+    lines.push(`严禁白色、灰色或纯色背景。必须渲染以下场景环境：`);
+    lines.push(sceneDescription || "宏大的奇幻场景，有建筑、自然景观或战场环境");
+    lines.push(`背景需完整可见，占画面至少30%面积，展现真实的场景纵深与氛围。`);
     lines.push("");
     lines.push(`=== 帧描述 ===`);
     lines.push(startFrameDesc);
     lines.push("");
     lines.push(`=== 角色描述 ===`);
-    lines.push(characterDescriptions);
+    lines.push(characterDescriptions || "（以参考图为准）");
     lines.push("");
     lines.push(r("reference_rules"));
     lines.push("");
@@ -951,10 +991,10 @@ const LAST_FRAME_NEXT_SHOT_READINESS = `=== 作为下一个镜头的起始点 ==
 const LAST_FRAME_RENDERING_QUALITY = `=== 渲染 ===
 材质：匹配首帧风格的丰富细节
 光线：与首帧相同的布光方案。仅在动作驱动的情况下变化。
-背景：必须匹配首帧的环境。
+背景：【强制必须】渲染与首帧完全一致的完整背景环境。严禁白色/灰色/纯色背景。背景必须展示与首帧相同的场景环境。
 角色：精确匹配参考图。展示镜头动作结束时的情感状态。
-构图：镜头的自然收束，为下一个剪辑做好准备。
-禁止：无文字叠加、无水印、无UI元素、无字幕条。`;
+构图：镜头的自然收束，为下一个剪辑做好准备。角色不超过画面70%，背景环境必须可见。
+禁止：无文字叠加、无水印、无UI元素、无字幕条。无白色或纯色背景。`;
 
 const frameGenerateLastDef: PromptDefinition = {
   key: "frame_generate_last",
@@ -976,23 +1016,58 @@ const frameGenerateLastDef: PromptDefinition = {
       (params?.endFrameDesc as string) ?? "";
     const characterDescriptions =
       (params?.characterDescriptions as string) ?? "";
+    const visualStyleTag =
+      (params?.visualStyleTag as string) ?? "";
+    const cameraDirection =
+      (params?.cameraDirection as string) ?? "";
+    const sceneTitle =
+      (params?.sceneTitle as string) ?? "";
 
     const lines: string[] = [];
-    lines.push(`生成此镜头的尾帧，作为一张高质量图像。`);
+
+    // 首行：画风硬锁（最高优先级）
+    if (visualStyleTag) {
+      lines.push(`视频静帧画面。【画风硬锁】${visualStyleTag}生成此镜头的尾帧——构图稳定，姿态完整，专为视频帧插值优化。`);
+    } else {
+      lines.push(`视频静帧画面。生成此镜头的尾帧，作为一张高质量视频结束静帧——构图稳定，姿态完整，专为视频帧插值优化。`);
+    }
     lines.push("");
-    lines.push(r("style_matching"));
+
+    // 画风匹配（内嵌画风硬锁覆盖 slot）
+    if (visualStyleTag) {
+      lines.push(`=== 【强制】画风锁定（最高优先级，不可覆盖）===`);
+      lines.push(`本项目画风标签：${visualStyleTag}`);
+      lines.push(`你同时必须精确匹配已附带的首帧图像的画风。严禁在任何画风之间切换或混合。`);
+    } else {
+      lines.push(r("style_matching"));
+    }
     lines.push("");
-    lines.push(`=== 场景环境 ===`);
-    lines.push(sceneDescription);
+
+    if (sceneTitle) {
+      lines.push(`=== 分镜段落 ===`);
+      lines.push(sceneTitle);
+      lines.push("");
+    }
+
+    if (cameraDirection) {
+      lines.push(`=== 运镜与构图视角（尾帧遵循同一运镜终止视角）===`);
+      lines.push(cameraDirection);
+      lines.push("");
+    }
+
+    lines.push(`=== 【强制】背景场景（最高优先级，必须渲染）===`);
+    lines.push(`严禁白色、灰色或纯色背景。必须渲染以下场景环境，并与首帧保持一致：`);
+    lines.push(sceneDescription || "宏大的奇幻场景，有建筑、自然景观或战场环境");
+    lines.push(`背景需完整可见，占画面至少30%面积，展现真实的场景纵深与氛围。`);
     lines.push("");
     lines.push(`=== 帧描述 ===`);
     lines.push(endFrameDesc);
     lines.push("");
     lines.push(`=== 角色描述 ===`);
-    lines.push(characterDescriptions);
+    lines.push(characterDescriptions || "（以参考图为准）");
     lines.push("");
     lines.push(`=== 参考图 ===`);
-    lines.push(`第一张附带图像是此镜头的首帧——以它为视觉锚点。`);
+    lines.push(`第一张附带图像是此镜头的首帧——以它为视觉锚点，背景必须与首帧完全一致。`);
     lines.push(`其余附带图像是角色设定图（每张4个视角，名字印在底部）。`);
     lines.push(`将每张设定图的角色名与场景中的角色对应。`);
     lines.push("");
@@ -1101,7 +1176,7 @@ const sceneFrameGenerateDef: PromptDefinition = {
 
 // ─── 11. video_generate ─────────────────────────────────
 
-const VIDEO_INTERPOLATION_HEADER = `从首帧平滑插值到尾帧。`;
+const VIDEO_INTERPOLATION_HEADER = `从首帧平滑插值到尾帧。提示词格式遵循 Seedance 官方规范：主体+运动+环境+运镜+美学描述，聚焦动态过渡而非静态外观。`;
 
 const VIDEO_DIALOGUE_FORMAT = `对白格式：
 - 画内对白：【对白口型】角色名（视觉标识）: "台词"
@@ -1163,14 +1238,14 @@ const REF_VIDEO_PROMPT_ROLE_DEFINITION = `你是一位AI视频提示词撰写专
 视频模型将首帧作为起点。你的工作是精确描述如何从首帧过渡到尾帧——什么在动，怎么动，什么时候动。仔细研究两帧：注意角色位置、表情、光线、镜头角度和环境在两帧之间的变化。`;
 
 const REF_VIDEO_PROMPT_MOTION_RULES = `## 规则
+- 遵循 Seedance 官方提示词公式：【主体】+【运动】+【环境】+【运镜】+【美学描述】，按此顺序组织内容
 - 匹配剧本上下文的语言（中文剧本 → 中文提示词，英文 → 英文），纯散文，无标签
 - 首次提及时："角色名（视觉标识）"——使用下方角色视觉标识中提供的精确标识符。绝不自行编造替代品。
-- 镜头运动：要具体——"缓慢推近"、"固定"、"焦点从X转移到Y"、"手持微晃"
+- 运动描述：聚焦实际物理动作——速度、方向、幅度、节奏（例："以极慢弧线向右转身45°"而非"优雅地转身"）
+- 运镜：必须明确指定——"固定镜头"、"缓慢推近"、"快速切换"、"手持跟拍"、"弧形环绕"、"俯拍"等
 - 将动作拆解为精确的节拍，有清晰的因果关系：先发生什么 → 然后 → 结果
-- 每个节拍应描述物理运动：距离、速度、方向、运动的质感
-- 不要使用空洞的修饰词（"优雅地"、"轻柔地"），除非它们指定了运动方式
-- 氛围/环境细节仅在它们有动态时描写（摇曳的枝条、升腾的雾气、闪烁的灯光）
-- 40-70字
+- 环境动态：仅在有动态时描写（摇曳的枝条、升腾的雾气、闪烁的灯光）
+- 字数：40-80字（复杂动作场景可适当延长）
 - 如有对白，保持原文语言，独立一行放在最后：【对白口型】角色名（视觉标识）: "原文台词"
 - 仅输出提示词，无前言`;
 

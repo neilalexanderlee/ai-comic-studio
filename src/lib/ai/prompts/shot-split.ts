@@ -195,8 +195,13 @@ export function buildShotSplitPrompt(
   screenplay: string,
   characters: string,
   characterVisualHints?: Array<{ name: string; visualHint: string }>,
-  targetDurationSeconds?: number | null
+  targetDurationSeconds?: number | null,
+  visualStyleTag?: string
 ): string {
+  const styleBlock = visualStyleTag
+    ? `\n⚠️ ART STYLE LOCK — HIGHEST PRIORITY:\nThis project's visual style is LOCKED to: ${visualStyleTag}\nEvery startFrame and endFrame description MUST explicitly state this style. NEVER describe photorealistic or 3D-render appearances. Character and environment descriptions must match this art style exactly.\n`
+    : "";
+
   const hintBlock = characterVisualHints?.length
     ? `\n--- CHARACTER VISUAL IDENTIFIERS (MANDATORY) ---\n${characterVisualHints.map((c) => `${c.name}：${c.visualHint}`).join("\n")}\n--- END ---\n\nCRITICAL: Whenever a character appears in videoScript, motionScript, startFrame, or endFrame, you MUST write their name followed by their visual identifier in parentheses using EXACTLY the text above. Example: 天枢真君（银发金瞳）. Never invent alternative descriptions — always reuse the exact identifier string provided.`
     : "";
@@ -220,7 +225,7 @@ At an average of ${avgShotDuration}s per shot, you MUST generate AT LEAST ${minS
     : "";
 
   return `Decompose this screenplay into a professional S-grade shot list for AI video generation. Each shot needs a vivid, specific videoScript that Seedance can directly use to generate cinematic motion — NO template phrases allowed.
-${coverageRule}
+${styleBlock}${coverageRule}
 --- SCREENPLAY ---
 ${screenplay}
 --- END ---

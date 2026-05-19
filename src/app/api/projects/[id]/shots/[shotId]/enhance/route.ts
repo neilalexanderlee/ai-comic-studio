@@ -88,7 +88,27 @@ export async function POST(
     const uploadDir = await getVersionedUploadDir(shot.versionId);
     const enhancer = new VolcengineEnhanceProvider({ uploadDir, apiKey });
 
-    const enhancedPath = await enhancer.enhanceVideo(shot.videoUrl);
+    // 画质增强 API 要求公网可访问的 HTTPS URL。
+    // Seedance 生成视频时会返回云端 URL（remoteVideoUrl），有效期约 24 小时。
+    // 本地文件路径无法被外网访问，因此只能使用 remoteVideoUrl。
+    // 若链接已过期，用户需要重新生成视频以获取新的云端链接。
+    if (!shot.remoteVideoUrl) {
+      await db.update(shots).set({ status: "completed" }).where(eq(shots.id, shotId));
+      return NextResponse.json(
+        { error: "该视频没有云端链接，请重新生成视频后再进行画质增强。" },
+        { status: 400 }
+      );
+    }
+    if (shot.remoteVideoExpiresAt && shot.remoteVideoExpiresAt <= new Date()) {
+      await db.update(shots).set({ status: "completed" }).where(eq(shots.id, shotId));
+      return NextResponse.json(
+        { error: "云端视频链接已过期（有效期 24 小时），请重新生成视频后再进行画质增强。" },
+        { status: 400 }
+      );
+    }
+
+    console.log(`[EnhanceRoute] Using remoteVideoUrl for enhance: ${shot.remoteVideoUrl}`);
+    const enhancedPath = await enhancer.enhanceVideo(shot.remoteVideoUrl);
 
     // 把 480p 旧视频存入历史（超出 5 条时自动删除最旧文件）
     await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "增强↑720p 前");

@@ -26,6 +26,21 @@ function resolveSlot(
   return hardcodedFallback;
 }
 
+/** Dialogue entry for a single line of spoken text in a video shot. */
+type DialogueEntry = {
+  characterName: string;
+  text: string;
+  offscreen?: boolean;
+  /** Visual descriptor used to identify the character on screen (e.g. "穿红衣女子"). */
+  visualHint?: string;
+  /**
+   * Voice characteristic hint following Seedance 1.5-pro formula:
+   * 性别+年龄区间+声音属性+语速+情绪基线
+   * Example: "女性，约20岁，声音明亮轻快，语速中等偏快，情绪积极略带兴奋"
+   */
+  voiceHint?: string;
+};
+
 /**
  * Prompt for reference-image-based video generation (Toonflow/Kling reference mode).
  * Seedance-style format: Shot description (prose) → Camera → 【对白口型】.
@@ -36,7 +51,7 @@ export function buildReferenceVideoPrompt(params: {
   cameraDirection: string;
   duration?: number;
   characters?: CharacterRef[];
-  dialogues?: Array<{ characterName: string; text: string; offscreen?: boolean; visualHint?: string }>;
+  dialogues?: DialogueEntry[];
   slotContents?: Record<string, string>;
 }): string {
   const lines: string[] = [];
@@ -73,9 +88,14 @@ export function buildReferenceVideoPrompt(params: {
     lines.push(``);
     for (const d of params.dialogues) {
       if (d.offscreen) {
-        lines.push(`${offScreenLabel}${d.characterName}: "${d.text}"`);
+        // 画外音：可附加声音属性
+        const voiceSuffix = d.voiceHint ? `（${d.voiceHint}）` : "";
+        lines.push(`${offScreenLabel}${d.characterName}${voiceSuffix}: "${d.text}"`);
       } else {
-        const label = d.visualHint ? `${d.characterName}（${d.visualHint}）` : d.characterName;
+        // 画内对白：视觉标识 + 可选声音属性
+        const visualPart = d.visualHint ? `（${d.visualHint}）` : "";
+        const voicePart = d.voiceHint ? `，声音属性：${d.voiceHint}` : "";
+        const label = `${d.characterName}${visualPart}${voicePart}`;
         lines.push(`${onScreenLabel}${label}: "${d.text}"`);
       }
     }
@@ -92,7 +112,7 @@ export function buildVideoPrompt(params: {
   sceneDescription?: string;       // kept for call-site compatibility, not used in output
   duration?: number;
   characters?: CharacterRef[];
-  dialogues?: Array<{ characterName: string; text: string; offscreen?: boolean; visualHint?: string }>;
+  dialogues?: DialogueEntry[];
   slotContents?: Record<string, string>;
 }): string {
   const lines: string[] = [];
@@ -160,9 +180,12 @@ export function buildVideoPrompt(params: {
     lines.push(``);
     for (const d of params.dialogues) {
       if (d.offscreen) {
-        lines.push(`${offScreenLabel}${d.characterName}: "${d.text}"`);
+        const voiceSuffix = d.voiceHint ? `（${d.voiceHint}）` : "";
+        lines.push(`${offScreenLabel}${d.characterName}${voiceSuffix}: "${d.text}"`);
       } else {
-        const label = d.visualHint ? `${d.characterName}（${d.visualHint}）` : d.characterName;
+        const visualPart = d.visualHint ? `（${d.visualHint}）` : "";
+        const voicePart = d.voiceHint ? `，声音属性：${d.voiceHint}` : "";
+        const label = `${d.characterName}${visualPart}${voicePart}`;
         lines.push(`${onScreenLabel}${label}: "${d.text}"`);
       }
     }

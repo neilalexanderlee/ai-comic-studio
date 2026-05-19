@@ -94,6 +94,8 @@ export class KlingImageProvider implements AIProvider {
 
     // Poll for result
     const imageUrl = await this.pollForResult(taskId);
+    // 在下载前把公网 URL 回传给调用方，可直接用于 Seedance 视频生成请求
+    options?.onRemoteUrl?.(imageUrl);
 
     // Download to local storage
     const imageRes = await fetch(imageUrl);
