@@ -203,10 +203,13 @@ export function buildVideoPrompt(params: {
     const openingLabel = extractFrameLabel(frameAnchorsText, "首帧", "Opening frame:");
     const closingLabel = extractFrameLabel(frameAnchorsText, "尾帧", "Closing frame:");
 
+    const duration = params.duration ?? 10;
+
     lines.push(``);
     lines.push(anchorHeader);
-    if (hasStart) lines.push(`${openingLabel} ${params.startFrameDesc}`);
-    if (hasEnd) lines.push(`${closingLabel} ${params.endFrameDesc}`);
+    // Use timeline format (0s / Xs) for better Seedance 2.0 interpolation
+    if (hasStart) lines.push(`${openingLabel} [0s] ${params.startFrameDesc}`);
+    if (hasEnd) lines.push(`${closingLabel} [${duration}s] ${params.endFrameDesc}`);
   }
 
   if (params.dialogues?.length) {

@@ -7,7 +7,11 @@
     "build": "next build",
     "start": "next start -p 3007",
     "lint": "eslint",
-    "pdf:intro": "node scripts/print-intro-pdf.cjs"
+    "pdf:intro": "node scripts/print-intro-pdf.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "eval": "tsx src/lib/evals/index.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",
@@ -52,10 +56,13 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "^2.0.0",
     "drizzle-kit": "^0.31.9",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.19.0",
+    "typescript": "^5",
+    "vitest": "^2.0.0"
   }
 }

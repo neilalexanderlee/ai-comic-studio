@@ -1,0 +1,1 @@
+ALTER TABLE projects ADD COLUMN enhance_prompts INTEGER NOT NULL DEFAULT 1;

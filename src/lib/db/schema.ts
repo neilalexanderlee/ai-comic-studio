@@ -14,6 +14,7 @@ export const projects = sqliteTable("projects", {
   finalVideoUrl: text("final_video_url"),
   generationMode: text('generation_mode', { enum: ['keyframe', 'reference'] }).notNull().default('keyframe'),
   useProjectPrompts: integer("use_project_prompts").notNull().default(0),
+  enhancePrompts: integer("enhance_prompts").notNull().default(1),
   visualStyle: text("visual_style").notNull().default("anime_2d"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

@@ -12,7 +12,7 @@ import { enqueueTask } from "@/lib/task-queue";
 import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
-import { buildCharacterExtractPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
+import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
@@ -39,6 +39,7 @@ import {
 import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted-shots";
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
 import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
+import { enhanceImagePrompt, enhanceVideoPrompt } from "@/lib/ai/prompt-enhancer";
 
 export const maxDuration = 300;
 
@@ -81,7 +82,8 @@ function filterShotCharacters<T extends { name: string }>(
   shotText: string,
   allCharacters: T[]
 ): T[] {
-  if (!shotText || allCharacters.length === 0) return allCharacters;
+  if (allCharacters.length === 0) return [];
+  if (!shotText) return [];
   const text = shotText.toLowerCase();
   const matched = allCharacters.filter((c) => {
     if (!c.name) return false;
@@ -223,9 +225,10 @@ export async function POST(
     payload?: Record<string, unknown>;
     modelConfig?: ModelConfig;
     episodeId?: string;
+    enhancePrompts?: boolean;
   };
 
-  const { action, payload, modelConfig, episodeId } = body;
+  const { action, payload, modelConfig, episodeId, enhancePrompts } = body;
   const resolvedModelConfig = (await hydrateModelConfigSecrets(
     userId,
     modelConfig
@@ -270,39 +273,39 @@ export async function POST(
   }
 
   if (action === "batch_frame_generate") {
-    return handleBatchFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleBatchFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "single_frame_generate") {
-    return handleSingleFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleSingleFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "single_video_generate") {
-    return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig);
+    return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
   }
 
   if (action === "batch_video_generate") {
-    return handleBatchVideoGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleBatchVideoGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "batch_chain_generate") {
-    return handleBatchChainGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleBatchChainGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "single_scene_frame") {
-    return handleSingleSceneFrame(projectId, userId, payload, resolvedModelConfig);
+    return handleSingleSceneFrame(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
   }
 
   if (action === "batch_scene_frame") {
-    return handleBatchSceneFrame(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleBatchSceneFrame(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "single_reference_video") {
-    return handleSingleReferenceVideo(projectId, userId, payload, resolvedModelConfig);
+    return handleSingleReferenceVideo(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
   }
 
   if (action === "batch_reference_video") {
-    return handleBatchReferenceVideo(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleBatchReferenceVideo(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
   }
 
   if (action === "single_video_prompt") {
@@ -315,6 +318,10 @@ export async function POST(
 
   if (action === "ai_optimize_text") {
     return handleAiOptimizeText(payload, resolvedModelConfig);
+  }
+
+  if (action === "enrich_shot_transitions") {
+    return handleEnrichShotTransitions(projectId, userId, payload, resolvedModelConfig, episodeId);
   }
 
   if (action === "video_assemble") {
@@ -465,13 +472,20 @@ async function handleCharacterExtract(
   episodeId?: string
 ) {
   let script: string | null = null;
+  let visualStyle: string = "anime_2d";
+
+  // Always fetch project for visualStyle (even when episode is specified)
+  const [proj] = await db
+    .select({ script: projects.script, visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  visualStyle = proj?.visualStyle || "anime_2d";
 
   if (episodeId) {
     const [episode] = await db.select().from(episodes).where(eq(episodes.id, episodeId));
     script = episode?.script ?? null;
   } else {
-    const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
-    script = project?.script ?? null;
+    script = proj?.script ?? null;
   }
 
   if (!script) {
@@ -503,8 +517,9 @@ async function handleCharacterExtract(
   }
 
   const model = createLanguageModel(modelConfig.text);
-  const charExtractSystem = await resolvePrompt("character_extract", { userId, projectId });
-  console.log("[CharacterExtract] resolved system prompt length:", charExtractSystem?.length ?? 0);
+  // Build system prompt with project's visual style so the LLM uses the correct art style
+  const charExtractSystem = buildCharacterExtractSystemPrompt(visualStyle);
+  console.log("[CharacterExtract] visualStyle:", visualStyle, "system prompt length:", charExtractSystem.length);
 
   const { text } = await generateText({
     model,
@@ -1230,7 +1245,8 @@ async function handleBatchFrameGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   if (!modelConfig?.image) {
     return NextResponse.json(
@@ -1362,19 +1378,23 @@ async function handleBatchFrameGenerate(
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
   const encoder = new TextEncoder();
+  const batchTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const batchImageProtocol = modelConfig?.image?.protocol ?? "";
 
   // Capture all loop variables needed inside the stream start callback
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
     userId, projectId, skipCount, batchVisualStyleTag,
+    enhancePrompts, batchTextProvider, batchImageProtocol,
   };
 
   // SSE streaming via ReadableStream start() — Next.js App Router idiomatic pattern
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const { allShots, copiedFirstFrame, overwrite, frameCharacters,
-              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag } = loopCtx;
+              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
+              enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
 
       function emit(data: object) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
@@ -1414,7 +1434,7 @@ async function handleBatchFrameGenerate(
             const shotCharDesc = shotChars
               .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
               .join("\n");
-            const firstPrompt = buildFirstFramePrompt({
+            const firstPromptRaw = buildFirstFramePrompt({
               sceneDescription: shot.prompt || "",
               startFrameDesc: shot.startFrameDesc || shot.prompt || "",
               characterDescriptions: shotCharDesc,
@@ -1422,6 +1442,9 @@ async function handleBatchFrameGenerate(
               cameraDirection: cleanedCamera,
               slotContents: frameFirstSlots,
             });
+            const firstPrompt = enhancePrompts && batchTextProvider
+              ? await enhanceImagePrompt(firstPromptRaw, batchImageProtocol, batchTextProvider)
+              : firstPromptRaw;
             firstFramePath = await ai.generateImage(firstPrompt, {
               ...imageOpts,
               quality: "hd",
@@ -1441,7 +1464,7 @@ async function handleBatchFrameGenerate(
           const shotCharDesc2 = shotChars2
             .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
             .join("\n");
-          const lastPrompt = buildLastFramePrompt({
+          const lastPromptRaw = buildLastFramePrompt({
             sceneDescription: shot.prompt || "",
             endFrameDesc: shot.endFrameDesc || shot.prompt || "",
             characterDescriptions: shotCharDesc2,
@@ -1450,6 +1473,9 @@ async function handleBatchFrameGenerate(
             cameraDirection: cleanedCamera,
             slotContents: frameLastSlots,
           });
+          const lastPrompt = enhancePrompts && batchTextProvider
+            ? await enhanceImagePrompt(lastPromptRaw, batchImageProtocol, batchTextProvider)
+            : lastPromptRaw;
           const lastFramePath = await ai.generateImage(lastPrompt, {
             ...imageOpts,
             quality: "hd",
@@ -1498,7 +1524,8 @@ async function handleSingleFrameGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   const shotId = payload?.shotId as string;
   if (!shotId) {
@@ -1524,8 +1551,9 @@ async function handleSingleFrameGenerate(
     .filter(Boolean)
     .join(" ");
   const shotCharacters = filterShotCharacters(shotText, projectCharacters);
-  // Fall back to all episode characters only if none matched (e.g. pure action shot with no names)
-  const charsForFrame = shotCharacters.length > 0 ? shotCharacters : projectCharacters;
+  // Use only characters mentioned in this shot — if none matched (crowd scene / no named chars),
+  // pass an empty list so no ref images are injected.
+  const charsForFrame = shotCharacters;
 
   const characterDescriptions = charsForFrame
     .map((c) => `${c.name}: ${c.description}`)
@@ -1586,6 +1614,8 @@ async function handleSingleFrameGenerate(
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
+  const singleTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const singleImageProtocol = modelConfig?.image?.protocol ?? "";
 
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
@@ -1617,7 +1647,7 @@ async function handleSingleFrameGenerate(
 
     if (frameTarget === "first") {
       // Regenerate first frame only (ignore previous shot continuity — user explicitly asked for fresh)
-      const firstPrompt = buildFirstFramePrompt({
+      const firstPromptRaw = buildFirstFramePrompt({
         sceneDescription: shot.prompt || "",
         startFrameDesc: shot.startFrameDesc || shot.prompt || "",
         characterDescriptions: characterDescriptionsWithHints,
@@ -1625,6 +1655,9 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
+      const firstPrompt = enhancePrompts && singleTextProvider
+        ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
+        : firstPromptRaw;
       const firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
@@ -1644,7 +1677,7 @@ async function handleSingleFrameGenerate(
         await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
         return NextResponse.json({ error: "首帧不存在，请先生成首帧" }, { status: 400 });
       }
-      const lastPrompt = buildLastFramePrompt({
+      const lastPromptRaw = buildLastFramePrompt({
         sceneDescription: shot.prompt || "",
         endFrameDesc: shot.endFrameDesc || shot.prompt || "",
         characterDescriptions: characterDescriptionsWithHints,
@@ -1653,6 +1686,9 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameLastSlots,
       });
+      const lastPrompt = enhancePrompts && singleTextProvider
+        ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
+        : lastPromptRaw;
       const lastFramePath = await ai.generateImage(lastPrompt, {
         ...imageOpts,
         quality: "hd",
@@ -1670,12 +1706,30 @@ async function handleSingleFrameGenerate(
     }
 
     // frameTarget === "both" (default)
-    // Reuse previous shot's lastFrame directly — no need to regenerate
+    // Smart chain-break: only reuse the previous shot's last frame if it contains
+    // overlapping named characters. crowd→character cuts always generate a fresh first frame.
     let firstFramePath: string;
-    if (previousShot?.lastFrame) {
-      firstFramePath = previousShot.lastFrame;
+    // disableChaining: caller (shot-card) can force independent first frame generation
+    const disableChaining = payload?.disableChaining === true;
+    const prevShotTextSingle = previousShot
+      ? [previousShot.prompt, previousShot.motionScript, previousShot.videoScript].filter(Boolean).join(" ")
+      : "";
+    const prevShotCharsSingle = previousShot
+      ? filterShotCharacters(prevShotTextSingle, projectCharacters)
+      : [];
+    const isCrowdToCharCutSingle = prevShotCharsSingle.length === 0 && charsForFrame.length > 0;
+    const shouldChainSingle = !disableChaining && !!previousShot?.lastFrame && !isCrowdToCharCutSingle;
+
+    if (shouldChainSingle) {
+      // Same-scene continuation: inherit previous shot's last frame as this shot's first frame
+      firstFramePath = previousShot!.lastFrame!;
     } else {
-      const firstPrompt = buildFirstFramePrompt({
+      // Generate fresh first frame from this shot's own startFrameDesc + character sheets.
+      // This handles: first shot, crowd→character cuts, and shots with no prior frame.
+      if (isCrowdToCharCutSingle) {
+        console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: crowd→character cut — generating fresh firstFrame`);
+      }
+      const firstPromptRaw = buildFirstFramePrompt({
         sceneDescription: shot.prompt || "",
         startFrameDesc: shot.startFrameDesc || shot.prompt || "",
         characterDescriptions: characterDescriptionsWithHints,
@@ -1683,6 +1737,9 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
+      const firstPrompt = enhancePrompts && singleTextProvider
+        ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
+        : firstPromptRaw;
       firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
@@ -1690,7 +1747,7 @@ async function handleSingleFrameGenerate(
       });
     }
 
-    const lastPrompt = buildLastFramePrompt({
+    const lastPromptRaw = buildLastFramePrompt({
       sceneDescription: shot.prompt || "",
       endFrameDesc: shot.endFrameDesc || shot.prompt || "",
       characterDescriptions: characterDescriptionsWithHints,
@@ -1699,6 +1756,9 @@ async function handleSingleFrameGenerate(
       cameraDirection: singleCleanedCamera,
       slotContents: frameLastSlots,
     });
+    const lastPrompt = enhancePrompts && singleTextProvider
+      ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
+      : lastPromptRaw;
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
@@ -1732,7 +1792,8 @@ async function handleSingleVideoGenerate(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
+  modelConfig?: ModelConfig,
+  enhancePrompts?: boolean
 ) {
   const shotId = payload?.shotId as string;
   if (!shotId) {
@@ -1821,7 +1882,7 @@ async function handleSingleVideoGenerate(
         visualHint,
       };
     });
-    const videoPrompt = shot.videoPrompt || buildVideoPrompt({
+    const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
       videoScript,
       cameraDirection: shot.cameraDirection || "static",
       startFrameDesc: shot.startFrameDesc ?? undefined,
@@ -1832,6 +1893,10 @@ async function handleSingleVideoGenerate(
       slotContents: videoSlots,
       visualStyleTag: singleVideoStyleTag,
     });
+    const singleVideoTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+    const videoPrompt = enhancePrompts && singleVideoTextProvider
+      ? await enhanceVideoPrompt(videoPromptRaw, modelConfig?.video?.protocol ?? "", singleVideoTextProvider)
+      : videoPromptRaw;
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
@@ -1879,7 +1944,8 @@ async function handleBatchVideoGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   if (!modelConfig?.video) {
     return NextResponse.json({ error: "No video model configured" }, { status: 400 });
@@ -1928,6 +1994,8 @@ async function handleBatchVideoGenerate(
   const resolution = payload?.resolution as "480p" | "720p" | undefined;
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
+  const batchVideoTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const batchVideoProtocol = modelConfig?.video?.protocol ?? "";
 
   // Mark all as generating
   await Promise.all(
@@ -1978,7 +2046,7 @@ async function handleBatchVideoGenerate(
           };
         });
 
-        const videoPrompt = shot.videoPrompt || buildVideoPrompt({
+        const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
           videoScript,
           cameraDirection: shot.cameraDirection || "static",
           startFrameDesc: shot.startFrameDesc ?? undefined,
@@ -1989,6 +2057,9 @@ async function handleBatchVideoGenerate(
           slotContents: videoSlots,
           visualStyleTag: batchVideoStyleTag,
         });
+        const videoPrompt = enhancePrompts && batchVideoTextProvider
+          ? await enhanceVideoPrompt(videoPromptRaw, batchVideoProtocol, batchVideoTextProvider)
+          : videoPromptRaw;
 
         const result = await videoProvider.generateVideo({
           firstFrame: shot.firstFrame!,
@@ -2041,7 +2112,8 @@ async function handleBatchChainGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   if (!modelConfig?.image) {
     return NextResponse.json({ error: "No image model configured" }, { status: 400 });
@@ -2102,6 +2174,9 @@ async function handleBatchChainGenerate(
   const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
+  const chainTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const chainImageProtocol = modelConfig?.image?.protocol ?? "";
+  const chainVideoProtocol = modelConfig?.video?.protocol ?? "";
 
   // Slot contents
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
@@ -2151,16 +2226,32 @@ async function handleBatchChainGenerate(
           // ── STEP 1: firstFrame ────────────────────────────────────────────────
           let firstFramePath: string;
 
-          if (i === 0 || !chainPreviousFrame) {
-            // First shot: generate firstFrame with Seedream
-            const shotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-            const shotChars = filterShotCharacters(shotText, chainCharacters);
+          // Compute current shot's named characters for smart chain-break decision
+          const shotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
+          const shotChars = filterShotCharacters(shotText, chainCharacters);
+
+          // Smart chain-break: if the previous shot was a crowd/establishing scene (no named
+          // characters) and the current shot introduces named characters, generating the first
+          // frame fresh from the shot's own startFrameDesc produces far better results than
+          // inheriting a crowd image and asking the model to morph it into a character shot.
+          const prevShot = i > 0 ? allShots[i - 1] : null;
+          const prevShotText = prevShot
+            ? [prevShot.prompt, prevShot.motionScript, prevShot.videoScript].filter(Boolean).join(" ")
+            : "";
+          const prevShotChars = prevShot ? filterShotCharacters(prevShotText, chainCharacters) : [];
+          const isCrowdToCharacterCut = prevShotChars.length === 0 && shotChars.length > 0;
+
+          const shouldChain = !isCrowdToCharacterCut && i > 0 && !!chainPreviousFrame;
+
+          if (!shouldChain) {
+            // Generate firstFrame fresh from this shot's own startFrameDesc + character sheets.
+            // Covers: first shot, crowd→character cuts, and any shot with no previous frame.
             const resolvedChars = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
             await saveShotWarnings(shot.id, resolvedChars);
             const shotCharDesc = shotChars
               .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
               .join("\n");
-            const firstPrompt = buildFirstFramePrompt({
+            const firstPromptRaw = buildFirstFramePrompt({
               sceneDescription: shot.prompt || "",
               startFrameDesc: shot.startFrameDesc || shot.prompt || "",
               characterDescriptions: shotCharDesc,
@@ -2168,27 +2259,33 @@ async function handleBatchChainGenerate(
               cameraDirection: cleanedCamera,
               slotContents: frameFirstSlots,
             });
+            const firstPrompt = enhancePrompts && chainTextProvider
+              ? await enhanceImagePrompt(firstPromptRaw, chainImageProtocol, chainTextProvider)
+              : firstPromptRaw;
             firstFramePath = await imageProvider.generateImage(firstPrompt, {
               ...imageOpts,
               quality: "hd",
               referenceImages: resolvedChars.map((c) => c.imagePath),
               referenceLabels: resolvedChars.map((c) => c.name),
             });
+            if (isCrowdToCharacterCut) {
+              console.log(`[BatchChainGenerate] Shot ${shot.sequence}: crowd→character cut detected — generated fresh firstFrame`);
+            }
           } else {
-            // Non-first shots: use seedanceLastFrame from previous shot directly
-            // This is the true last frame of the generated video — higher continuity quality
-            firstFramePath = chainPreviousFrame;
+            // Same-scene continuation: reuse the actual last frame from the previous video.
+            // This preserves pixel-level continuity for consecutive shots in the same scene
+            // with overlapping characters.
+            firstFramePath = chainPreviousFrame!;
           }
 
           // ── STEP 2: lastFrame ────────────────────────────────────────────────
-          const shotText2 = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-          const shotChars2 = filterShotCharacters(shotText2, chainCharacters);
-          const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
-          if (i === 0) await saveShotWarnings(shot.id, resolvedChars2);
-          const shotCharDesc2 = shotChars2
+          // shotChars already computed in Step 1; re-resolve images for lastFrame generation.
+          const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
+          if (shouldChain) await saveShotWarnings(shot.id, resolvedChars2); // only if Step 1 didn't already save
+          const shotCharDesc2 = shotChars
             .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
             .join("\n");
-          const lastPrompt = buildLastFramePrompt({
+          const lastPromptRaw = buildLastFramePrompt({
             sceneDescription: shot.prompt || "",
             endFrameDesc: shot.endFrameDesc || shot.prompt || "",
             characterDescriptions: shotCharDesc2,
@@ -2197,6 +2294,9 @@ async function handleBatchChainGenerate(
             cameraDirection: cleanedCamera,
             slotContents: frameLastSlots,
           });
+          const lastPrompt = enhancePrompts && chainTextProvider
+            ? await enhanceImagePrompt(lastPromptRaw, chainImageProtocol, chainTextProvider)
+            : lastPromptRaw;
           const lastFramePath = await imageProvider.generateImage(lastPrompt, {
             ...imageOpts,
             quality: "hd",
@@ -2245,14 +2345,15 @@ async function handleBatchChainGenerate(
           });
 
           // 只传与本镜头相关的角色（过滤无关角色），并附带 description 以保留服装信息
+          // 若无匹配（群演/无名角色镜头），传空列表而非全部角色
           const shotCharsForVideo = filterShotCharacters(videoScript, chainCharacters);
-          const videoCharacters = (shotCharsForVideo.length > 0 ? shotCharsForVideo : chainCharacters).map((c) => ({
+          const videoCharacters = shotCharsForVideo.map((c) => ({
             name: c.name,
             visualHint: c.visualHint,
             description: c.description,
           }));
 
-          const videoPrompt = shot.videoPrompt || buildVideoPrompt({
+          const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
             videoScript,
             cameraDirection: cleanedCamera,
             startFrameDesc: shot.startFrameDesc ?? undefined,
@@ -2263,6 +2364,9 @@ async function handleBatchChainGenerate(
             slotContents: videoSlots,
             visualStyleTag: chainVisualStyleTag,
           });
+          const videoPrompt = enhancePrompts && chainTextProvider
+            ? await enhanceVideoPrompt(videoPromptRaw, chainVideoProtocol, chainTextProvider)
+            : videoPromptRaw;
 
           const videoResult = await videoProvider.generateVideo({
             firstFrame: firstFramePath,
@@ -2364,7 +2468,8 @@ async function handleSingleSceneFrame(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
+  modelConfig?: ModelConfig,
+  enhancePrompts?: boolean
 ) {
   const shotId = payload?.shotId as string | undefined;
   if (!shotId) {
@@ -2412,7 +2517,7 @@ async function handleSingleSceneFrame(
 
     const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
     const slotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-    const sceneFramePrompt = buildSceneFramePrompt({
+    const sceneFramePromptRaw = buildSceneFramePrompt({
       sceneDescription: shot.prompt || "",
       charRefMapping,
       characterDescriptions,
@@ -2421,6 +2526,9 @@ async function handleSingleSceneFrame(
       motionScript: shot.motionScript,
       slotContents,
     });
+    const sceneFramePrompt = enhancePrompts
+      ? await enhanceImagePrompt(sceneFramePromptRaw, modelConfig?.image?.protocol ?? "", resolveAIProvider(modelConfig))
+      : sceneFramePromptRaw;
 
     console.log(`[SingleSceneFrame] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
 
@@ -2452,7 +2560,8 @@ async function handleBatchSceneFrame(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   if (!modelConfig?.image) {
     return NextResponse.json({ error: "No image model configured" }, { status: 400 });
@@ -2489,6 +2598,8 @@ async function handleBatchSceneFrame(
 
   const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
   const sceneSlotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
+  const batchSceneTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const batchSceneImageProtocol = modelConfig?.image?.protocol ?? "";
 
   await Promise.all(
     eligible.map((shot) =>
@@ -2515,7 +2626,7 @@ async function handleBatchSceneFrame(
       );
       const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
 
-      const sceneFramePrompt = buildSceneFramePrompt({
+      const sceneFramePromptRaw = buildSceneFramePrompt({
         sceneDescription: shot.prompt || "",
         charRefMapping,
         characterDescriptions,
@@ -2524,6 +2635,9 @@ async function handleBatchSceneFrame(
         slotContents: sceneSlotContents,
         motionScript: shot.motionScript,
       });
+      const sceneFramePrompt = enhancePrompts && batchSceneTextProvider
+        ? await enhanceImagePrompt(sceneFramePromptRaw, batchSceneImageProtocol, batchSceneTextProvider)
+        : sceneFramePromptRaw;
 
       console.log(`[BatchSceneFrame] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
 
@@ -2554,7 +2668,8 @@ async function handleSingleReferenceVideo(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
+  modelConfig?: ModelConfig,
+  enhancePrompts?: boolean
 ) {
   const shotId = payload?.shotId as string | undefined;
   if (!shotId) {
@@ -2662,7 +2777,7 @@ async function handleSingleReferenceVideo(
     if (!sceneFramePath) {
       const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
       const refSlotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-      const sceneFramePrompt = buildSceneFramePrompt({
+      const sceneFramePromptRaw = buildSceneFramePrompt({
         sceneDescription: shot.prompt || "",
         charRefMapping,
         characterDescriptions,
@@ -2671,6 +2786,9 @@ async function handleSingleReferenceVideo(
         motionScript: shot.motionScript,
         slotContents: refSlotContents,
       });
+      const sceneFramePrompt = enhancePrompts
+        ? await enhanceImagePrompt(sceneFramePromptRaw, modelConfig?.image?.protocol ?? "", resolveAIProvider(modelConfig))
+        : sceneFramePromptRaw;
       console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
       sceneFramePath = await imageProvider.generateImage(sceneFramePrompt, {
         quality: "hd",
@@ -2725,11 +2843,16 @@ async function handleSingleReferenceVideo(
       }
     }
 
+    // Enhance video prompt if requested (skip if user pre-set videoPrompt)
+    const finalVideoPrompt = (enhancePrompts && !shot.videoPrompt)
+      ? await enhanceVideoPrompt(videoPrompt, modelConfig?.video?.protocol ?? "", resolveAIProvider(modelConfig))
+      : videoPrompt;
+
     console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
     const result = await videoProvider.generateVideo({
       initialImage: sceneFramePath,
-      prompt: videoPrompt,
+      prompt: finalVideoPrompt,
       duration: effectiveDuration,
       ratio,
       referenceImages: charRefs.map((c) => c.imagePath),
@@ -2774,7 +2897,8 @@ async function handleBatchReferenceVideo(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  enhancePrompts?: boolean
 ) {
   if (!modelConfig?.video) {
     return NextResponse.json({ error: "No video model configured" }, { status: 400 });
@@ -2814,6 +2938,9 @@ async function handleBatchReferenceVideo(
   const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const textProvider = resolveAIProvider(modelConfig);
+  const batchRefTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
+  const batchRefImageProtocol = modelConfig?.image?.protocol ?? "";
+  const batchRefVideoProtocol = modelConfig?.video?.protocol ?? "";
   const refVideoSystem = await resolvePrompt("ref_video_prompt", { userId, projectId });
   const ratio = (payload?.ratio as string) || "16:9";
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
@@ -2888,7 +3015,7 @@ async function handleBatchReferenceVideo(
         const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
         
         const batchRefSlots = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-        const sceneFramePrompt = buildSceneFramePrompt({
+        const sceneFramePromptRaw = buildSceneFramePrompt({
           sceneDescription: shot.prompt || "",
           charRefMapping,
           characterDescriptions,
@@ -2897,6 +3024,9 @@ async function handleBatchReferenceVideo(
           motionScript: shot.motionScript,
           slotContents: batchRefSlots,
         });
+        const sceneFramePrompt = enhancePrompts && batchRefTextProvider
+          ? await enhanceImagePrompt(sceneFramePromptRaw, batchRefImageProtocol, batchRefTextProvider)
+          : sceneFramePromptRaw;
 
         console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
 
@@ -2909,9 +3039,9 @@ async function handleBatchReferenceVideo(
         await db.update(shots).set({ sceneRefFrame: sceneFramePath }).where(eq(shots.id, shot.id));
 
         // Step 2: Use stored videoPrompt if available; otherwise generate from scene frame via vision AI
-        let videoPrompt: string;
+        let videoPromptRaw: string;
         if (shot.videoPrompt) {
-          videoPrompt = shot.videoPrompt;
+          videoPromptRaw = shot.videoPrompt;
         } else {
           try {
             const motionContext = shot.motionScript || shot.videoScript || shot.prompt || "";
@@ -2927,10 +3057,10 @@ async function handleBatchReferenceVideo(
               images: [sceneFramePath],
               temperature: 0.7,
             });
-            videoPrompt = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
+            videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
           } catch (err) {
             console.warn("[BatchReferenceVideo] Vision prompt generation failed, falling back:", err);
-            videoPrompt = buildReferenceVideoPrompt({
+            videoPromptRaw = buildReferenceVideoPrompt({
               videoScript: shot.videoScript || shot.motionScript || shot.prompt || "",
               cameraDirection: shot.cameraDirection || "static",
               duration: effectiveDuration,
@@ -2941,6 +3071,9 @@ async function handleBatchReferenceVideo(
             });
           }
         }
+        const videoPrompt = (enhancePrompts && batchRefTextProvider && !shot.videoPrompt)
+          ? await enhanceVideoPrompt(videoPromptRaw, batchRefVideoProtocol, batchRefTextProvider)
+          : videoPromptRaw;
 
         console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
 
@@ -2989,6 +3122,168 @@ async function handleBatchReferenceVideo(
   );
 
   return NextResponse.json({ results });
+}
+
+// --- enrich_shot_transitions: AI-powered startFrameDesc/endFrameDesc bridging ---
+//
+// For each pair of adjacent shots, uses an LLM to rewrite the outgoing shot's endFrameDesc
+// and the incoming shot's startFrameDesc so they form a coherent visual bridge. Only
+// rewrites when there is a detectable scene-type mismatch (crowd→character, location change).
+// Same-scene, same-character continuations are left untouched.
+
+async function handleEnrichShotTransitions(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string
+) {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  const versionId = payload?.versionId as string | undefined;
+
+  const whereConditions = [eq(shots.projectId, projectId)];
+  if (versionId) whereConditions.push(eq(shots.versionId, versionId));
+  if (episodeId) whereConditions.push(eq(shots.episodeId, episodeId));
+
+  const allShots = await db
+    .select()
+    .from(shots)
+    .where(and(...whereConditions))
+    .orderBy(asc(shots.sequence));
+
+  if (allShots.length < 2) {
+    return NextResponse.json({ enriched: 0, message: "Not enough shots to enrich" });
+  }
+
+  // Fetch characters for scene-type detection
+  let projectCharsForEnrich: typeof characters.$inferSelect[];
+  if (episodeId) {
+    const linkedIds = await db
+      .select({ characterId: episodeCharacters.characterId })
+      .from(episodeCharacters)
+      .where(eq(episodeCharacters.episodeId, episodeId));
+    projectCharsForEnrich = linkedIds.length > 0
+      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
+      : [];
+  } else {
+    projectCharsForEnrich = await db.select().from(characters).where(eq(characters.projectId, projectId));
+  }
+
+  const model = createLanguageModel(modelConfig.text);
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      function emit(data: object) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+
+      let enriched = 0;
+
+      for (let i = 0; i < allShots.length - 1; i++) {
+        const curr = allShots[i];
+        const next = allShots[i + 1];
+
+        const currText = [curr.prompt, curr.motionScript, curr.videoScript].filter(Boolean).join(" ");
+        const nextText = [next.prompt, next.motionScript, next.videoScript].filter(Boolean).join(" ");
+        const currChars = filterShotCharacters(currText, projectCharsForEnrich);
+        const nextChars = filterShotCharacters(nextText, projectCharsForEnrich);
+
+        // Only enrich when there is a scene type mismatch worth bridging
+        const isCrowdToChar = currChars.length === 0 && nextChars.length > 0;
+        const isCharToCrowd = currChars.length > 0 && nextChars.length === 0;
+        const isCharToNewChar = currChars.length > 0 && nextChars.length > 0 &&
+          !nextChars.some((c) => currChars.some((p) => p.id === c.id));
+
+        const needsEnrichment = isCrowdToChar || isCharToCrowd || isCharToNewChar;
+        if (!needsEnrichment) {
+          emit({ pair: `${curr.sequence}→${next.sequence}`, status: "skip", reason: "same-scene-continuation" });
+          continue;
+        }
+
+        emit({ pair: `${curr.sequence}→${next.sequence}`, status: "enriching" });
+
+        const transitionType = isCrowdToChar
+          ? "CROWD/WIDE → CHARACTER CLOSE-UP"
+          : isCharToCrowd
+          ? "CHARACTER → CROWD/WIDE"
+          : "CHARACTER → NEW CHARACTERS";
+
+        const prompt = `You are a storyboard supervisor reviewing two consecutive shots in an animated film. Your job is to rewrite the endFrameDesc of Shot A and the startFrameDesc of Shot B so they form a natural cinematic bridge.
+
+TRANSITION TYPE: ${transitionType}
+
+=== SHOT A (outgoing) ===
+Scene: ${curr.prompt || ""}
+Current endFrameDesc: ${curr.endFrameDesc || "(none)"}
+Characters in shot: ${currChars.map(c => c.name).join(", ") || "none (crowd/wide)"}
+
+=== SHOT B (incoming) ===
+Scene: ${next.prompt || ""}
+Current startFrameDesc: ${next.startFrameDesc || "(none)"}
+Characters in shot: ${nextChars.map(c => c.name).join(", ") || "none (crowd/wide)"}
+
+RULES:
+- endFrameDesc of Shot A must end on a compositional element or camera position that visually leads INTO Shot B's world
+- startFrameDesc of Shot B must establish the scene/characters BEFORE action begins — not mid-motion
+- Do NOT change the story content — only improve the visual bridge
+- Keep each description under 80 words
+- Write in the SAME LANGUAGE as the existing descriptions
+
+Respond with ONLY a JSON object (no markdown):
+{
+  "endFrameDesc": "improved endFrameDesc for Shot A",
+  "startFrameDesc": "improved startFrameDesc for Shot B"
+}`;
+
+        try {
+          const { text } = await generateText({ model, prompt });
+          const parsed = JSON.parse(extractJSON(text)) as { endFrameDesc?: string; startFrameDesc?: string };
+
+          const updates: { endFrameDesc?: string; startFrameDesc?: string } = {};
+          if (parsed.endFrameDesc && parsed.endFrameDesc !== curr.endFrameDesc) {
+            updates.endFrameDesc = parsed.endFrameDesc;
+          }
+          if (parsed.startFrameDesc && parsed.startFrameDesc !== next.startFrameDesc) {
+            updates.startFrameDesc = parsed.startFrameDesc;
+          }
+
+          if (updates.endFrameDesc) {
+            await db.update(shots).set({ endFrameDesc: updates.endFrameDesc }).where(eq(shots.id, curr.id));
+          }
+          if (updates.startFrameDesc) {
+            await db.update(shots).set({ startFrameDesc: updates.startFrameDesc }).where(eq(shots.id, next.id));
+          }
+
+          enriched++;
+          emit({
+            pair: `${curr.sequence}→${next.sequence}`,
+            status: "ok",
+            transitionType,
+            endFrameDescUpdated: !!updates.endFrameDesc,
+            startFrameDescUpdated: !!updates.startFrameDesc,
+          });
+        } catch (err) {
+          console.error(`[EnrichTransitions] Pair ${curr.sequence}→${next.sequence} error:`, err);
+          emit({ pair: `${curr.sequence}→${next.sequence}`, status: "error", error: extractErrorMessage(err) });
+        }
+      }
+
+      emit({ type: "done", enriched, total: allShots.length - 1 });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
+  });
 }
 
 // --- video_assemble: synchronous ffmpeg concat + subtitle burn ---

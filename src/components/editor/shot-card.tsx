@@ -83,6 +83,10 @@ interface ShotCardProps {
   videoGenerationResolution?: "480p" | "720p";
   /** 上一镜 Seedance 生成视频的真实尾帧，可直接用作本镜首帧（跳过 Seedream 重新生成） */
   prevSeedanceLastFrame?: string | null;
+  /** 是否开启 AI Prompt 增强（透传给生成 API） */
+  enhancePrompts?: boolean;
+  /** 独立生成首帧：true 时不继承上一镜尾帧，每个分镜首帧独立生成 */
+  independentFirstFrame?: boolean;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -178,6 +182,8 @@ export function ShotCard({
   videoResolution,
   videoGenerationResolution,
   prevSeedanceLastFrame,
+  enhancePrompts = false,
+  independentFirstFrame = false,
 }: ShotCardProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -332,8 +338,14 @@ export function ShotCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "single_frame_generate",
-          payload: { shotId: id, ratio: videoRatio, frameTarget: "both" },
+          payload: {
+            shotId: id,
+            ratio: videoRatio,
+            frameTarget: "both",
+            disableChaining: independentFirstFrame,
+          },
           modelConfig: getModelConfig(),
+          enhancePrompts,
         }),
       });
       onUpdate();

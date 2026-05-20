@@ -72,6 +72,8 @@ interface Project {
   status: string;
   finalVideoUrl: string | null;
   generationMode: "keyframe" | "reference";
+  useProjectPrompts?: number;
+  enhancePrompts?: number;
   visualStyle: string;
   characters: Character[];
   shots: Shot[];

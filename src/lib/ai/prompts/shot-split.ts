@@ -45,11 +45,12 @@ Output a JSON array:
 ═══════════════════════════════════════════════════
 PURPOSE: The PRIMARY input to the Seedance video generation model. This single field determines 80% of output quality. Write it with the precision of a world-class film director briefing a cinematographer.
 
-FORMAT: 30–60 words of seamless flowing prose. NO section labels. NO timestamps. NO dialogue text.
-- Open with character name + brief visual identifier in parentheses
-- Describe SPECIFIC physical motion: body parts, direction, speed, force
-- Embed camera movement naturally at the end (include speed and endpoint)
-- Close with ONE sharp atmospheric or emotional detail
+FORMAT: 30–60 words of seamless flowing prose. NO section labels. NO dialogue text.
+- Open with character name + brief visual identifier in parentheses (e.g. 龙渊（黑甲银纹）)
+- Describe ONE clear, specific physical action with a single verb — do NOT chain multiple actions
+- Specify exact camera movement with speed and endpoint (e.g. "镜头从中景缓慢推至颈部以上近景")
+- Close with ONE sharp atmospheric or sensory detail (light quality, sound texture, particle motion)
+- OPTIONAL timeline anchor for complex shots: prefix key moments with timestamp (e.g. "0s:起幅" "3s:动作峰值" "6s:落幅"), separated by semicolons
 
 LANGUAGE: Same as the screenplay.
 
@@ -110,7 +111,27 @@ Each must be a SELF-SUFFICIENT image generation prompt containing:
 
 startFrame = INITIAL STATE before action begins (starting poses, opening expressions, camera at start position)
 endFrame = END STATE after action completes (new positions, expression reflecting conclusion, camera at final position)
-endFrame MUST be visually stable (not mid-motion) — it will be REUSED as the next shot's opening reference
+endFrame MUST be visually stable (not mid-motion) — it should create a natural visual bridge to the next shot
+
+═══════════════════════════════════════════════════
+  Scene Transition Rules (CRITICAL for cinematic flow)
+═══════════════════════════════════════════════════
+When two adjacent shots have a SCENE CHANGE (different characters, different focus area):
+
+▸ CROWD/WIDE → CHARACTER CLOSE-UP:
+  The crowd shot's endFrame must end with a compositional lead-in: camera has already pushed toward the area where the characters will appear, OR a specific visual element (a lantern, a haystack, a doorway) anchors both frames.
+  Example: crowd shot endFrame = "镜头已推至打谷场边缘的稻草垛，画面中央可见两道模糊的孩童轮廓"
+  The character shot's startFrame must establish the characters in their environment BEFORE the action begins, not mid-action.
+  Example: character shot startFrame = "龙渊（黑碎发琥珀眼，130cm）拉着灵瑶（短马尾棕眼，125cm）站于稻草垛前，两人回头对视，笑意尚未完全展开"
+
+▸ CHARACTER → NEW SCENE:
+  The departing shot's endFrame must show the character moving TOWARD an exit or transition (turning away, walking off-frame, camera pulling back to reveal the wider world).
+  The arriving shot's startFrame must re-establish the new environment before introducing its characters.
+
+▸ SAME SCENE CONTINUATION (same characters, same location):
+  endFrame and the next shot's startFrame share visual elements — same costume, same lighting, same background. The cut point is a natural action beat.
+
+▸ GENERAL RULE: Never end a shot at the PEAK of motion. End on a hold, a pause, a completed gesture. Never start a shot in mid-action without context.
 
 ═══════════════════════════════════════════════════
   motionScript — Time-Segmented Narrative

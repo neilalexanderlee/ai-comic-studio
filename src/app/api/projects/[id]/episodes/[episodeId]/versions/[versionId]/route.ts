@@ -41,20 +41,24 @@ export async function DELETE(
     .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)));
   if (!episode) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Verify version belongs to this episode
+  // Verify version belongs to this project.
+  // Note: we intentionally do NOT filter by episodeId here — versions created
+  // when the episode store hadn't hydrated yet may have episodeId = null but
+  // still belong to this project and should be deletable.
   const [version] = await db
     .select()
     .from(storyboardVersions)
     .where(
       and(
         eq(storyboardVersions.id, versionId),
-        eq(storyboardVersions.episodeId, episodeId),
         eq(storyboardVersions.projectId, projectId)
       )
     );
   if (!version) return NextResponse.json({ error: "Version not found" }, { status: 404 });
 
-  // Refuse to delete the last version
+  // Refuse to delete the last episode-specific version.
+  // We count only versions tied to this episode (episodeId matches) since
+  // orphaned null-episodeId versions don't appear in the episode UI anyway.
   const allVersions = await db
     .select({ id: storyboardVersions.id })
     .from(storyboardVersions)
@@ -64,7 +68,10 @@ export async function DELETE(
         eq(storyboardVersions.projectId, projectId)
       )
     );
-  if (allVersions.length <= 1) {
+  // If the version being deleted has a null episodeId (orphan), skip the guard
+  // since it's not counted in the episode list.
+  const isEpisodeVersion = version.episodeId === episodeId;
+  if (isEpisodeVersion && allVersions.length <= 1) {
     return NextResponse.json(
       { error: "Cannot delete the last version" },
       { status: 400 }

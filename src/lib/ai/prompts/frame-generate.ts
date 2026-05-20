@@ -110,7 +110,7 @@ export function buildLastFramePrompt(params: {
   sceneDescription: string;
   endFrameDesc: string;
   characterDescriptions: string;
-  firstFramePath: string;
+  firstFramePath?: string;
   /** 项目画风标签（同 buildFirstFramePrompt），锁定尾帧画风一致性。 */
   visualStyleTag?: string;
   /** 运镜方向，用于指定尾帧构图视角。 */

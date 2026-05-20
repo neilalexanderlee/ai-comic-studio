@@ -75,6 +75,9 @@ export default function EpisodeStoryboardPage() {
   const [generatingVideos, setGeneratingVideos] = useState(false);
   const [generatingChain, setGeneratingChain] = useState(false);
   const [generatingChainOverwrite, setGeneratingChainOverwrite] = useState(false);
+  const [enrichingTransitions, setEnrichingTransitions] = useState(false);
+  // 独立生成首帧：关闭时每个分镜的首帧独立生成（不继承上一镜尾帧），适合场景多变、角色切换频繁的集数
+  const [independentFirstFrame, setIndependentFirstFrame] = useState(true);
   const [generatingSceneFrames, setGeneratingSceneFrames] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
   const [sceneFramesOverwrite, setSceneFramesOverwrite] = useState(false);
@@ -92,6 +95,7 @@ export default function EpisodeStoryboardPage() {
   const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
+  const [enhancePrompts, setEnhancePrompts] = useState(true); // AI prompt 增强，默认开
   const [resplitConfirmOpen, setResplitConfirmOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -161,6 +165,10 @@ export default function EpisodeStoryboardPage() {
     if (!project?.id) return;
     const stored = localStorage.getItem(`storyboardView:${project.id}`);
     if (stored === "list" || stored === "kanban") setViewMode(stored);
+    // Sync enhancePrompts from DB (project.enhancePrompts: 1 = on, 0 = off; default on)
+    if (project.enhancePrompts !== undefined) {
+      setEnhancePrompts(project.enhancePrompts !== 0);
+    }
   }, [project?.id]);
 
   useEffect(() => {
@@ -192,7 +200,7 @@ export default function EpisodeStoryboardPage() {
   const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
   const hasReferenceImages = charactersWithRefs.length > 0;
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts;
+  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts || enrichingTransitions;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -229,7 +237,8 @@ export default function EpisodeStoryboardPage() {
           action: "shot_split",
           payload: forceAi ? { forceAi: true } : undefined,
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
 
@@ -247,7 +256,7 @@ export default function EpisodeStoryboardPage() {
 
     setGenerating(false);
     setSelectedVersionId(null);
-    await fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    await fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   async function handlePreviewExtraction() {
@@ -261,7 +270,7 @@ export default function EpisodeStoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "shot_extract_preview",
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
         }),
       });
       const data = (await response.json()) as typeof extractPreview;
@@ -290,7 +299,8 @@ export default function EpisodeStoryboardPage() {
           action: "batch_frame_generate",
           payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, continueFromPrev },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
 
@@ -321,7 +331,7 @@ export default function EpisodeStoryboardPage() {
               if (event.status === "error") hasError = true;
               // Refresh only the affected shot so the frame appears immediately
               if (event.shotId && (event.status === "ok" || event.status === "skipped")) {
-                fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+                fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
               }
               if (event.type === "done") break;
             } catch { /* ignore malformed events */ }
@@ -336,7 +346,7 @@ export default function EpisodeStoryboardPage() {
     if (hasError) toast.warning(t("common.batchPartialFailed"));
     setGeneratingFramesOverwrite(false);
     setGeneratingFrames(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   async function handleBatchGenerateVideos(overwrite = false) {
@@ -353,7 +363,8 @@ export default function EpisodeStoryboardPage() {
           action: "batch_video_generate",
           payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, resolution: videoGenerationResolution },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
       const data = await response.json() as { results: Array<{ status: string }> };
@@ -367,7 +378,7 @@ export default function EpisodeStoryboardPage() {
 
     setGeneratingVideosOverwrite(false);
     setGeneratingVideos(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   async function handleBatchGenerateSceneFrames(overwrite = false) {
@@ -384,7 +395,8 @@ export default function EpisodeStoryboardPage() {
           action: "batch_scene_frame",
           payload: { overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
       const data = await response.json() as { results: Array<{ status: string }> };
@@ -398,7 +410,7 @@ export default function EpisodeStoryboardPage() {
 
     setSceneFramesOverwrite(false);
     setGeneratingSceneFrames(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   async function handleBatchGenerateVideoPrompts() {
@@ -413,7 +425,8 @@ export default function EpisodeStoryboardPage() {
           action: "batch_video_prompt",
           payload: { versionId: selectedVersionId },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
       const data = await response.json() as { results: Array<{ status: string }> };
@@ -426,7 +439,7 @@ export default function EpisodeStoryboardPage() {
     }
 
     setGeneratingVideoPrompts(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   async function handleBatchGenerateReferenceVideos(overwrite = false) {
@@ -443,7 +456,8 @@ export default function EpisodeStoryboardPage() {
           action: "batch_reference_video",
           payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
       const data = await response.json() as { results: Array<{ status: string }> };
@@ -457,7 +471,7 @@ export default function EpisodeStoryboardPage() {
 
     setGeneratingVideosOverwrite(false);
     setGeneratingVideos(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
   // 链式生成：每个分镜依次执行 首帧 → 尾帧 → 视频，尾帧直接链入下一镜首帧
@@ -482,7 +496,8 @@ export default function EpisodeStoryboardPage() {
             resolution: videoGenerationResolution,
           },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+          enhancePrompts,
         }),
       });
 
@@ -512,7 +527,7 @@ export default function EpisodeStoryboardPage() {
               // ok: 整个分镜（帧+视频）完成
               // skipped: 已跳过
               if (event.shotId && (event.status === "ok" || event.status === "frame_ok" || event.status === "skipped")) {
-                fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+                fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
               }
               if (event.type === "done") break;
             } catch { /* ignore */ }
@@ -527,7 +542,85 @@ export default function EpisodeStoryboardPage() {
     if (hasError) toast.warning(t("common.batchPartialFailed"));
     setGeneratingChainOverwrite(false);
     setGeneratingChain(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
+  }
+
+  // 分镜过渡增强：用 AI 自动桥接相邻分镜间的首帧/尾帧描述，减少场景割裂感
+  async function handleEnrichTransitions() {
+    if (!project) return;
+    if (!confirm("AI 将分析所有相邻分镜，自动改写场景切换处的首帧/尾帧描述，生成视觉桥接。\n\n这会修改分镜数据，建议在生成帧之前执行。继续吗？")) return;
+    setEnrichingTransitions(true);
+    let enriched = 0;
+    // Collect which shot sequences were actually modified
+    const modifiedSeqs = new Set<number>();
+    try {
+      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "enrich_shot_transitions",
+          payload: { versionId: selectedVersionId },
+          modelConfig: getModelConfig(),
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
+            if (!dataLine) continue;
+            try {
+              const event = JSON.parse(dataLine.slice(6)) as {
+                type?: string;
+                enriched?: number;
+                status?: string;
+                pair?: string;
+                endFrameDescUpdated?: boolean;
+                startFrameDescUpdated?: boolean;
+              };
+              if (event.type === "done") {
+                enriched = event.enriched ?? 0;
+              }
+              // e.g. pair = "3→4" — extract both sequences when either desc was updated
+              if (event.status === "ok" && event.pair) {
+                const [aStr, bStr] = event.pair.split("→");
+                const a = parseInt(aStr ?? "");
+                const b = parseInt(bStr ?? "");
+                if (event.endFrameDescUpdated && !isNaN(a)) modifiedSeqs.add(a);
+                if (event.startFrameDescUpdated && !isNaN(b)) modifiedSeqs.add(b);
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      }
+      await fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
+
+      if (enriched === 0) {
+        toast.info("所有相邻分镜均为同场景连续，无需过渡增强");
+      } else {
+        const seqList = [...modifiedSeqs].sort((a, b) => a - b);
+        const seqLabel = seqList.length > 0
+          ? `第 ${seqList.join("、")} 镜的首帧/尾帧描述已更新`
+          : `${enriched} 处场景切换已优化`;
+        toast.success(`✨ 过渡增强完成 — ${seqLabel}`, {
+          description: "点击任意分镜卡片右侧展开箭头，可在抽屉里查看并编辑更新后的首帧/尾帧描述",
+          duration: 8000,
+        });
+      }
+    } catch (err) {
+      console.error("Enrich transitions error:", err);
+      toast.error(err instanceof Error ? err.message : "过渡增强失败");
+    }
+    setEnrichingTransitions(false);
   }
 
   async function handleAutoRun() {
@@ -623,7 +716,7 @@ export default function EpisodeStoryboardPage() {
               size="sm"
               onClick={() => {
                 const a = document.createElement("a");
-                a.href = `/api/projects/${project!.id}/download?episodeId=${useProjectStore.getState().currentEpisodeId}`;
+                a.href = `/api/projects/${project!.id}/download?episodeId=${urlEpisodeId || useProjectStore.getState().currentEpisodeId}`;
                 a.download = "";
                 a.click();
               }}
@@ -632,15 +725,6 @@ export default function EpisodeStoryboardPage() {
               {t("project.downloadAll")}
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handlePreviewExtraction}
-            disabled={anyGenerating}
-          >
-            <Play className="h-3.5 w-3.5" />
-            {t("project.previewExtract")}
-          </Button>
         </div>
       </div>
 
@@ -799,12 +883,55 @@ export default function EpisodeStoryboardPage() {
           characters={project.characters}
           projectId={project.id}
           generationMode={generationMode}
-          onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
+          onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
         />
 
         {/* Batch operations */}
         {viewMode === "list" && (
         <div className="space-y-2">
+
+          {/* Global generation settings strip */}
+          <div className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/60 px-3 py-2 flex-wrap">
+            <span className="text-[11px] font-semibold text-[--text-muted] uppercase tracking-wide shrink-0">生成设置</span>
+            <div className="h-3.5 w-px bg-[--border-subtle] shrink-0" />
+            {/* AI Prompt 增强开关 — 影响所有生成步骤 */}
+            <label
+              className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none"
+              title="开启后，每次生成前用文本模型对图像/视频 prompt 进行模型专属优化，提升生成质量"
+            >
+              <input
+                type="checkbox"
+                checked={enhancePrompts}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setEnhancePrompts(next);
+                  apiFetch(`/api/projects/${project.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ enhancePrompts: next ? 1 : 0 }),
+                  }).catch(() => {});
+                }}
+                className="accent-primary h-3.5 w-3.5"
+                disabled={anyGenerating}
+              />
+              <span className={enhancePrompts ? "text-[--text-primary] font-medium" : ""}>AI 增强</span>
+            </label>
+            {/* 独立首帧开关 */}
+            <label
+              className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none"
+              title="开启后，每个分镜的首帧独立生成（不继承上一镜尾帧）。场景切换频繁时推荐开启，避免PPT割裂感。同场景连续镜头可关闭以保持像素级连续。"
+            >
+              <input
+                type="checkbox"
+                checked={independentFirstFrame}
+                onChange={(e) => setIndependentFirstFrame(e.target.checked)}
+                className="accent-primary h-3.5 w-3.5"
+                disabled={anyGenerating}
+              />
+              <span className={independentFirstFrame ? "text-[--text-primary] font-medium" : ""}>独立首帧</span>
+            </label>
+          </div>
+
           {/* Row 1: Generate text / shots */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">1</span>
@@ -849,6 +976,26 @@ export default function EpisodeStoryboardPage() {
               <RefreshCw className="h-3.5 w-3.5" />
               {t("project.forceAiShots")}
             </Button>
+            {/* AI过渡增强 — 属于剧本准备阶段，解析分镜后、生成帧前执行 */}
+            {totalShots >= 2 && (
+              <button
+                onClick={handleEnrichTransitions}
+                disabled={anyGenerating}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
+                  enrichingTransitions
+                    ? "border-amber-300 bg-amber-50 text-amber-700"
+                    : "border-amber-200 bg-amber-50/60 text-amber-700 hover:bg-amber-100 hover:border-amber-300"
+                }`}
+                title="AI 分析相邻分镜的场景切换，自动改写首帧/尾帧描述，桥接视觉割裂。解析分镜后、生成帧前执行。"
+              >
+                {enrichingTransitions ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                {enrichingTransitions ? "分析中…" : "✨ AI过渡增强"}
+              </button>
+            )}
           </div>
 
           {/* Row 2: Frames */}
@@ -935,7 +1082,7 @@ export default function EpisodeStoryboardPage() {
           {/* Row 2.5: Chain generate (keyframe mode only) — frames + video per shot, sequential */}
           {generationMode === "keyframe" && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]" style={{ fontSize: "8px" }}>⛓</span>
+              <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">⛓</span>
               <Button
                 onClick={() => handleBatchChainGenerate(false)}
                 disabled={anyGenerating || totalShots === 0}
@@ -971,7 +1118,6 @@ export default function EpisodeStoryboardPage() {
           {/* Row 3: Video prompts */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">3</span>
-            <InlineModelPicker capability="text" />
             <Button
               onClick={handleBatchGenerateVideoPrompts}
               disabled={anyGenerating || shotsWithFrameAny === 0}
@@ -1149,7 +1295,7 @@ export default function EpisodeStoryboardPage() {
               videoResolution={shot.videoResolution}
               videoGenerationResolution={videoGenerationResolution}
               dialogues={shot.dialogues || []}
-              onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
+              onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
               generationMode={generationMode}
               videoRatio={videoRatio}
               isCompact={openDrawerShotId !== null}
@@ -1158,6 +1304,8 @@ export default function EpisodeStoryboardPage() {
               batchGeneratingVideoPrompts={generatingVideoPrompts}
               batchGeneratingVideos={generatingVideos}
               prevSeedanceLastFrame={index > 0 ? project.shots[index - 1]?.seedanceLastFrame : null}
+              enhancePrompts={enhancePrompts}
+              independentFirstFrame={independentFirstFrame}
             />
           ))}
         </div>
@@ -1169,7 +1317,7 @@ export default function EpisodeStoryboardPage() {
           openShotId={openDrawerShotId}
           onClose={() => setOpenDrawerShotId(null)}
           onShotChange={(id) => setOpenDrawerShotId(id)}
-          onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
+          onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
           projectId={project.id}
           generationMode={generationMode}
           videoRatio={videoRatio}
@@ -1182,12 +1330,12 @@ export default function EpisodeStoryboardPage() {
         open={newVersionDialogOpen}
         onOpenChange={setNewVersionDialogOpen}
         projectId={project.id}
-        episodeId={currentEpisodeId!}
+        episodeId={(urlEpisodeId || currentEpisodeId)!}
         versions={versions}
         currentVersionId={selectedVersionId}
         onCreated={(newVersionId) => {
           setSelectedVersionId(newVersionId);
-          fetchProject(project.id, useProjectStore.getState().currentEpisodeId!, newVersionId);
+          fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!, newVersionId);
         }}
       />
 
