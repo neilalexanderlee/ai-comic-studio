@@ -44,7 +44,7 @@ interface SplitEpisode {
 }
 
 type StepStatus = "idle" | "running" | "done" | "error";
-type StepNum = 1 | 2 | 3 | 4 | 5;
+type StepNum = 1 | 2 | 3 | 4;
 
 interface StepState {
   status: StepStatus;
@@ -60,8 +60,7 @@ const STEP_META: {
   { num: 1, icon: Wand2,    label: "扩写大纲",   desc: "AI 将大纲扩写为完整剧本" },
   { num: 2, icon: Users,    label: "提取角色",   desc: "解析角色定妆词与视觉描述" },
   { num: 3, icon: Layers,   label: "分集解析",   desc: "按剧集结构切分故事线" },
-  { num: 4, icon: Sparkles, label: "写入数据库", desc: "创建剧集与角色记录" },
-  { num: 5, icon: Film,     label: "生成分镜",   desc: "解析结构化分镜写入数据库" },
+  { num: 4, icon: Sparkles, label: "写入数据库", desc: "创建剧集与角色记录，完成导入" },
 ];
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -89,7 +88,6 @@ export default function AutoPipelinePage({
     2: { status: "idle", message: "" },
     3: { status: "idle", message: "" },
     4: { status: "idle", message: "" },
-    5: { status: "idle", message: "" },
   });
   const [logs, setLogs] = useState<string[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -238,38 +236,11 @@ export default function AutoPipelinePage({
       setStep(
         4,
         "done",
-        `导入完成！${data.characterCount} 个角色 · ${data.episodes.length} 集`
+        `导入完成！${data.characterCount} 个角色 · ${data.episodes.length} 集 · 请进入各集点击「解析分镜」`
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "创建失败";
       setStep(4, "error", `写入失败: ${msg}`);
-      throw err;
-    }
-  }
-
-  async function step5_generateStoryboard() {
-    const episodeIds = createdEpisodeIds.current;
-    if (!episodeIds.length) {
-      setStep(5, "error", "没有可用的剧集 ID");
-      throw new Error("No episode IDs");
-    }
-    setStep(5, "running", `正在解析 ${episodeIds.length} 集的分镜...`);
-
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/import/storyboard`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ episodeIds }),
-      });
-      const data = await res.json() as { totalShots: number; successCount: number };
-      setStep(
-        5,
-        "done",
-        `分镜生成完成！${data.successCount}/${episodeIds.length} 集 · 共 ${data.totalShots} 个分镜`
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "分镜生成失败";
-      setStep(5, "error", `分镜生成失败: ${msg}`);
       throw err;
     }
   }
@@ -521,7 +492,7 @@ export default function AutoPipelinePage({
                   AI 全自动生成项目
                 </h1>
                 <p className="mt-1.5 text-sm text-[--text-muted]">
-                  系统将根据下方大纲，自动生成完整剧本、提取角色、分集，并写入数据库
+                  系统将根据下方大纲，自动生成完整剧本、提取角色、分集并写入数据库。分镜解析请进入各集手动触发。
                 </p>
               </div>
 

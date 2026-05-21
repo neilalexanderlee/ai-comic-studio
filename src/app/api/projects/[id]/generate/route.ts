@@ -867,7 +867,7 @@ async function handleShotSplitStream(
         chunkTargetDuration = Math.round(targetDurationSeconds * ratio);
         console.log(`[ShotSplit] Chunk ${idx + 1}: ${chunkSceneCount} scenes → targetDuration=${chunkTargetDuration}s`);
       }
-      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration, splitVisualStyleTag);
+      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration, splitVisualStyleTag, videoMaxDuration);
       try {
         const result = await generateText({
           model,

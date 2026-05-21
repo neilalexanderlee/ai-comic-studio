@@ -282,7 +282,9 @@ export function buildShotSplitPrompt(
   characters: string,
   characterVisualHints?: Array<{ name: string; visualHint: string }>,
   targetDurationSeconds?: number | null,
-  visualStyleTag?: string
+  visualStyleTag?: string,
+  /** Max shot duration in seconds — must match the value passed to buildShotSplitSystem */
+  maxShotDuration: number = 15
 ): string {
   const styleBlock = visualStyleTag
     ? `\n⚠️ ART STYLE LOCK — HIGHEST PRIORITY:\nThis project's visual style is LOCKED to: ${visualStyleTag}\nEvery startFrame and endFrame description MUST explicitly state this style. NEVER describe photorealistic or 3D-render appearances. Character and environment descriptions must match this art style exactly.\n`
@@ -294,6 +296,8 @@ export function buildShotSplitPrompt(
 
   // Inject a narrative-coverage constraint when target duration is known.
   // The goal is STORY RICHNESS, not mechanical duration padding.
+  // ⚠️ This block is placed BEFORE the screenplay so the LLM internalises the
+  //   duration budget BEFORE it starts generating — not as an afterthought.
   const coverageRule = targetDurationSeconds
     ? (() => {
         const targetMin = Math.floor(targetDurationSeconds / 60);
@@ -302,30 +306,39 @@ export function buildShotSplitPrompt(
         const tolerance = Math.round(targetDurationSeconds * 0.1); // ±10%
         const low = targetDurationSeconds - tolerance;
         const high = targetDurationSeconds + tolerance;
-        return `\n🎬 NARRATIVE COVERAGE TARGET: ${targetLabel} (${targetDurationSeconds}s), acceptable range ${low}s–${high}s.
+        // Give the LLM a concrete minimum shot count so it doesn't need to
+        // discover the shortfall only after writing all shots.
+        const minShots = Math.ceil(low / maxShotDuration); // worst case: all shots at max duration
+        const typicalShots = Math.ceil(targetDurationSeconds / 10); // typical 10s average
+        return `
+🎬 DURATION BUDGET — READ THIS BEFORE LOOKING AT THE SCREENPLAY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Target total duration: ${targetLabel} (${targetDurationSeconds}s). Acceptable range: ${low}s – ${high}s.
+At a typical 10s per shot, you need approximately ${typicalShots} shots.
+At the maximum ${maxShotDuration}s per shot, you need at least ${minShots} shots.
 
-⚠️ The screenplay may define a fixed number of shots — that count is NOT a ceiling.
-You are FREE to INSERT additional shots between defined ones whenever needed to reach the duration target.
+MANDATORY RULES — violation = failed output:
+① The screenplay's shot count is a STORY OUTLINE, NOT a shot list ceiling. You MUST generate as many shots as needed to reach ${low}s+.
+② NEVER stretch a single shot's duration to pad time — pacing matters. Split or insert instead.
+③ AFTER writing all shots, SUM every "duration" field silently:
+   • Sum in range [${low}s, ${high}s] → output as-is.
+   • Sum < ${low}s → YOU MUST INSERT additional shots (see types below) until sum ≥ ${low}s. Do not submit under-length output.
+   • Sum > ${high}s → trim establishing/atmosphere shots first (cap at 8–10s each).
 
-SELF-CHECK before submitting — sum every "duration" field:
-• Total within ${low}s–${high}s → submit.
-• Total < ${low}s → INSERT additional shots inline (do not stretch existing durations). Choose from:
-    - REACTION SHOT: after key dialogue, cut to the listener's unspoken response — show the micro-expression shift, the held breath, the hand that tightens
-    - CHARACTER BEAT: a moment of internal conflict made visible — hesitation before a decision, a glance that reveals doubt, a gesture that contradicts the spoken words
-    - ENVIRONMENT DETAIL: a world element that ACTIVELY COMMENTS on the scene — not random scenery, but something that foreshadows, mirrors, or ironically contrasts the emotional beat
-    - TRANSITION SHOT: a character physically moving between locations with emotional subtext — their pace, posture, and expression carry story information
-    - PARALLEL ACTION: what another character is doing simultaneously, adding dramatic irony or tension
+TYPES OF SHOTS TO INSERT (choose based on story context):
+  - REACTION SHOT: after key dialogue, cut to the listener's micro-response — held breath, hand tightening, gaze shifting away
+  - CHARACTER BEAT: internal conflict made visible — hesitation before a decision, a contradicting gesture, doubt behind the eyes
+  - ENVIRONMENT DETAIL: a world element that foreshadows, mirrors, or ironically contrasts the emotional beat (not random scenery)
+  - TRANSITION SHOT: character moving between locations, pace and posture carrying story subtext
+  - PARALLEL ACTION: what another character is simultaneously doing, adding irony or tension
 
-  EVERY INSERTED SHOT MUST MEET S-GRADE STANDARDS — identical requirements to all other shots:
-    ✅ videoScript: 30–60 word Seedance-style prose with character name + visual ID, ONE specific action verb, camera movement with speed and endpoint, ONE atmospheric detail
-    ✅ startFrame / endFrame: full S-grade image composition (character position, expression, lighting, emotional tone)
-    ✅ motionScript: time-segmented with max 3s per segment
-    ✅ The inserted shot must ADVANCE one of: plot, character relationship, emotional state, or world-building
-    ❌ REJECT any inserted shot whose videoScript is a template, generic, or shorter than 25 characters
-    ❌ REJECT any inserted shot that merely shows "character walks" or "camera pans" with no subtext
-    ❌ Do NOT pad duration values of existing shots — empty slow shots destroy pacing
-  Keep inserting until total ≥ ${low}s.
-• Total > ${high}s → shorten durations of pure establishing/atmosphere shots first (cap at 8–10s each).
+EVERY INSERTED SHOT MUST MEET S-GRADE STANDARDS:
+  ✅ videoScript: 30–60 word Seedance prose, character name + visual ID, ONE action verb, camera formula, ONE sensory detail
+  ✅ startFrame / endFrame: character position, expression, lighting, emotional tone
+  ✅ motionScript: time-segmented, max 3s per segment
+  ✅ Must advance: plot, character relationship, emotional state, or world-building
+  ❌ No template videoScripts, no shots under 25 characters, no "character walks/sits" with no subtext
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
       })()
     : "";
