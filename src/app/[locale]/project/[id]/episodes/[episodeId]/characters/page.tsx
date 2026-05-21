@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useParams } from "next/navigation";
 import { useProjectStore } from "@/stores/project-store";
 import { useModelStore } from "@/stores/model-store";
 import { CharacterCard } from "@/components/editor/character-card";
@@ -17,6 +18,8 @@ export default function EpisodeCharactersPage() {
   const t = useTranslations();
   const { project, fetchProject } = useProjectStore();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const params = useParams<{ episodeId: string }>();
+  const episodeId = params.episodeId;
   const [extracting, setExtracting] = useState(false);
   const [generatingImages, setGeneratingImages] = useState(false);
   const textGuard = useModelGuard("text");
@@ -40,7 +43,7 @@ export default function EpisodeCharactersPage() {
         body: JSON.stringify({
           action: "character_extract",
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: episodeId,
         }),
       });
 
@@ -55,7 +58,7 @@ export default function EpisodeCharactersPage() {
     }
 
     setExtracting(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, episodeId);
   }
 
   async function handleBatchGenerateImages() {
@@ -70,7 +73,7 @@ export default function EpisodeCharactersPage() {
         body: JSON.stringify({
           action: "batch_character_image",
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: episodeId,
         }),
       });
 
@@ -84,7 +87,7 @@ export default function EpisodeCharactersPage() {
     }
 
     setGeneratingImages(false);
-    fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    fetchProject(project.id, episodeId);
   }
 
   return (
@@ -168,7 +171,7 @@ export default function EpisodeCharactersPage() {
               description={char.description}
               visualHint={char.visualHint ?? null}
               assets={char.assets}
-              onUpdate={() => fetchProject(project.id, useProjectStore.getState().currentEpisodeId!)}
+              onUpdate={() => fetchProject(project.id, episodeId)}
               batchGenerating={generatingImages}
             />
           ))}

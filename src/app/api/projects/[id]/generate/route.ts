@@ -31,6 +31,7 @@ import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
 import { extractShotsFromScript } from "@/lib/storyboard/extract-shot-script";
+import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
   getShotCharacters,
   persistStoryboardVersion,
@@ -58,46 +59,7 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
   return getShotCharacters(projectId, epId);
 }
 
-/**
- * 提取角色名的「基础名」：去掉括号及其内容。
- * 例如："龙渊（10岁）" → "龙渊"，"灵瑶（8岁）" → "灵瑶"
- * 用于双向模糊匹配：脚本里写"龙渊"能匹配到"龙渊（10岁）"的角色资产。
- */
-function extractBaseName(name: string): string {
-  // 去掉中文括号/英文括号及其内容
-  return name.replace(/[（(][^）)]*[）)]/g, "").trim();
-}
-
-/**
- * Filter characters to only those whose name (or base name) appears in the shot's text fields.
- * Prevents passing irrelevant character reference images to the image model.
- * Falls back to empty array if none match (e.g., scene with no named characters).
- *
- * Matching rules (any one passes):
- *   1. Full name in text: text contains "龙渊（10岁）"
- *   2. Base name in text: text contains "龙渊" (matches both adult and child variants)
- *   3. Text name in full name: character name starts with a token found in text
- */
-function filterShotCharacters<T extends { name: string }>(
-  shotText: string,
-  allCharacters: T[]
-): T[] {
-  if (allCharacters.length === 0) return [];
-  if (!shotText) return [];
-  const text = shotText.toLowerCase();
-  const matched = allCharacters.filter((c) => {
-    if (!c.name) return false;
-    const fullName = c.name.toLowerCase();
-    const baseName = extractBaseName(c.name).toLowerCase();
-    // Full name match
-    if (text.includes(fullName)) return true;
-    // Base name match (e.g. "龙渊" matches "龙渊（10岁）")
-    if (baseName && text.includes(baseName)) return true;
-    return false;
-  });
-  // If no character names found in text, return empty array (no char refs needed)
-  return matched;
-}
+// filterShotCharacters imported from @/lib/storyboard/filter-shot-characters (shared with pipeline/video-generate)
 
 /**
  * Check if a character is visible on-screen by looking for their name

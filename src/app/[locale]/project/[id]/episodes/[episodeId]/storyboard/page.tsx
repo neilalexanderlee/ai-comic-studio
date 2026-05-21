@@ -641,7 +641,7 @@ export default function EpisodeStoryboardPage() {
           )}
           {totalShots > 0 && (
             <Link
-              href={`/${locale}/project/${project!.id}/episodes/${useProjectStore.getState().currentEpisodeId}/preview${selectedVersionId ? `?versionId=${selectedVersionId}` : ""}`}
+              href={`/${locale}/project/${project!.id}/episodes/${urlEpisodeId || useProjectStore.getState().currentEpisodeId}/preview${selectedVersionId ? `?versionId=${selectedVersionId}` : ""}`}
               className="inline-flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-sm font-medium shadow-xs hover:bg-accent hover:text-accent-foreground"
             >
               <Film className="h-3.5 w-3.5" />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useParams } from "next/navigation";
 import { useProjectStore } from "@/stores/project-store";
 import { apiFetch } from "@/lib/api-fetch";
 import { Film, ImageIcon } from "lucide-react";
@@ -11,6 +12,9 @@ type GenerationMode = "keyframe" | "reference";
 export function GenerationModeTab() {
   const t = useTranslations("project");
   const { project, setProject } = useProjectStore();
+  // Read episodeId from URL params first — store may not be hydrated yet on first render
+  const urlParams = useParams<{ episodeId?: string }>();
+  const urlEpisodeId = urlParams?.episodeId ?? null;
 
   if (!project) return null;
 
@@ -23,7 +27,7 @@ export function GenerationModeTab() {
     setProject({ ...project, generationMode: newMode });
 
     try {
-      const episodeId = useProjectStore.getState().currentEpisodeId;
+      const episodeId = urlEpisodeId ?? useProjectStore.getState().currentEpisodeId;
       const url = episodeId
         ? `/api/projects/${project.id}/episodes/${episodeId}`
         : `/api/projects/${project.id}`;

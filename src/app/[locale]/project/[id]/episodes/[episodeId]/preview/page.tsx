@@ -23,7 +23,7 @@ export default function EpisodePreviewPage() {
   const t = useTranslations();
   const { project, fetchProject } = useProjectStore();
   const searchParams = useSearchParams();
-  const params = useParams<{ id: string }>();
+  const params = useParams<{ id: string; episodeId: string }>();
   const versionId = searchParams.get("versionId");
 
   useEffect(() => {
@@ -84,7 +84,7 @@ export default function EpisodePreviewPage() {
       const res = await apiFetch(`/api/projects/${project.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "video_assemble", payload: versionId ? { versionId } : undefined, episodeId: useProjectStore.getState().currentEpisodeId }),
+        body: JSON.stringify({ action: "video_assemble", payload: versionId ? { versionId } : undefined, episodeId: params.episodeId }),
       });
       await res.json();
     } catch (err) {
@@ -92,7 +92,7 @@ export default function EpisodePreviewPage() {
       toast.error(t("common.generationFailed"));
     }
     setAssembling(false);
-    await fetchProject(project.id, useProjectStore.getState().currentEpisodeId!);
+    await fetchProject(project.id, params.episodeId);
   }
 
   function handleDownload() {

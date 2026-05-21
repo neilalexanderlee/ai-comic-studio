@@ -7,6 +7,7 @@ import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { resolveSlotContents } from "@/lib/ai/prompts/resolver";
+import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
 import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
@@ -136,14 +137,21 @@ export async function handleVideoGenerate(task: Task) {
     ? `【画风】${visualStyleTag}\n\n${videoScript}`
     : videoScript;
 
+  // 仅传入当前 shot 中被提及的角色，避免群演场景注入无关角色的外貌描述
+  // 与 generate/route.ts 中 filterShotCharacters 的用法保持一致：无匹配时传空列表
+  const shotText = [shot.videoScript, shot.motionScript, shot.prompt, shot.startFrameDesc, shot.endFrameDesc]
+    .filter(Boolean)
+    .join(" ");
+  const shotCharacters = filterShotCharacters(shotText, projectCharacters);
+
   const prompt = buildVideoPrompt({
     videoScript: styledVideoScript,
     cameraDirection: cleanCamera,
     startFrameDesc: shot.startFrameDesc ?? undefined,
     endFrameDesc: shot.endFrameDesc ?? undefined,
     duration: effectiveDuration,
-    // 传入 description 以保留角色服装信息，防止视频模型自行发挥服装
-    characters: projectCharacters.map((c) => ({
+    // 只传入本镜头提及的角色（无匹配时为空列表，群演场景不注入无关角色）
+    characters: shotCharacters.map((c) => ({
       name: c.name,
       visualHint: c.visualHint,
       description: c.description,

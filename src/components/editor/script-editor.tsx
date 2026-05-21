@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { useProjectStore } from "@/stores/project-store";
@@ -21,6 +22,11 @@ export function ScriptEditor() {
   const [generating, setGenerating] = useState(false);
   const textGuard = useModelGuard("text");
   const scriptTextareaRef = useRef<HTMLTextAreaElement>(null);
+  // Read episodeId from URL params — store may not be hydrated yet on first render
+  const urlParams = useParams<{ episodeId?: string }>();
+  // Use a ref so persistNow (useCallback with [] deps) always reads the current URL value
+  const urlEpisodeIdRef = useRef(urlParams?.episodeId ?? null);
+  useEffect(() => { urlEpisodeIdRef.current = urlParams?.episodeId ?? null; }, [urlParams?.episodeId]);
 
   useEffect(() => {
     if (generating && scriptTextareaRef.current) {
@@ -39,7 +45,8 @@ export function ScriptEditor() {
     if (!proj || savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
-    const episodeId = state.currentEpisodeId;
+    // URL param takes priority — store may not be hydrated yet on first render
+    const episodeId = urlEpisodeIdRef.current ?? state.currentEpisodeId;
     const url = episodeId
       ? `/api/projects/${proj.id}/episodes/${episodeId}`
       : `/api/projects/${proj.id}`;
@@ -96,7 +103,7 @@ export function ScriptEditor() {
           action: "script_generate",
           payload: { idea },
           modelConfig: getModelConfig(),
-          episodeId: useProjectStore.getState().currentEpisodeId,
+          episodeId: urlEpisodeIdRef.current ?? useProjectStore.getState().currentEpisodeId,
         }),
       });
 
@@ -113,7 +120,7 @@ export function ScriptEditor() {
         }
       }
 
-      await fetchProject(project.id, useProjectStore.getState().currentEpisodeId ?? undefined);
+      await fetchProject(project.id, urlEpisodeIdRef.current ?? useProjectStore.getState().currentEpisodeId ?? undefined);
     } catch (err) {
       console.error("Script generate error:", err);
       toast.error(t("common.generationFailed"));
