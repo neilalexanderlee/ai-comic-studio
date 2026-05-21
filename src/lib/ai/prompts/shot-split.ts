@@ -45,10 +45,13 @@ Output a JSON array:
 ═══════════════════════════════════════════════════
 PURPOSE: The PRIMARY input to the Seedance video generation model. This single field determines 80% of output quality. Write it with the precision of a world-class film director briefing a cinematographer.
 
+SEEDANCE PROMPT FORMULA: 主体 + 运动（必须）+ 环境（选填）+ 运镜（选填）+ 氛围/感官细节（选填）
+
 FORMAT: 30–60 words of seamless flowing prose. NO section labels. NO dialogue text.
-- Open with character name + brief visual identifier in parentheses (e.g. 龙渊（黑甲银纹）)
+- Open with character name + brief visual tag in parentheses (e.g. 龙渊（黑甲）).
+  ⚠️ The video model ALREADY sees what the character looks like via the first/last frame images — the tag is for DISAMBIGUATION only (2–4 Chinese characters max). Do NOT re-describe full appearance; focus on what HAPPENS.
 - Describe ONE clear, specific physical action with a single verb — do NOT chain multiple actions
-- Specify exact camera movement with speed and endpoint (e.g. "镜头从中景缓慢推至颈部以上近景")
+- Specify camera movement using the formula: 起幅构图 + 运镜动作 + 运镜幅度 + 落幅构图 (e.g. "镜头从胸口中景缓慢推至下颌以上近景")
 - Close with ONE sharp atmospheric or sensory detail (light quality, sound texture, particle motion)
 - OPTIONAL timeline anchor for complex shots: prefix key moments with timestamp (e.g. "0s:起幅" "3s:动作峰值" "6s:落幅"), separated by semicolons
 
@@ -109,9 +112,15 @@ GOOD: "镜头从地平线高度缓慢升起——星落小镇全景自下而上�
   startFrame & endFrame — Image Generation Anchors
 ═══════════════════════════════════════════════════
 Each must be a SELF-SUFFICIENT image generation prompt containing:
-- COMPOSITION: frame layout — foreground/midground/background layers, character positions (left/center/right, rule-of-thirds), depth-of-field
-- CHARACTERS: reference by exact name, describe CURRENT pose, expression, action, outfit
-- CAMERA: shot type (extreme close-up / close-up / medium / wide / extreme wide), angle (eye level / low angle / high angle / bird's eye / dutch angle)
+- SHOT TYPE (景别): use "主体+景别" syntax — e.g. "龙渊的近景" / "灵瑶的半身像" / "两人的中景"
+  摄影景别词: 远景/全景/中景/近景/特写/极特写
+  美术景别词: 头像/胸像/半身像/全身像
+- CAMERA ANGLE (机位/视角):
+  机位高度: 高机位俯视 / 低机位仰视 / 平机位 / 正扣（正上方）/ 正仰（正下方朝上）
+  叙事视角: 过肩视角 / 主观视角（POV）/ 蝼蚁视角 / 偷窥视角 / 望远镜视角
+  主体角度: 正面 / 正侧 / 四分之三侧 / 背面
+- COMPOSITION: character positions (left/center/right, rule-of-thirds), foreground/background layers, depth-of-field
+- CHARACTERS: reference by exact name, describe CURRENT pose, expression, action only — visual appearance is carried by the frame image, no need to re-describe costume/hair in detail
 - LIGHTING: direction, quality, color temperature — specific to this frame's moment
 - EMOTIONAL STATE: one word or phrase describing the visible emotional tone of the frame
 - Do NOT include dialogue text in startFrame or endFrame
@@ -121,41 +130,59 @@ endFrame = END STATE after action completes (new positions, expression reflectin
 endFrame MUST be visually stable (not mid-motion) — it should create a natural visual bridge to the next shot
 
 ═══════════════════════════════════════════════════
-  Scene Transition Rules — MANDATORY SELF-CHECK
+  Scene Transition Rules — FORWARD GENERATION (per shot, not retrospective)
 ═══════════════════════════════════════════════════
-After writing ALL shots, you MUST review every adjacent pair (shot N endFrame → shot N+1 startFrame).
-A hard cut between mismatched scenes is a CRITICAL FAILURE. Fix it before submitting.
+Handle transitions WHILE writing each shot — do NOT leave it for a retrospective review.
+Since you read the full script before generating, you already know what comes before and after each shot.
 
-TRANSITION TYPES — apply the correct rule for each pair:
+FOR EVERY SHOT, before writing startFrame and endFrame, silently answer:
+  Q1: What is the PREVIOUS shot type? → determines how to write startFrame
+  Q2: What is the NEXT shot type? → determines how to write endFrame
 
-▸ CROWD/WIDE → CHARACTER CLOSE-UP:
-  Shot N endFrame: camera has already moved toward where the character will appear — frame through a gap (archway, parted crowd, doorway, shadow pool). The character's silhouette or location anchor is visible in the background.
-  Shot N+1 startFrame: character fully established in environment, before any action begins. NOT mid-action.
-  BAD endFrame: "人群热闹庆祝，锣鼓喧天" (no lead-in to next shot)
-  GOOD endFrame: "镜头缓推至人群外侧空地边缘，稻草垛居中，两道模糊孩童轮廓隐于其后"
+STARTFRAME rules based on Q1:
+▸ Previous = CROWD/WIDE, This = CHARACTER:
+  Character is already established in sub-location (e.g. near the haystacks, at the doorway) BEFORE the wide shot ends.
+  startFrame: character placed in environment, pre-action, NOT mid-motion. Environment visible behind them.
+  BAD: "龙渊回头笑着" (mid-action, no environment context)
+  GOOD: "龙渊站于麦垛前，侧身对着镜头，右手尚未伸出，背景是模糊的篝火与镇子轮廓"
 
-▸ CHARACTER → NEW LOCATION:
-  Shot N endFrame: character physically moves toward exit — turning away, stepping off-frame, camera pulls back to reveal wider world. The departure is visible, not implied.
-  Shot N+1 startFrame: new environment established FIRST (establishing shot logic), then introduce characters entering the frame.
+▸ Previous = SAME CHARACTERS, This = SAME LOCATION:
+  Match previous shot's lighting direction, costume, background elements exactly.
 
-▸ CHARACTER → NEW CHARACTER (same or different location):
-  Shot N endFrame: outgoing character's gaze or body language motivates the cut — looking off-screen toward where the next character will be, OR a reaction that implies another person's presence.
-  Shot N+1 startFrame: incoming character positioned and settled before speaking or acting.
+▸ Previous = CHARACTER, This = NEW LOCATION:
+  Environment is shown first (empty or ambient), THEN character enters from frame edge.
 
-▸ SAME SCENE CONTINUATION (same characters, same location):
-  endFrame and next startFrame share: same costume, same lighting direction, same background elements. Cut on a natural pause — NOT at peak motion.
+ENDFRAME rules based on Q2:
+▸ This = CROWD/WIDE, Next = CHARACTER:
+  Camera has ALREADY MOVED toward the sub-location where next shot's characters are.
+  Their silhouette or a specific prop anchor (haystack, doorway, lamppost) is visible in the background.
+  BAD: "俯拍全景，村民在篝火旁跳舞" (no spatial lead-in to next shot)
+  GOOD: "镜头从俯拍全景缓推至打谷场外侧，麦垛区居中，两道孩童模糊身影隐于其后"
 
-▸ PHYSICAL REALITY CHECK (apply to every frame):
-  - Objects under gravity hang/fall straight down — lanterns, flags, cloth do NOT "point toward" things
-  - Camera angle in frame description MUST match the shot's cameraDirection field
-  - Do NOT invent props or spatial relationships not present in the scene description
-  - Each frame description is a FROZEN STILL IMAGE — no motion verbs ("swinging", "rushing")
+▸ This = CHARACTER, Next = CROWD/WIDE:
+  Character's gaze or body language faces the direction of the crowd / wider world (motivates cut-out).
+
+▸ This = CHARACTER, Next = NEW CHARACTER:
+  Outgoing character looks off-screen toward where next character will appear.
+
+▸ This = CHARACTER, Next = SAME CHARACTERS, SAME LOCATION:
+  End on a natural pause or held gesture. NOT at peak motion.
+
+PHYSICAL REALITY CHECK (every frame):
+  - Objects under gravity (lanterns, flags, cloth) hang STRAIGHT DOWN — never "extend toward" or "point at" things
+  - Camera angle in description MUST match the shot's cameraDirection field
+  - No invented props or spatial relationships absent from the scene description
+  - Every frame description = a FROZEN STILL IMAGE — no motion verbs
 
 ═══════════════════════════════════════════════════
   motionScript — Time-Segmented Narrative
 ═══════════════════════════════════════════════════
 FORMAT: "0-2s: [action]. 2-4s: [action]. 4-6s: [action]. ..."
 STRICT RULE: each segment spans AT MOST 3 seconds. A 10s shot = at least 4 segments.
+
+CAMERA MOVEMENT FORMULA (per segment): 起幅构图描述 + 运镜动作 + 运镜幅度 + 落幅构图描述
+运镜动词: 推/拉/摇/移/跟/升/降/甩/环绕/旋转/变焦
+复合运镜: 希区柯克镜头 = 推拉 + 变焦（主体不变，背景压缩/拉伸）; 子弹时间 = 升格 + 快速环绕
 
 Each segment is ONE densely-packed sentence (50-80 words) weaving ALL four layers simultaneously:
 • CHARACTER: exact body parts in motion — knuckles whiten, tendons flare, pupils contract, breath held, teeth clench; specify speed and force
@@ -185,22 +212,42 @@ ${proportionalTiers}
 ═══════════════════════════════════════════════════
   cameraDirection — Technical Camera Instruction
 ═══════════════════════════════════════════════════
-Choose ONE value per shot. Compound movements allowed with " + ":
-- "static" — locked camera, no movement
-- "slow zoom in" / "slow zoom out" — gradual focal length change
-- "fast zoom in" / "fast zoom out" — rapid punch zoom
-- "pan left" / "pan right" — horizontal sweep
-- "tilt up" / "tilt down" — vertical sweep
-- "tracking shot" — camera follows character movement
-- "dolly in" / "dolly out" — camera physically moves toward/away
-- "crane up" / "crane down" — vertical camera lift
-- "orbit left" / "orbit right" — camera arcs around subject
-- "push in" — slow forward dolly for emphasis
-- "whip pan left" / "whip pan right" — fast blurred pan
-- "handheld" — slightly unstable handheld feel for tension/immediacy
-- "low angle push in" — ground-level forward dolly
-- "high angle tilt down" — overhead looking down
-Compound: "dolly in + tilt up" / "orbit right + crane up" / "slow zoom in + pan right"
+Choose ONE value per shot. Compound movements allowed with " + ".
+
+▸ 基础运镜（中文优先，与 videoScript 保持一致）:
+- "static" / "固定" — locked camera
+- "推" / "dolly in" — camera moves forward toward subject
+- "拉" / "dolly out" — camera pulls away
+- "摇左" / "摇右" / "pan left" / "pan right" — horizontal pivot
+- "摇上" / "摇下" / "tilt up" / "tilt down" — vertical pivot
+- "移左" / "移右" — lateral tracking (camera body moves)
+- "跟" / "tracking shot" — follows character movement
+- "升" / "crane up" — camera rises vertically
+- "降" / "crane down" — camera descends
+- "甩" / "whip pan" — fast blurred pan for cut emphasis
+- "环绕" / "orbit" — camera arcs around subject
+- "变焦推" / "slow zoom in" — focal length change (Hitchcock effect when combined with 拉)
+- "handheld" — slight instability for immediacy/tension
+
+▸ 机位高度 + 视角（可与运镜组合）:
+- "高机位" — camera above subject, looking down
+- "低机位" / "low angle" — camera below subject, looking up
+- "蝼蚁视角" — extreme low angle, ground level
+- "俯拍" / "bird's eye" — straight down from above
+- "仰拍" — straight up from below
+
+▸ 叙事视角（直接写入值）:
+- "过肩" — over-the-shoulder framing
+- "主观视角" / "POV" — character's point of view
+- "偷窥视角" — voyeuristic, partially obscured
+- "望远镜视角" — narrow circular framing, telephoto feel
+
+▸ 复合运镜（写成组合值）:
+- "推 + 变焦拉" — Hitchcock zoom (subject stays, background compresses/stretches)
+- "环绕 + 升" / "orbit + crane up"
+- "低机位 + 推" / "low angle push in"
+- "高机位 + 摇下" / "high angle tilt down"
+- "跟 + 摇" — follow then pivot
 
 ⚠️ HARD DURATION RULE — NON-NEGOTIABLE:
 Every single shot duration MUST be between ${minDuration} and ${maxDuration} seconds.
@@ -257,18 +304,28 @@ export function buildShotSplitPrompt(
         const high = targetDurationSeconds + tolerance;
         return `\n🎬 NARRATIVE COVERAGE TARGET: ${targetLabel} (${targetDurationSeconds}s), acceptable range ${low}s–${high}s.
 
+⚠️ The screenplay may define a fixed number of shots — that count is NOT a ceiling.
+You are FREE to INSERT additional shots between defined ones whenever needed to reach the duration target.
+
 SELF-CHECK before submitting — sum every "duration" field:
-• Total ≥ ${low}s and ≤ ${high}s → submit as-is.
-• Total < ${low}s → you must add MORE STORY, not stretch durations. Add shots by:
-    - Reaction shots: after key dialogue, cut to the listener's face showing their unspoken response
-    - Character beats: a moment of hesitation, a micro-gesture that reveals inner state
-    - Environmental storytelling: a detail in the world that foreshadows or reflects the emotion
-    - Scene transitions: a character walking to the next location, not a jump cut
-    - Parallel action: what another character is doing during this scene
-  ❌ Do NOT bloat duration values just to hit the number — empty slow shots kill pacing.
-  ❌ Do NOT repeat content already shown.
-  ✅ Every added shot must earn its place with narrative purpose.
-• Total > ${high}s → trim durations of pure establishing/transition shots (they rarely need more than 8s).
+• Total within ${low}s–${high}s → submit.
+• Total < ${low}s → INSERT additional shots inline (do not stretch existing durations). Choose from:
+    - REACTION SHOT: after key dialogue, cut to the listener's unspoken response — show the micro-expression shift, the held breath, the hand that tightens
+    - CHARACTER BEAT: a moment of internal conflict made visible — hesitation before a decision, a glance that reveals doubt, a gesture that contradicts the spoken words
+    - ENVIRONMENT DETAIL: a world element that ACTIVELY COMMENTS on the scene — not random scenery, but something that foreshadows, mirrors, or ironically contrasts the emotional beat
+    - TRANSITION SHOT: a character physically moving between locations with emotional subtext — their pace, posture, and expression carry story information
+    - PARALLEL ACTION: what another character is doing simultaneously, adding dramatic irony or tension
+
+  EVERY INSERTED SHOT MUST MEET S-GRADE STANDARDS — identical requirements to all other shots:
+    ✅ videoScript: 30–60 word Seedance-style prose with character name + visual ID, ONE specific action verb, camera movement with speed and endpoint, ONE atmospheric detail
+    ✅ startFrame / endFrame: full S-grade image composition (character position, expression, lighting, emotional tone)
+    ✅ motionScript: time-segmented with max 3s per segment
+    ✅ The inserted shot must ADVANCE one of: plot, character relationship, emotional state, or world-building
+    ❌ REJECT any inserted shot whose videoScript is a template, generic, or shorter than 25 characters
+    ❌ REJECT any inserted shot that merely shows "character walks" or "camera pans" with no subtext
+    ❌ Do NOT pad duration values of existing shots — empty slow shots destroy pacing
+  Keep inserting until total ≥ ${low}s.
+• Total > ${high}s → shorten durations of pure establishing/atmosphere shots first (cap at 8–10s each).
 `;
       })()
     : "";
