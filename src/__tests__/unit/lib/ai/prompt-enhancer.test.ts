@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { makeTextProvider } from "../../setup";
+import { makeTextProvider } from "../../../setup";
 import {
   enhanceVideoPrompt,
   enhanceImagePrompt,
