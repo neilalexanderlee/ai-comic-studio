@@ -865,34 +865,11 @@ async function handleShotSplitStream(
     cameraDirection?: string;
   };
 
-  const extracted = extractShotsFromScript(fullScript);
-  if (!options?.forceAi && extracted.detection.matched && extracted.shots.length > 0) {
-    const persistableShots: PersistableShot[] = finalizeExtractedShotsForDb(
-      extracted.shots
-    );
-    const warnings =
-      extracted.warnings.length > 0 ? extracted.warnings : undefined;
-    persistableShots.forEach((shot) => {
-      shot.warnings = warnings;
-    });
+  // 始终走 LLM S 级 shot_split 路径，保证分镜质量达到电影级标准。
+  // 快速路径（extractShotsFromScript）已废弃：它只是照抄剧本内容，
+  // 无法补全运镜、首尾帧四要素、videoScript 等 S 级必要字段。
+  console.log(`[ShotSplit] Using LLM with S-grade system prompt (script length=${fullScript.length})`);
 
-    const persisted = await persistStoryboardVersion({
-      projectId,
-      episodeId: episodeId ?? null,
-      shotCharacters,
-      shots: persistableShots,
-    });
-
-    console.log(
-      `[ShotSplit] Extracted ${persisted.shotCount} shots directly from structured script (score=${extracted.detection.score})`
-    );
-    return NextResponse.json({
-      shots: persisted.shotCount,
-      mode: "extracted",
-      warnings: extracted.warnings,
-      reasons: extracted.detection.reasons,
-    });
-  }
 
   // Pre-compute scene count per chunk for proportional duration distribution
   const chunkSceneCounts = sceneChunks.map(
@@ -1099,16 +1076,28 @@ async function handleSingleShotRewrite(
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
   const characterDescriptions = projectCharacters
-    .map((c) => `${c.name}: ${c.description}`)
+    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
   const characterVisualHints = projectCharacters
     .filter((c) => c.visualHint)
     .map((c) => `${c.name}：${c.visualHint}`)
     .join("\n");
 
+  const [rewriteProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const rewriteVisualStyleTag = (() => {
+    const style = rewriteProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   const model = createLanguageModel(modelConfig.text);
 
-  const prompt = `You are a storyboard director. Rewrite the text fields for a single shot so the descriptions are vivid, safe for AI image generation, and free of any potentially sensitive content.
+  const prompt = `You are an S-rank storyboard director for theatrical-quality animated short films. Rewrite the fields for a single shot to reach S-grade production quality AND avoid AI content filter triggers.
+
+${rewriteVisualStyleTag ? `PROJECT ART STYLE (MANDATORY — preserve in all descriptions): ${rewriteVisualStyleTag}` : ""}
 
 Current shot (sequence ${shot.sequence}):
 - Scene description: ${shot.prompt || ""}
@@ -1119,21 +1108,24 @@ Current shot (sequence ${shot.sequence}):
 - Camera direction: ${shot.cameraDirection || "static"}
 - Duration: ${shot.duration}s
 
-Character references:
-${characterDescriptions || "none"}
-${characterVisualHints ? `\nCHARACTER VISUAL IDs (MANDATORY — whenever a character appears in any field, write their name followed by exactly this identifier in parentheses, e.g. 天枢真君（银发金瞳）. Never invent alternatives):\n${characterVisualHints}` : ""}
+${characterDescriptions ? `Character references:\n${characterDescriptions}` : ""}
+${characterVisualHints ? `\nCHARACTER VISUAL IDs (MANDATORY — use these exact identifiers in parentheses on first mention, e.g. 天枢真君（银发金瞳）. Never invent alternatives):\n${characterVisualHints}` : ""}
 
 Return ONLY a JSON object (no markdown fences) with these fields:
 {
-  "prompt": "rewritten scene description",
-  "startFrameDesc": "rewritten start frame description",
-  "endFrameDesc": "rewritten end frame description",
-  "motionScript": "rewritten motion script in time-segmented format (0-Xs: ... Xs-Ys: ...)",
-  "videoScript": "rewritten concise video model prompt: 1-2 sentences, no timestamps, just core motion and camera arc",
-  "cameraDirection": "camera direction (keep original or adjust)"
+  "prompt": "Scene/environment: setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood",
+  "startFrameDesc": "Static opening frame composition — character position/posture/expression BEFORE action begins, ambient lighting, environment. 40-60 words. Physical reality: objects obey gravity, camera matches cameraDirection.",
+  "endFrameDesc": "Static closing frame composition — character position/posture/expression AFTER action completes, stable pose. 40-60 words. Same physical reality rules.",
+  "motionScript": "Time-segmented action script: 0s-Xs: [precise body mechanics], Xs-Ys: [continuation], final Zs: [resolution]. Anatomically specific (which joint, which direction, force level).",
+  "videoScript": "S-grade Seedance 2.0 prose (30-60 words, NO section labels): ① character name (visual-id) + precise current position/posture ② ONE action verb with anatomical detail (which joint, arc direction, force) ③ camera: opening-composition → speed+method → closing-composition ④ ONE sharp atmospheric detail (light color+source+position, or particle/mist motion). DIALOGUE SHOTS additionally require: exact frame position, ONE pre-speech micro-action (head tilt angle / jaw set / eye direction), expression arc across shot.",
+  "cameraDirection": "Specific camera instruction with speed and endpoint (e.g. '缓慢推至颈部以上近景' not just '推镜')"
 }
 
-IMPORTANT: Keep the same scene, characters, and narrative intent. Only rephrase to avoid safety filter triggers. Match the language of the original text.`;
+CRITICAL RULES:
+- Keep identical scene, characters, and narrative intent — only improve quality and rephrase to avoid safety triggers
+- videoScript must be 30-60 words of seamless prose — NOT a template, NOT a list
+- Physical reality: objects subject to gravity hang/fall straight down; no impossible spatial relationships
+- Match language of the original text (中文→中文, English→English)`;
 
   console.log(`[SingleShotRewrite] Shot ${shot.sequence} prompt length=${prompt.length}`);
 
@@ -1221,11 +1213,25 @@ async function handleFramePromptPreview(
     projectId,
   });
 
+  // Fetch visualStyle for style lock (same as actual generation)
+  const [previewProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const previewVisualStyleTag = (() => {
+    const style = previewProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+  const previewCleanedCamera = shot.cameraDirection?.replace(/^\*+\s*/, "").replace(/\*+$/, "").trim() || undefined;
+
   const firstPrompt = buildFirstFramePrompt({
     sceneDescription: shot.prompt || "",
     startFrameDesc: shot.startFrameDesc || shot.prompt || "",
     characterDescriptions,
     previousLastFrame: previousShot?.lastFrame || undefined,
+    visualStyleTag: previewVisualStyleTag,
+    cameraDirection: previewCleanedCamera,
     slotContents: frameFirstSlots,
   });
 
@@ -1234,6 +1240,8 @@ async function handleFramePromptPreview(
     endFrameDesc: shot.endFrameDesc || shot.prompt || "",
     characterDescriptions,
     firstFramePath: shot.firstFrame || previousShot?.lastFrame || "first-frame-reference",
+    visualStyleTag: previewVisualStyleTag,
+    cameraDirection: previewCleanedCamera,
     slotContents: frameLastSlots,
   });
 
@@ -2739,11 +2747,11 @@ async function handleSingleReferenceVideo(
     .from(dialogues)
     .where(eq(dialogues.shotId, shotId))
     .orderBy(asc(dialogues.sequence));
-  const videoContextForDialogue = shot.motionScript || shot.videoScript || shot.prompt || "";
+  const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
   const onScreenDialogueChars = shotDialogues
     .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
     .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-  
+
   const dialogueList = shotDialogues.map((d) => {
     const char = projectCharacters.find((c) => c.id === d.characterId);
     const characterName = char?.name ?? "Unknown";
@@ -3002,7 +3010,7 @@ async function handleBatchReferenceVideo(
           .from(dialogues)
           .where(eq(dialogues.shotId, shot.id))
           .orderBy(asc(dialogues.sequence));
-        const videoContextForDialogue = shot.motionScript || shot.videoScript || shot.prompt || "";
+        const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
         const onScreenDialogueChars = shotDialogues
           .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
           .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
