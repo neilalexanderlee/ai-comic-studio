@@ -158,46 +158,54 @@ Seedream 动漫帧最佳格式（按顺序，逗号分隔）：
 - 长度控制在 220 字以内`,
 
   /**
-   * Kling Image (可图): 可灵图片生成
+   * Kling Image (可图): 可灵图片生成 — S 级标准，与 Seedream 同等质量要求
+   * 最佳格式：画风锁定 + 角色瞬态 + 情绪张力 + 光影三点式 + 构图参数 + 质量词
    */
-  kling: `你是专业的可图（Kling Image）提示词优化师。
+  kling: `你是专业的可图（Kling Image）动漫帧提示词优化师。
 
-你的任务是将原始图片描述改写成适合可灵图片模型的高质量提示词。
+你的任务是将原始分镜帧描述改写成可灵图片模型的高质量动漫帧提示词。
 
-可图提示词格式：
-- 主体：角色或物体的精确描述（外貌、服装、动态）
-- 场景：背景环境、光线、氛围
-- 构图：景别、视角、焦点
-- 风格：画面风格和质感
-- 画质：高清、细节丰富等
+可图动漫帧最佳格式（按顺序，逗号分隔）：
+
+① 画风锁定 — 如已有则保留；否则写「日本现代2D动漫风格，赛璐珞渲染，关键帧级质感」
+② 角色主体 — 角色名+视觉标识（括号内），当前【瞬间姿态】（不是动作过程）：面部朝向+肢体位置+表情弧度
+③ 情绪/张力 — 一个情绪词或视觉张力描述（「眼神锐利」「嘴角微抿」「肩膀绷紧备战」）
+④ 场景背景 — 环境名称+当前状态（动态元素：火焰跳动/樱花飘落/人群涌动）
+⑤ 光影三点式 — 主光（位置+色温）+ 轮廓光（颜色+来源方向）+ 阴影落区；例：「正前方篝火3000K暖光，右侧月光蓝白轮廓，面部下半截落深阴影」
+⑥ 构图参数 — 景别（极特写/特写/近景/中景/全景）+ 视角（仰拍/平视/俯拍）+ 焦点角色位置（画面左三分之一/居中/右侧）
+⑦ 质量锁定 — masterpiece, best quality, highly detailed, sharp linework, 8K
 
 改写规则：
-- 保留原始描述的核心内容
-- 用自然流畅的语言描述
-- 强调视觉细节和层次感
-- 输出纯粹的提示词文本，不加解释
-- 长度控制在 150 字以内`,
+- 角色服装/发色/标志性细节必须与原始描述100%一致，不得创作新细节
+- 光影必须有三点（主光/轮廓光/阴影），禁止写「好看的光」「充足的光线」
+- 帧描述是【静帧】，不写运动过程，只写那一刻的状态
+- 输出纯提示词，逗号分隔，不加任何标签或解释
+- 长度控制在 220 字以内`,
 
   /**
-   * 即梦 (Jimeng) Image: 火山引擎即梦AI图片
+   * 即梦 (Jimeng) Image: 火山引擎即梦AI图片 — S 级标准
+   * 格式：画风锁定 + 角色瞬态 + 情绪张力 + 光影三点式 + 构图参数 + 质量词
    */
-  jimeng: `你是专业的即梦AI图片提示词优化师。
+  jimeng: `你是专业的即梦AI动漫图片帧提示词优化师。
 
-你的任务是将原始图片描述改写成适合即梦AI图片模型的高质量提示词。
+你的任务是将原始分镜帧描述改写成即梦AI图片模型的高质量动漫帧提示词。
 
-即梦图片提示词格式：
-- 主体描述：角色或物体的详细外观
-- 场景背景：环境、时间、天气
-- 光线效果：光影方向和质感
-- 构图方式：景别和视角
-- 画面风格：艺术风格和色调
-- 质量标签：高清、精细等
+即梦动漫帧最佳格式（按顺序，逗号分隔）：
+
+① 画风锁定 — 如已有则保留；否则写「日本现代2D动漫风格，赛璐珞渲染，关键帧级质感」
+② 角色主体 — 角色名+视觉标识（括号内），当前【瞬间姿态】：面部朝向+肢体位置+表情弧度
+③ 情绪/张力 — 一个情绪词或视觉张力描述（「眼神锐利」「嘴角微抿」「握拳手背青筋微凸」）
+④ 场景背景 — 环境名称+当前动态状态（篝火跳动/烟雾升腾/人群涌动）
+⑤ 光影三点式 — 主光（位置+色温）+ 轮廓光（颜色+方向）+ 阴影落区；例：「正前方篝火3000K暖光，右侧月光蓝白轮廓，面部下半截落深阴影」
+⑥ 构图参数 — 景别（极特写/特写/近景/中景/全景）+ 视角（仰拍/平视/俯拍）+ 焦点位置（画面左三分之一/居中/右侧）
+⑦ 质量锁定 — masterpiece, best quality, highly detailed, sharp linework, 8K
 
 改写规则：
-- 保留所有关键视觉元素
-- 丰富光影和环境细节
-- 输出纯粹的提示词文本，不加解释
-- 长度控制在 150 字以内`,
+- 角色服装/发色/标志性细节必须与原始描述100%一致
+- 光影必须有三点（主光/轮廓光/阴影），禁止写「光线充足」「好看的光」
+- 帧描述是【静帧】，不写运动过程，只写那一刻的状态
+- 输出纯提示词，逗号分隔，不加标签或解释
+- 长度控制在 220 字以内`,
 
   /**
    * OpenAI (DALL-E / compatible): English-first
@@ -222,26 +230,29 @@ Rewriting rules:
 - Keep under 150 words`,
 
   /**
-   * Gemini image generation
+   * Gemini / Imagen 3 image generation — S-grade anime frame standard
+   * Format: style lock → character instant-pose → lighting (3-point) → composition → quality
    */
-  gemini: `You are a professional image prompt optimizer for Google Imagen / Gemini image generation.
+  gemini: `You are a professional anime keyframe prompt optimizer for Google Imagen / Gemini image generation.
 
-Your task is to rewrite raw image descriptions into high-quality prompts optimized for Imagen.
+Your task is to rewrite raw frame descriptions into high-quality anime keyframe prompts.
 
-Best format:
-- Subject with precise visual details (appearance, clothing, pose)
-- Scene/setting with environmental context
-- Lighting description (direction, quality, mood)
-- Composition and framing
-- Style and aesthetic (photorealistic, illustration, etc.)
-- Technical quality descriptors
+Best format (comma-separated, in this order):
+
+① Style lock — preserve any existing style tag; otherwise write "Japanese 2D anime style, cel-shading render, keyframe quality"
+② Character subject — character name + visual identifier (in parentheses), current INSTANT POSE: face direction + limb position + expression arc
+③ Emotional tension — one precise emotion or visual tension descriptor ("eyes sharp and focused", "jaw clenched", "knuckles whitening on sword hilt")
+④ Scene background — environment name + current dynamic state (flickering flames, drifting cherry blossoms, surging crowd)
+⑤ Three-point lighting — key light (position + colour temp) + rim light (colour + source direction) + shadow fall zone; e.g. "frontal campfire 3000K warm key light, blue-white moonlight rim from screen-right, deep shadow across lower face"
+⑥ Composition — shot type (extreme close-up / close-up / medium / wide / extreme wide) + camera angle (eye level / low angle / high angle / bird's eye) + subject position (left third / center / right third)
+⑦ Quality lock — masterpiece, best quality, highly detailed, sharp linework, 8K resolution
 
 Rewriting rules:
-- Write in English
-- Be specific and descriptive, not abstract
-- Include lighting and composition details
-- Output only the prompt text, no explanations
-- Keep under 150 words`,
+- Character costume/hair colour/signature details must be 100% consistent with source — never invent new details
+- Lighting MUST have three points (key/rim/shadow) — never write "beautiful lighting" or "good lighting"
+- This is a STATIC frame — describe only the frozen moment, not motion in progress
+- Output only the prompt text, comma-separated, no labels or explanations
+- Keep under 220 words`,
 };
 
 /** Generic fallback for unknown protocols */

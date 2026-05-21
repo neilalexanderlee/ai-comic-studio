@@ -13,7 +13,7 @@ import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
-import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
+import { buildShotSplitPrompt, buildShotSplitSystem } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
@@ -24,7 +24,7 @@ import {
 import { buildSceneFramePrompt } from "@/lib/ai/prompts/scene-frame-generate";
 import { resolveImageProvider, resolveVideoProvider, resolveAIProvider } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
-import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
+import { buildRefVideoPromptRequest, getRefVideoPromptSystem } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
 import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { assembleVideo } from "@/lib/video/ffmpeg";
@@ -824,8 +824,17 @@ async function handleShotSplitStream(
   const model = createLanguageModel(modelConfig.text);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const shotSplitSlots = await resolveSlotContents("shot_split", { userId, projectId });
-  const shotSplitDef = getPromptDefinition("shot_split")!;
-  const systemPrompt = shotSplitDef.buildFullPrompt(shotSplitSlots, { maxDuration: videoMaxDuration });
+  // If the user has customised any slot, respect their override (registry build).
+  // Otherwise use the high-fidelity buildShotSplitSystem which contains the full
+  // S-grade dialogue/action/atmosphere requirements that the registry defaults lack.
+  const hasUserCustomisation = Object.keys(shotSplitSlots).length > 0;
+  let systemPrompt: string;
+  if (hasUserCustomisation) {
+    const shotSplitDef = getPromptDefinition("shot_split")!;
+    systemPrompt = shotSplitDef.buildFullPrompt(shotSplitSlots, { maxDuration: videoMaxDuration });
+  } else {
+    systemPrompt = buildShotSplitSystem(videoMaxDuration);
+  }
   
   // Use portable JSON mode if possible, fallback to plain text + extractJSON
   const useJsonMode = modelConfig.text.protocol === "openai";
@@ -1641,6 +1650,8 @@ async function handleSingleFrameGenerate(
 
   // frameTarget: "first" = only regenerate firstFrame; "last" = only lastFrame; "both" = default
   const frameTarget = (payload?.frameTarget as "first" | "last" | "both") ?? "both";
+  // disableChaining: when true, never auto-write this shot's lastFrame into the next shot's firstFrame
+  const disableChaining = payload?.disableChaining === true;
 
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
@@ -1698,8 +1709,8 @@ async function handleSingleFrameGenerate(
         .update(shots)
         .set({ lastFrame: lastFramePath, status: "completed" })
         .where(eq(shots.id, shotId));
-      // Sync next shot's firstFrame
-      if (nextShot) {
+      // Sync next shot's firstFrame only when chaining is enabled
+      if (nextShot && !disableChaining) {
         await db.update(shots).set({ firstFrame: lastFramePath }).where(eq(shots.id, nextShot.id));
       }
       return NextResponse.json({ shotId, lastFrame: lastFramePath, status: "ok" });
@@ -1709,8 +1720,7 @@ async function handleSingleFrameGenerate(
     // Smart chain-break: only reuse the previous shot's last frame if it contains
     // overlapping named characters. crowd→character cuts always generate a fresh first frame.
     let firstFramePath: string;
-    // disableChaining: caller (shot-card) can force independent first frame generation
-    const disableChaining = payload?.disableChaining === true;
+    // disableChaining is read from payload above (hoisted before frameTarget checks)
     const prevShotTextSingle = previousShot
       ? [previousShot.prompt, previousShot.motionScript, previousShot.videoScript].filter(Boolean).join(" ")
       : "";
@@ -1770,8 +1780,8 @@ async function handleSingleFrameGenerate(
       .set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" })
       .where(eq(shots.id, shotId));
 
-    // Sync next shot's firstFrame to maintain continuity chain
-    if (nextShot) {
+    // Sync next shot's firstFrame to maintain continuity chain — only when chaining is enabled
+    if (nextShot && !disableChaining) {
       await db
         .update(shots)
         .set({ firstFrame: lastFramePath })
@@ -1882,6 +1892,10 @@ async function handleSingleVideoGenerate(
         visualHint,
       };
     });
+    // If the user already ran "generate video prompt" (Step 7), shot.videoPrompt is a
+    // vision-informed, model-specific prompt — use it directly without re-enhancement.
+    // Only build from scratch + enhance when no pre-generated prompt exists.
+    const hasPreGeneratedPrompt = !!shot.videoPrompt;
     const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
       videoScript,
       cameraDirection: shot.cameraDirection || "static",
@@ -1893,8 +1907,8 @@ async function handleSingleVideoGenerate(
       slotContents: videoSlots,
       visualStyleTag: singleVideoStyleTag,
     });
-    const singleVideoTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-    const videoPrompt = enhancePrompts && singleVideoTextProvider
+    const singleVideoTextProvider = (enhancePrompts && !hasPreGeneratedPrompt) ? resolveAIProvider(modelConfig) : null;
+    const videoPrompt = enhancePrompts && !hasPreGeneratedPrompt && singleVideoTextProvider
       ? await enhanceVideoPrompt(videoPromptRaw, modelConfig?.video?.protocol ?? "", singleVideoTextProvider)
       : videoPromptRaw;
 
@@ -2046,6 +2060,7 @@ async function handleBatchVideoGenerate(
           };
         });
 
+        const batchHasPreGenPrompt = !!shot.videoPrompt;
         const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
           videoScript,
           cameraDirection: shot.cameraDirection || "static",
@@ -2057,7 +2072,7 @@ async function handleBatchVideoGenerate(
           slotContents: videoSlots,
           visualStyleTag: batchVideoStyleTag,
         });
-        const videoPrompt = enhancePrompts && batchVideoTextProvider
+        const videoPrompt = (enhancePrompts && !batchHasPreGenPrompt && batchVideoTextProvider)
           ? await enhanceVideoPrompt(videoPromptRaw, batchVideoProtocol, batchVideoTextProvider)
           : videoPromptRaw;
 
@@ -2353,6 +2368,7 @@ async function handleBatchChainGenerate(
             description: c.description,
           }));
 
+          const chainHasPreGenPrompt = !!shot.videoPrompt;
           const videoPromptRaw = shot.videoPrompt || buildVideoPrompt({
             videoScript,
             cameraDirection: cleanedCamera,
@@ -2364,7 +2380,7 @@ async function handleBatchChainGenerate(
             slotContents: videoSlots,
             visualStyleTag: chainVisualStyleTag,
           });
-          const videoPrompt = enhancePrompts && chainTextProvider
+          const videoPrompt = (enhancePrompts && !chainHasPreGenPrompt && chainTextProvider)
             ? await enhanceVideoPrompt(videoPromptRaw, chainVideoProtocol, chainTextProvider)
             : videoPromptRaw;
 
@@ -2812,9 +2828,10 @@ async function handleSingleReferenceVideo(
       videoPrompt = shot.videoPrompt;
     } else {
       const textProvider = resolveAIProvider(modelConfig);
-      const refVideoSystem = await resolvePrompt("ref_video_prompt", { userId, projectId });
+      const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
       try {
-        const motionContext = shot.motionScript || shot.videoScript || shot.prompt || "";
+        // Prefer videoScript (already optimized for video models) over raw motionScript
+        const motionContext = shot.videoScript || shot.motionScript || shot.prompt || "";
         const promptRequest = buildRefVideoPromptRequest({
           motionScript: motionContext,
           cameraDirection: shot.cameraDirection || "static",
@@ -2941,7 +2958,7 @@ async function handleBatchReferenceVideo(
   const batchRefTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
   const batchRefImageProtocol = modelConfig?.image?.protocol ?? "";
   const batchRefVideoProtocol = modelConfig?.video?.protocol ?? "";
-  const refVideoSystem = await resolvePrompt("ref_video_prompt", { userId, projectId });
+  const refVideoSystem = getRefVideoPromptSystem(batchRefVideoProtocol);
   const ratio = (payload?.ratio as string) || "16:9";
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const refVideoSlots = await resolveSlotContents("ref_video_generate", { userId, projectId });
@@ -3044,7 +3061,8 @@ async function handleBatchReferenceVideo(
           videoPromptRaw = shot.videoPrompt;
         } else {
           try {
-            const motionContext = shot.motionScript || shot.videoScript || shot.prompt || "";
+            // Prefer videoScript (already optimized for video models) over raw motionScript
+            const motionContext = shot.videoScript || shot.motionScript || shot.prompt || "";
             const promptRequest = buildRefVideoPromptRequest({
               motionScript: motionContext,
               cameraDirection: shot.cameraDirection || "static",
@@ -3212,31 +3230,54 @@ async function handleEnrichShotTransitions(
           ? "CHARACTER → CROWD/WIDE"
           : "CHARACTER → NEW CHARACTERS";
 
-        const prompt = `You are a storyboard supervisor reviewing two consecutive shots in an animated film. Your job is to rewrite the endFrameDesc of Shot A and the startFrameDesc of Shot B so they form a natural cinematic bridge.
+        const prompt = `You are a professional storyboard supervisor for an animated film. Review two consecutive shots and rewrite their transition frame descriptions so the edit feels natural and cinematic.
+
+⚠️ THESE ARE STATIC IMAGE COMPOSITION DESCRIPTIONS — they will be sent directly to a generative image model. Every detail must obey real-world physics and be visually renderable as a single frozen frame:
+- Objects subject to gravity (lanterns, flags, cloth, chains) hang or fall STRAIGHT DOWN — they CANNOT "extend diagonally" or "point toward" something unless driven by wind explicitly stated in the scene
+- Camera angle and shot type MUST match the existing cameraDirection — never invent a new camera move
+- Do NOT move objects to impossible positions just to create a visual lead-in — if no physical bridge exists, write a clean neutral frame that faithfully shows what is actually in the scene
+- Do NOT describe motion or transitions — describe only what a single frozen frame LOOKS LIKE
 
 TRANSITION TYPE: ${transitionType}
 
 === SHOT A (outgoing) ===
-Scene: ${curr.prompt || ""}
-Current endFrameDesc: ${curr.endFrameDesc || "(none)"}
-Characters in shot: ${currChars.map(c => c.name).join(", ") || "none (crowd/wide)"}
+Scene description: ${curr.prompt || "(none)"}
+Motion script: ${curr.videoScript || curr.motionScript || "(none)"}
+Camera direction: ${curr.cameraDirection || "(none)"}
+Current endFrameDesc (rewrite this): ${curr.endFrameDesc || "(none)"}
+Characters present: ${currChars.map(c => c.name).join(", ") || "none — crowd / environment / wide shot"}
 
 === SHOT B (incoming) ===
-Scene: ${next.prompt || ""}
-Current startFrameDesc: ${next.startFrameDesc || "(none)"}
-Characters in shot: ${nextChars.map(c => c.name).join(", ") || "none (crowd/wide)"}
+Scene description: ${next.prompt || "(none)"}
+Motion script: ${next.videoScript || next.motionScript || "(none)"}
+Camera direction: ${next.cameraDirection || "(none)"}
+Current startFrameDesc (rewrite this): ${next.startFrameDesc || "(none)"}
+Characters present: ${nextChars.map(c => c.name).join(", ") || "none — crowd / environment / wide shot"}
 
-RULES:
-- endFrameDesc of Shot A must end on a compositional element or camera position that visually leads INTO Shot B's world
-- startFrameDesc of Shot B must establish the scene/characters BEFORE action begins — not mid-motion
-- Do NOT change the story content — only improve the visual bridge
-- Keep each description under 80 words
-- Write in the SAME LANGUAGE as the existing descriptions
+REWRITING RULES:
+1. endFrameDesc of Shot A — the FINAL stable composition at the end of Shot A:
+   - Keep camera angle consistent with Shot A's cameraDirection
+   - For wide/crowd shots ending before a character shot: frame through a natural gap (archway, parted crowd, open doorway, shadow pool) that creates negative space — do NOT force objects to "point at" the next scene
+   - Every object must physically belong to the scene as described — no invented elements
 
-Respond with ONLY a JSON object (no markdown):
+2. startFrameDesc of Shot B — the OPENING composition at the very start of Shot B, before any movement:
+   - Match Shot B's camera type (close-up / medium / wide / bird's-eye / etc.)
+   - If characters are present: describe their position, posture, and expression BEFORE action begins — not mid-motion
+   - Describe the ambient lighting and environment first, then the subject
+
+3. Physical reality self-check (apply before writing):
+   - "Can this object physically do this in the real world?" — if NO, rewrite
+   - "Does this camera angle match the cameraDirection?" — if NO, rewrite
+   - "Am I inventing spatial relationships not in the original scene?" — if YES, remove them
+
+4. Length: 40–60 words per description (concise, image-prompt style — no filler phrases)
+5. Language: Write in the SAME LANGUAGE as the existing descriptions
+6. Do NOT alter story content — only refine the visual framing
+
+Respond with ONLY a JSON object (no markdown fences):
 {
-  "endFrameDesc": "improved endFrameDesc for Shot A",
-  "startFrameDesc": "improved startFrameDesc for Shot B"
+  "endFrameDesc": "rewritten endFrameDesc for Shot A",
+  "startFrameDesc": "rewritten startFrameDesc for Shot B"
 }`;
 
         try {
@@ -3450,8 +3491,9 @@ async function handleSingleVideoPrompt(
     const videoMaxDuration = getModelMaxDuration(videoModelId);
     const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
     const textProvider = resolveAIProvider(modelConfig);
-    const refVideoSystem = await resolvePrompt("ref_video_prompt", { userId, projectId });
-    const motionContext = shot.motionScript || shot.videoScript || shot.prompt || "";
+    const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
+    // Prefer videoScript (already optimized for video models) over raw motionScript
+    const motionContext = shot.videoScript || shot.motionScript || shot.prompt || "";
     const promptRequest = buildRefVideoPromptRequest({
       motionScript: motionContext,
       cameraDirection: shot.cameraDirection || "static",
@@ -3506,7 +3548,7 @@ async function handleBatchVideoPrompt(
   }
 
   const textProvider = resolveAIProvider(modelConfig);
-  const refVideoSystem = await resolvePrompt("ref_video_prompt", { userId, projectId });
+  const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
 
   console.log(`[BatchVideoPrompt] Processing ${eligible.length} shots (${batchShots.length} total, ${batchCharacters.length} chars, mode=${batchGenMode})`);
