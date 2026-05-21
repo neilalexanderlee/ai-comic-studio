@@ -229,13 +229,23 @@ export default function EpisodeStoryboardPage() {
     if (!textGuard()) return;
     setGenerating(true);
 
+    // 若当前已选版本且该版本为空（无 shots），则复用它而非新建版本
+    // project.shots 已按 selectedVersionId 过滤，length === 0 说明当前版本是空的
+    const targetVersionId =
+      selectedVersionId && (project.shots?.length ?? 0) === 0
+        ? selectedVersionId
+        : undefined;
+
     try {
       const response = await apiFetch(`/api/projects/${project.id}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "shot_split",
-          payload: forceAi ? { forceAi: true } : undefined,
+          payload: {
+            ...(forceAi ? { forceAi: true } : {}),
+            ...(targetVersionId ? { targetVersionId } : {}),
+          },
           modelConfig: getModelConfig(),
           episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
           enhancePrompts,
@@ -255,8 +265,14 @@ export default function EpisodeStoryboardPage() {
     }
 
     setGenerating(false);
-    setSelectedVersionId(null);
-    await fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
+    // 若复用了已有版本，保留 selectedVersionId；若新建了版本，重置为 null 让页面自动选最新版
+    if (!targetVersionId) setSelectedVersionId(null);
+    // 传入 targetVersionId 确保 store 加载正确版本的 shots
+    await fetchProject(
+      project.id,
+      (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!,
+      targetVersionId
+    );
   }
 
   async function handlePreviewExtraction() {

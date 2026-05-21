@@ -61,32 +61,55 @@ export async function persistStoryboardVersion(params: {
   episodeId?: string | null;
   shotCharacters: CharacterRow[];
   shots: PersistableShot[];
+  /**
+   * 如果传入，则清空该版本的 shots 并复用它，而不是新建版本。
+   * 用于「解析分镜」时复用用户已选的空版本，避免多建一个 v3。
+   */
+  existingVersionId?: string | null;
 }): Promise<{ versionId: string; shotCount: number }> {
   const { projectId, episodeId, shotCharacters } = params;
-  const versionWhereClause = episodeId
-    ? and(
-        eq(storyboardVersions.projectId, projectId),
-        eq(storyboardVersions.episodeId, episodeId)
-      )
-    : eq(storyboardVersions.projectId, projectId);
 
-  const [maxVersionRow] = await db
-    .select({ maxNum: storyboardVersions.versionNum })
-    .from(storyboardVersions)
-    .where(versionWhereClause)
-    .orderBy(desc(storyboardVersions.versionNum))
-    .limit(1);
-  const nextVersionNum = (maxVersionRow?.maxNum ?? 0) + 1;
-  const versionId = ulid();
+  let versionId: string;
 
-  await db.insert(storyboardVersions).values({
-    id: versionId,
-    projectId,
-    label: buildVersionLabel(nextVersionNum),
-    versionNum: nextVersionNum,
-    createdAt: new Date(),
-    episodeId: episodeId ?? null,
-  });
+  if (params.existingVersionId) {
+    // 复用已有版本：先清空该版本下的所有 shots（及其 dialogues）
+    versionId = params.existingVersionId;
+    const existingShots = await db
+      .select({ id: shots.id })
+      .from(shots)
+      .where(eq(shots.versionId, versionId));
+    for (const s of existingShots) {
+      await db.delete(dialogues).where(eq(dialogues.shotId, s.id));
+    }
+    await db.delete(shots).where(eq(shots.versionId, versionId));
+    console.log(`[PersistStoryboard] Reusing existing version ${versionId}, cleared ${existingShots.length} old shots`);
+  } else {
+    // 新建版本
+    const versionWhereClause = episodeId
+      ? and(
+          eq(storyboardVersions.projectId, projectId),
+          eq(storyboardVersions.episodeId, episodeId)
+        )
+      : eq(storyboardVersions.projectId, projectId);
+
+    const [maxVersionRow] = await db
+      .select({ maxNum: storyboardVersions.versionNum })
+      .from(storyboardVersions)
+      .where(versionWhereClause)
+      .orderBy(desc(storyboardVersions.versionNum))
+      .limit(1);
+    const nextVersionNum = (maxVersionRow?.maxNum ?? 0) + 1;
+    versionId = ulid();
+
+    await db.insert(storyboardVersions).values({
+      id: versionId,
+      projectId,
+      label: buildVersionLabel(nextVersionNum),
+      versionNum: nextVersionNum,
+      createdAt: new Date(),
+      episodeId: episodeId ?? null,
+    });
+  }
 
   const charByName = new Map(
     shotCharacters.map((character) => [

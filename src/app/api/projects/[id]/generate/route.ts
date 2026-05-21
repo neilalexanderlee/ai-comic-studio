@@ -257,6 +257,7 @@ export async function POST(
   if (action === "shot_split") {
     return handleShotSplitStream(projectId, userId, resolvedModelConfig, episodeId, {
       forceAi: Boolean(payload?.forceAi),
+      targetVersionId: (payload?.targetVersionId as string | undefined) || undefined,
     });
   }
 
@@ -778,7 +779,7 @@ async function handleShotSplitStream(
   userId: string,
   modelConfig?: ModelConfig,
   episodeId?: string,
-  options?: { forceAi?: boolean }
+  options?: { forceAi?: boolean; targetVersionId?: string }
 ) {
   let script: string | null = null;
   let targetDurationSeconds: number | null = null;
@@ -945,6 +946,31 @@ async function handleShotSplitStream(
     );
   }
 
+  // 若前端传入 targetVersionId，验证它确实属于本项目+本集，防止跨项目 shot 清除
+  let verifiedTargetVersionId: string | null = null;
+  if (options?.targetVersionId) {
+    const versionWhereClause = episodeId
+      ? and(
+          eq(storyboardVersions.projectId, projectId),
+          eq(storyboardVersions.episodeId, episodeId),
+          eq(storyboardVersions.id, options.targetVersionId)
+        )
+      : and(
+          eq(storyboardVersions.projectId, projectId),
+          eq(storyboardVersions.id, options.targetVersionId)
+        );
+    const [verifiedVersion] = await db
+      .select({ id: storyboardVersions.id })
+      .from(storyboardVersions)
+      .where(versionWhereClause)
+      .limit(1);
+    if (verifiedVersion) {
+      verifiedTargetVersionId = verifiedVersion.id;
+    } else {
+      console.warn(`[ShotSplit] targetVersionId ${options.targetVersionId} not found in project ${projectId} — creating new version instead`);
+    }
+  }
+
   await persistStoryboardVersion({
     projectId,
     episodeId: episodeId ?? null,
@@ -960,9 +986,10 @@ async function handleShotSplitStream(
       duration: shot.duration,
       dialogues: shot.dialogues,
     })),
+    existingVersionId: verifiedTargetVersionId,
   });
 
-  console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks`);
+  console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks${verifiedTargetVersionId ? ` (reused version ${verifiedTargetVersionId})` : ""}`);
   return NextResponse.json({ shots: allShots.length });
 }
 
