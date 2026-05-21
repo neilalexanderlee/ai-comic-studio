@@ -227,20 +227,25 @@ export function buildShotSplitPrompt(
     ? `\n--- CHARACTER VISUAL IDENTIFIERS (MANDATORY) ---\n${characterVisualHints.map((c) => `${c.name}：${c.visualHint}`).join("\n")}\n--- END ---\n\nCRITICAL: Whenever a character appears in videoScript, motionScript, startFrame, or endFrame, you MUST write their name followed by their visual identifier in parentheses using EXACTLY the text above. Example: 天枢真君（银发金瞳）. Never invent alternative descriptions — always reuse the exact identifier string provided.`
     : "";
 
-  // Inject a hard minimum-shot-count constraint when target duration is known
+  // Inject a total-duration constraint when target duration is known.
+  // We constrain the SUM of durations, NOT the shot count — shot count is
+  // determined by the script structure, not an arbitrary number.
   const coverageRule = targetDurationSeconds
     ? (() => {
-        const avgShotDuration = 10; // conservative average
-        const minShots = Math.ceil(targetDurationSeconds / avgShotDuration);
         const targetMin = Math.floor(targetDurationSeconds / 60);
         const targetSec = targetDurationSeconds % 60;
         const targetLabel = targetSec > 0 ? `${targetMin}分${targetSec}秒` : `${targetMin}分钟`;
-        return `\n⚠️ COVERAGE REQUIREMENT — NON-NEGOTIABLE:
-This episode has a target screen time of ${targetLabel} (${targetDurationSeconds}s).
-At an average of ${avgShotDuration}s per shot, you MUST generate AT LEAST ${minShots} shots.
-- Fewer than ${minShots} shots = CRITICAL ERROR. The episode will be visually incomplete.
-- When in doubt, generate MORE shots: split long scenes, add reaction shots, insert transitions.
-- A ${targetLabel} episode needs rich visual coverage — do NOT compress multiple scenes into one shot.
+        const tolerance = Math.round(targetDurationSeconds * 0.1); // ±10%
+        const low = targetDurationSeconds - tolerance;
+        const high = targetDurationSeconds + tolerance;
+        return `\n🚨 TOTAL DURATION REQUIREMENT — NON-NEGOTIABLE:
+The SUM of all shot durations MUST equal ${targetDurationSeconds}s (${targetLabel}) ± ${tolerance}s (acceptable range: ${low}s–${high}s).
+SELF-CHECK (mandatory before submitting):
+  1. Add up every "duration" value in your JSON array.
+  2. If the total < ${low}s → you are SHORT. Increase durations of scenes with room to breathe, OR split crowded scenes into more shots.
+  3. If the total > ${high}s → you are OVER. Trim durations of establishing/transition shots.
+  4. Only submit when the total falls within ${low}s–${high}s.
+Shot count is determined by the script — do NOT pad with unnecessary shots just to hit duration. Instead, extend or compress individual shot durations to match the target.
 `;
       })()
     : "";

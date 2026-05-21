@@ -798,6 +798,17 @@ async function handleShotSplitStream(
     script = project.script ?? null;
   }
 
+  // Always fetch project visualStyle for art-style lock in shot split prompts
+  const [splitProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const splitVisualStyleTag = (() => {
+    const style = splitProject?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   if (!script || !script.trim()) {
     return NextResponse.json(
       { error: "Script is empty. Please generate or import a script first." },
@@ -896,7 +907,7 @@ async function handleShotSplitStream(
         chunkTargetDuration = Math.round(targetDurationSeconds * ratio);
         console.log(`[ShotSplit] Chunk ${idx + 1}: ${chunkSceneCount} scenes → targetDuration=${chunkTargetDuration}s`);
       }
-      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration);
+      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration, splitVisualStyleTag);
       try {
         const result = await generateText({
           model,
