@@ -75,7 +75,6 @@ export default function EpisodeStoryboardPage() {
   const [generatingVideos, setGeneratingVideos] = useState(false);
   const [generatingChain, setGeneratingChain] = useState(false);
   const [generatingChainOverwrite, setGeneratingChainOverwrite] = useState(false);
-  const [enrichingTransitions, setEnrichingTransitions] = useState(false);
   // 独立生成首帧：关闭时每个分镜的首帧独立生成（不继承上一镜尾帧），适合场景多变、角色切换频繁的集数
   const [independentFirstFrame, setIndependentFirstFrame] = useState(true);
   const [generatingSceneFrames, setGeneratingSceneFrames] = useState(false);
@@ -96,7 +95,6 @@ export default function EpisodeStoryboardPage() {
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [continueFromPrev, setContinueFromPrev] = useState(false);
   const [enhancePrompts, setEnhancePrompts] = useState(true); // AI prompt 增强，默认开
-  const [resplitConfirmOpen, setResplitConfirmOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
@@ -200,7 +198,7 @@ export default function EpisodeStoryboardPage() {
   const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
   const hasReferenceImages = charactersWithRefs.length > 0;
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts || enrichingTransitions;
+  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -221,20 +219,24 @@ export default function EpisodeStoryboardPage() {
   }));
 
   async function handleGenerateShots() {
-    return handleGenerateShotsWithMode(false);
+    // 当前版本已有生成的帧或视频时提示用户——重新解析会覆盖并删除这些文件
+    const hasGeneratedAssets = project?.shots?.some(
+      (s) => s.firstFrame || s.lastFrame || s.videoUrl || s.sceneRefFrame
+    );
+    if (hasGeneratedAssets) {
+      if (!confirm("当前版本已有生成的帧/视频，重新解析分镜会覆盖并删除这些文件。\n\n如需保留，请先点「新建版本」。继续吗？")) return;
+    }
+    return handleGenerateShotsWithMode();
   }
 
-  async function handleGenerateShotsWithMode(forceAi: boolean) {
+  async function handleGenerateShotsWithMode() {
     if (!project) return;
     if (!textGuard()) return;
     setGenerating(true);
 
-    // 若当前已选版本且该版本为空（无 shots），则复用它而非新建版本
-    // project.shots 已按 selectedVersionId 过滤，length === 0 说明当前版本是空的
-    const targetVersionId =
-      selectedVersionId && (project.shots?.length ?? 0) === 0
-        ? selectedVersionId
-        : undefined;
+    // 始终覆盖当前已选版本（和重新生成帧/视频的行为一致）。
+    // 想保留旧分镜的话，用户应先点「新建版本」再解析。
+    const targetVersionId = selectedVersionId ?? undefined;
 
     try {
       const response = await apiFetch(`/api/projects/${project.id}/generate`, {
@@ -243,7 +245,6 @@ export default function EpisodeStoryboardPage() {
         body: JSON.stringify({
           action: "shot_split",
           payload: {
-            ...(forceAi ? { forceAi: true } : {}),
             ...(targetVersionId ? { targetVersionId } : {}),
           },
           modelConfig: getModelConfig(),
@@ -265,9 +266,7 @@ export default function EpisodeStoryboardPage() {
     }
 
     setGenerating(false);
-    // 若复用了已有版本，保留 selectedVersionId；若新建了版本，重置为 null 让页面自动选最新版
-    if (!targetVersionId) setSelectedVersionId(null);
-    // 传入 targetVersionId 确保 store 加载正确版本的 shots
+    // 覆盖当前版本后 selectedVersionId 不变，直接刷新即可
     await fetchProject(
       project.id,
       (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!,
@@ -561,83 +560,6 @@ export default function EpisodeStoryboardPage() {
     fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
-  // 分镜过渡增强：用 AI 自动桥接相邻分镜间的首帧/尾帧描述，减少场景割裂感
-  async function handleEnrichTransitions() {
-    if (!project) return;
-    if (!confirm("AI 将分析所有相邻分镜，自动改写场景切换处的首帧/尾帧描述，生成视觉桥接。\n\n这会修改分镜数据，建议在生成帧之前执行。继续吗？")) return;
-    setEnrichingTransitions(true);
-    let enriched = 0;
-    // Collect which shot sequences were actually modified
-    const modifiedSeqs = new Set<number>();
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "enrich_shot_transitions",
-          payload: { versionId: selectedVersionId },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-        }),
-      });
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-          for (const part of parts) {
-            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
-            if (!dataLine) continue;
-            try {
-              const event = JSON.parse(dataLine.slice(6)) as {
-                type?: string;
-                enriched?: number;
-                status?: string;
-                pair?: string;
-                endFrameDescUpdated?: boolean;
-                startFrameDescUpdated?: boolean;
-              };
-              if (event.type === "done") {
-                enriched = event.enriched ?? 0;
-              }
-              // e.g. pair = "3→4" — extract both sequences when either desc was updated
-              if (event.status === "ok" && event.pair) {
-                const [aStr, bStr] = event.pair.split("→");
-                const a = parseInt(aStr ?? "");
-                const b = parseInt(bStr ?? "");
-                if (event.endFrameDescUpdated && !isNaN(a)) modifiedSeqs.add(a);
-                if (event.startFrameDescUpdated && !isNaN(b)) modifiedSeqs.add(b);
-              }
-            } catch { /* ignore */ }
-          }
-        }
-      }
-      await fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-
-      if (enriched === 0) {
-        toast.info("所有相邻分镜均为同场景连续，无需过渡增强");
-      } else {
-        const seqList = [...modifiedSeqs].sort((a, b) => a - b);
-        const seqLabel = seqList.length > 0
-          ? `第 ${seqList.join("、")} 镜的首帧/尾帧描述已更新`
-          : `${enriched} 处场景切换已优化`;
-        toast.success(`✨ 过渡增强完成 — ${seqLabel}`, {
-          description: "点击任意分镜卡片右侧展开箭头，可在抽屉里查看并编辑更新后的首帧/尾帧描述",
-          duration: 8000,
-        });
-      }
-    } catch (err) {
-      console.error("Enrich transitions error:", err);
-      toast.error(err instanceof Error ? err.message : "过渡增强失败");
-    }
-    setEnrichingTransitions(false);
-  }
 
   async function handleAutoRun() {
     if (!project) return;
@@ -846,14 +768,6 @@ export default function EpisodeStoryboardPage() {
                 >
                   <Sparkles className="h-3.5 w-3.5" />
                 </button>
-                <button
-                  onClick={() => handleGenerateShotsWithMode(true)}
-                  disabled={anyGenerating}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
-                  title={t("project.forceAiShots")}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </button>
               </>
             )}
           </div>
@@ -974,44 +888,6 @@ export default function EpisodeStoryboardPage() {
               <Play className="h-3.5 w-3.5" />
               {t("project.previewExtract")}
             </Button>
-            <Button
-              onClick={() => {
-                const hasGeneratedContent = project?.shots?.some(
-                  (s) => s.firstFrame || s.videoUrl
-                );
-                if (hasGeneratedContent) {
-                  setResplitConfirmOpen(true);
-                } else {
-                  handleGenerateShotsWithMode(true);
-                }
-              }}
-              disabled={anyGenerating}
-              variant="ghost"
-              size="sm"
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-              {t("project.forceAiShots")}
-            </Button>
-            {/* AI过渡增强 — 属于剧本准备阶段，解析分镜后、生成帧前执行 */}
-            {totalShots >= 2 && (
-              <button
-                onClick={handleEnrichTransitions}
-                disabled={anyGenerating}
-                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium transition-colors disabled:opacity-40 ${
-                  enrichingTransitions
-                    ? "border-amber-300 bg-amber-50 text-amber-700"
-                    : "border-amber-200 bg-amber-50/60 text-amber-700 hover:bg-amber-100 hover:border-amber-300"
-                }`}
-                title="AI 分析相邻分镜的场景切换，自动改写首帧/尾帧描述，桥接视觉割裂。解析分镜后、生成帧前执行。"
-              >
-                {enrichingTransitions ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )}
-                {enrichingTransitions ? "分析中…" : "✨ AI过渡增强"}
-              </button>
-            )}
           </div>
 
           {/* Row 2: Frames */}
@@ -1385,45 +1261,6 @@ export default function EpisodeStoryboardPage() {
               >
                 {deletingVersion ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
                 {deletingVersion ? "删除中..." : "确认删除"}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* AI重拆分镜确认弹窗 */}
-      <Dialog open={resplitConfirmOpen} onOpenChange={(open) => { if (!open) setResplitConfirmOpen(false); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <RefreshCw className="h-4 w-4 text-primary" />
-              AI 重拆分镜
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-1">
-            {/* 关键提示：结构化剧本应该用"生成分镜"而不是"AI重拆分镜" */}
-            <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2.5 space-y-1.5">
-              <p className="text-xs font-semibold text-blue-800">💡 剧本已包含分镜结构？</p>
-              <p className="text-xs text-blue-700">
-                如果你的剧本里已经写好了时间码（如 <code className="bg-blue-100 px-1 rounded">0:00-0:11|场景标题</code>）、首帧、尾帧、videoScript 等字段，请点击<strong>取消</strong>，然后用顶部的「<Sparkles className="inline h-3 w-3" /> 生成分镜」按钮——它会直接读取你剧本里写好的内容，不需要 AI 重新分。
-              </p>
-            </div>
-            <p className="text-sm text-[--text-secondary]">
-              AI 重拆分镜会让 AI <strong>从零</strong>重新解析剧本，创建一个<strong>新版本</strong>。当前已生成的帧和视频不会丢失，可在顶部版本标签切回查看。
-            </p>
-            <p className="text-xs text-amber-700 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-              新版本需要重新生成帧和视频。如果只想调整个别分镜的提示词，建议直接在卡片里手动编辑。
-            </p>
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" size="sm" onClick={() => setResplitConfirmOpen(false)}>
-                取消
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => { setResplitConfirmOpen(false); handleGenerateShotsWithMode(true); }}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                确认用 AI 重拆分
               </Button>
             </div>
           </div>

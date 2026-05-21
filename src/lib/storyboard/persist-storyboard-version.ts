@@ -9,6 +9,16 @@ import {
 import { normalizeCharacterName } from "./normalize-character-name";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
+import fs from "fs";
+
+function tryDeleteFile(filePath: string | null | undefined) {
+  if (!filePath) return;
+  try {
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  } catch {
+    console.warn(`[PersistStoryboard] Failed to delete file: ${filePath}`);
+  }
+}
 
 type CharacterRow = typeof characters.$inferSelect;
 
@@ -72,17 +82,39 @@ export async function persistStoryboardVersion(params: {
   let versionId: string;
 
   if (params.existingVersionId) {
-    // 复用已有版本：先清空该版本下的所有 shots（及其 dialogues）
+    // 覆盖已有版本：先收集文件路径，再清空 dialogues → shots，最后删磁盘文件
     versionId = params.existingVersionId;
     const existingShots = await db
-      .select({ id: shots.id })
+      .select({
+        id: shots.id,
+        firstFrame: shots.firstFrame,
+        lastFrame: shots.lastFrame,
+        videoUrl: shots.videoUrl,
+        seedanceLastFrame: shots.seedanceLastFrame,
+        sceneRefFrame: shots.sceneRefFrame,
+        referenceVideoUrl: shots.referenceVideoUrl,
+      })
       .from(shots)
       .where(eq(shots.versionId, versionId));
+
     for (const s of existingShots) {
       await db.delete(dialogues).where(eq(dialogues.shotId, s.id));
     }
     await db.delete(shots).where(eq(shots.versionId, versionId));
-    console.log(`[PersistStoryboard] Reusing existing version ${versionId}, cleared ${existingShots.length} old shots`);
+
+    // 删磁盘文件（用 Set 避免相邻镜头共享文件被重复删除）
+    const filesToDelete = new Set<string>();
+    for (const s of existingShots) {
+      if (s.firstFrame) filesToDelete.add(s.firstFrame);
+      if (s.lastFrame) filesToDelete.add(s.lastFrame);
+      if (s.videoUrl) filesToDelete.add(s.videoUrl);
+      if (s.seedanceLastFrame) filesToDelete.add(s.seedanceLastFrame);
+      if (s.sceneRefFrame) filesToDelete.add(s.sceneRefFrame);
+      if (s.referenceVideoUrl) filesToDelete.add(s.referenceVideoUrl);
+    }
+    for (const filePath of filesToDelete) tryDeleteFile(filePath);
+
+    console.log(`[PersistStoryboard] Overwrote version ${versionId}: cleared ${existingShots.length} shots, deleted ${filesToDelete.size} files`);
   } else {
     // 新建版本
     const versionWhereClause = episodeId

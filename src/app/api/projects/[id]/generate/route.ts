@@ -321,9 +321,7 @@ export async function POST(
     return handleAiOptimizeText(payload, resolvedModelConfig);
   }
 
-  if (action === "enrich_shot_transitions") {
-    return handleEnrichShotTransitions(projectId, userId, payload, resolvedModelConfig, episodeId);
-  }
+
 
   if (action === "video_assemble") {
     return handleVideoAssembleSync(projectId, payload, episodeId);
@@ -982,7 +980,7 @@ async function handleShotSplitStream(
     }
   }
 
-  await persistStoryboardVersion({
+  const { versionId: persistedVersionId } = await persistStoryboardVersion({
     projectId,
     episodeId: episodeId ?? null,
     shotCharacters,
@@ -1001,6 +999,7 @@ async function handleShotSplitStream(
   });
 
   console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks${verifiedTargetVersionId ? ` (reused version ${verifiedTargetVersionId})` : ""}`);
+
   return NextResponse.json({ shots: allShots.length });
 }
 
@@ -3188,190 +3187,6 @@ async function handleBatchReferenceVideo(
   return NextResponse.json({ results });
 }
 
-// --- enrich_shot_transitions: AI-powered startFrameDesc/endFrameDesc bridging ---
-//
-// For each pair of adjacent shots, uses an LLM to rewrite the outgoing shot's endFrameDesc
-// and the incoming shot's startFrameDesc so they form a coherent visual bridge. Only
-// rewrites when there is a detectable scene-type mismatch (crowd→character, location change).
-// Same-scene, same-character continuations are left untouched.
-
-async function handleEnrichShotTransitions(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string
-) {
-  if (!modelConfig?.text) {
-    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
-  }
-
-  const versionId = payload?.versionId as string | undefined;
-
-  const whereConditions = [eq(shots.projectId, projectId)];
-  if (versionId) whereConditions.push(eq(shots.versionId, versionId));
-  if (episodeId) whereConditions.push(eq(shots.episodeId, episodeId));
-
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...whereConditions))
-    .orderBy(asc(shots.sequence));
-
-  if (allShots.length < 2) {
-    return NextResponse.json({ enriched: 0, message: "Not enough shots to enrich" });
-  }
-
-  // Fetch characters for scene-type detection
-  let projectCharsForEnrich: typeof characters.$inferSelect[];
-  if (episodeId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, episodeId));
-    projectCharsForEnrich = linkedIds.length > 0
-      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
-      : [];
-  } else {
-    projectCharsForEnrich = await db.select().from(characters).where(eq(characters.projectId, projectId));
-  }
-
-  const model = createLanguageModel(modelConfig.text);
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      function emit(data: object) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      }
-
-      let enriched = 0;
-
-      for (let i = 0; i < allShots.length - 1; i++) {
-        const curr = allShots[i];
-        const next = allShots[i + 1];
-
-        const currText = [curr.prompt, curr.motionScript, curr.videoScript].filter(Boolean).join(" ");
-        const nextText = [next.prompt, next.motionScript, next.videoScript].filter(Boolean).join(" ");
-        const currChars = filterShotCharacters(currText, projectCharsForEnrich);
-        const nextChars = filterShotCharacters(nextText, projectCharsForEnrich);
-
-        // Only enrich when there is a scene type mismatch worth bridging
-        const isCrowdToChar = currChars.length === 0 && nextChars.length > 0;
-        const isCharToCrowd = currChars.length > 0 && nextChars.length === 0;
-        const isCharToNewChar = currChars.length > 0 && nextChars.length > 0 &&
-          !nextChars.some((c) => currChars.some((p) => p.id === c.id));
-
-        const needsEnrichment = isCrowdToChar || isCharToCrowd || isCharToNewChar;
-        if (!needsEnrichment) {
-          emit({ pair: `${curr.sequence}→${next.sequence}`, status: "skip", reason: "same-scene-continuation" });
-          continue;
-        }
-
-        emit({ pair: `${curr.sequence}→${next.sequence}`, status: "enriching" });
-
-        const transitionType = isCrowdToChar
-          ? "CROWD/WIDE → CHARACTER CLOSE-UP"
-          : isCharToCrowd
-          ? "CHARACTER → CROWD/WIDE"
-          : "CHARACTER → NEW CHARACTERS";
-
-        const prompt = `You are a professional storyboard supervisor for an animated film. Review two consecutive shots and rewrite their transition frame descriptions so the edit feels natural and cinematic.
-
-⚠️ THESE ARE STATIC IMAGE COMPOSITION DESCRIPTIONS — they will be sent directly to a generative image model. Every detail must obey real-world physics and be visually renderable as a single frozen frame:
-- Objects subject to gravity (lanterns, flags, cloth, chains) hang or fall STRAIGHT DOWN — they CANNOT "extend diagonally" or "point toward" something unless driven by wind explicitly stated in the scene
-- Camera angle and shot type MUST match the existing cameraDirection — never invent a new camera move
-- Do NOT move objects to impossible positions just to create a visual lead-in — if no physical bridge exists, write a clean neutral frame that faithfully shows what is actually in the scene
-- Do NOT describe motion or transitions — describe only what a single frozen frame LOOKS LIKE
-
-TRANSITION TYPE: ${transitionType}
-
-=== SHOT A (outgoing) ===
-Scene description: ${curr.prompt || "(none)"}
-Motion script: ${curr.videoScript || curr.motionScript || "(none)"}
-Camera direction: ${curr.cameraDirection || "(none)"}
-Current endFrameDesc (rewrite this): ${curr.endFrameDesc || "(none)"}
-Characters present: ${currChars.map(c => c.name).join(", ") || "none — crowd / environment / wide shot"}
-
-=== SHOT B (incoming) ===
-Scene description: ${next.prompt || "(none)"}
-Motion script: ${next.videoScript || next.motionScript || "(none)"}
-Camera direction: ${next.cameraDirection || "(none)"}
-Current startFrameDesc (rewrite this): ${next.startFrameDesc || "(none)"}
-Characters present: ${nextChars.map(c => c.name).join(", ") || "none — crowd / environment / wide shot"}
-
-REWRITING RULES:
-1. endFrameDesc of Shot A — the FINAL stable composition at the end of Shot A:
-   - Keep camera angle consistent with Shot A's cameraDirection
-   - For wide/crowd shots ending before a character shot: frame through a natural gap (archway, parted crowd, open doorway, shadow pool) that creates negative space — do NOT force objects to "point at" the next scene
-   - Every object must physically belong to the scene as described — no invented elements
-
-2. startFrameDesc of Shot B — the OPENING composition at the very start of Shot B, before any movement:
-   - Match Shot B's camera type (close-up / medium / wide / bird's-eye / etc.)
-   - If characters are present: describe their position, posture, and expression BEFORE action begins — not mid-motion
-   - Describe the ambient lighting and environment first, then the subject
-
-3. Physical reality self-check (apply before writing):
-   - "Can this object physically do this in the real world?" — if NO, rewrite
-   - "Does this camera angle match the cameraDirection?" — if NO, rewrite
-   - "Am I inventing spatial relationships not in the original scene?" — if YES, remove them
-
-4. Length: 40–60 words per description (concise, image-prompt style — no filler phrases)
-5. Language: Write in the SAME LANGUAGE as the existing descriptions
-6. Do NOT alter story content — only refine the visual framing
-
-Respond with ONLY a JSON object (no markdown fences):
-{
-  "endFrameDesc": "rewritten endFrameDesc for Shot A",
-  "startFrameDesc": "rewritten startFrameDesc for Shot B"
-}`;
-
-        try {
-          const { text } = await generateText({ model, prompt });
-          const parsed = JSON.parse(extractJSON(text)) as { endFrameDesc?: string; startFrameDesc?: string };
-
-          const updates: { endFrameDesc?: string; startFrameDesc?: string } = {};
-          if (parsed.endFrameDesc && parsed.endFrameDesc !== curr.endFrameDesc) {
-            updates.endFrameDesc = parsed.endFrameDesc;
-          }
-          if (parsed.startFrameDesc && parsed.startFrameDesc !== next.startFrameDesc) {
-            updates.startFrameDesc = parsed.startFrameDesc;
-          }
-
-          if (updates.endFrameDesc) {
-            await db.update(shots).set({ endFrameDesc: updates.endFrameDesc }).where(eq(shots.id, curr.id));
-          }
-          if (updates.startFrameDesc) {
-            await db.update(shots).set({ startFrameDesc: updates.startFrameDesc }).where(eq(shots.id, next.id));
-          }
-
-          enriched++;
-          emit({
-            pair: `${curr.sequence}→${next.sequence}`,
-            status: "ok",
-            transitionType,
-            endFrameDescUpdated: !!updates.endFrameDesc,
-            startFrameDescUpdated: !!updates.startFrameDesc,
-          });
-        } catch (err) {
-          console.error(`[EnrichTransitions] Pair ${curr.sequence}→${next.sequence} error:`, err);
-          emit({ pair: `${curr.sequence}→${next.sequence}`, status: "error", error: extractErrorMessage(err) });
-        }
-      }
-
-      emit({ type: "done", enriched, total: allShots.length - 1 });
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    },
-  });
-}
 
 // --- video_assemble: synchronous ffmpeg concat + subtitle burn ---
 
