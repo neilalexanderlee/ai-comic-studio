@@ -9,4 +9,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    environment:
+      # 代理（可选）：让容器内的 fetch 走宿主机的 VPN 客户端（如 Clash Verge）。
+      # host.docker.internal 在 Docker Desktop for Mac/Windows 上自动解析为宿主机。
+      # 把端口换成你 VPN 客户端实际的 HTTP 代理端口。
+      # 不需要代理时，删掉这两行或留空即可。
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
     restart: unless-stopped

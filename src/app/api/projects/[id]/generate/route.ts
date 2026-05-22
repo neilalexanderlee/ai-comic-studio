@@ -12,7 +12,7 @@ import { enqueueTask } from "@/lib/task-queue";
 import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
-import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
+import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
@@ -478,14 +478,40 @@ async function handleCharacterExtract(
   }
 
   const model = createLanguageModel(modelConfig.text);
-  // Build system prompt with project's visual style so the LLM uses the correct art style
+
+  // ── Pass 1: LLM name enumeration (fast, no descriptions) ──────────────────
+  // Ask the same model to list every character name first. This is a simple
+  // task so it's fast and cheap. The resulting list is injected as a mandatory
+  // cast list into pass-2, preventing any character from being silently dropped.
+  let confirmedNames: string[] = [];
+  try {
+    console.log("[CharacterExtract] ── Pass 1 start: extracting name list ──");
+    const { text: nameListText } = await generateText({
+      model,
+      system: CHARACTER_NAME_EXTRACTION_SYSTEM,
+      prompt: buildCharacterNameExtractionPrompt(script),
+    });
+    console.log("[CharacterExtract] Pass-1 raw response:", nameListText.slice(0, 300));
+    const parsed = JSON.parse(extractJSON(nameListText));
+    if (Array.isArray(parsed) && parsed.every((n) => typeof n === "string")) {
+      confirmedNames = parsed.filter((n) => n.trim().length > 0);
+      console.log("[CharacterExtract] Pass-1 confirmed names (" + confirmedNames.length + "):", confirmedNames.join("、"));
+    } else {
+      console.warn("[CharacterExtract] Pass-1 returned unexpected format:", parsed);
+    }
+  } catch (err) {
+    // Pass-1 failure is non-fatal: pass-2 runs without the mandatory list
+    console.warn("[CharacterExtract] Pass-1 FAILED (will proceed without mandatory list):", err);
+  }
+
+  // ── Pass 2: Full character sheet generation ────────────────────────────────
   const charExtractSystem = buildCharacterExtractSystemPrompt(visualStyle);
-  console.log("[CharacterExtract] visualStyle:", visualStyle, "system prompt length:", charExtractSystem.length);
+  console.log("[CharacterExtract] visualStyle:", visualStyle, "confirmed names:", confirmedNames.length);
 
   const { text } = await generateText({
     model,
     system: charExtractSystem,
-    prompt: buildCharacterExtractPrompt(script),
+    prompt: buildCharacterExtractPrompt(script, confirmedNames),
   });
 
   const extracted = JSON.parse(extractJSON(text)) as Array<{

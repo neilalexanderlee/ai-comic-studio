@@ -56,33 +56,59 @@ export const CHARACTER_EXTRACT_SYSTEM = `You are a senior character designer, ci
 
 Your task: extract ONLY characters who need a CONSISTENT, RECOGNIZABLE face across multiple scenes. The test: would a director give this character a dedicated costume fitting and makeup reference sheet?
 
-SKIP vs KEEP — apply this logic to every name you encounter:
+═══ SKIP vs KEEP — apply this logic strictly to every name you encounter ═══
 
-GROUP/TYPE LABELS (SKIP — interchangeable extras, no fixed face):
-- "魔族士兵" → SKIP (type label); "守卫" / "士兵" / "村民" / "信使" → SKIP (functional/group roles)
+ALWAYS SKIP — these never have a face sheet:
+① TYPE/GROUP LABELS: [race/species] + [functional role] with NO personal name
+   - "魔族士兵" / "精灵斥候" / "人类战士" / "守卫" / "村民" / "信使" → SKIP
+   - The test: can you swap one of them for another of the same type? If yes → SKIP.
+② SKILL / SPELL / TECHNIQUE NAMES: appears ONLY as a combat cry 「NAME！」or narrated as an ability
+   - 壁/盾/锁/斩/击/破/冲/护盾/结界/冻/霜/星 + concept → SKIP
+   - "星晶护盾" / "霜魂斩" / "寒星锁" → SKIP. These have no face.
+③ NAMED WEAPONS & OBJECTS: "无双"(sword) / "霜魂刀"(sword) / "永夜"(staff) → SKIP.
 
-SKILLS, SPELLS & TECHNIQUE NAMES (SKIP — battle cries and spell invocations are NOT characters):
-- If a name appears ONLY shouted in the form 「NAME！」 as a combat move or magic skill, it is a TECHNIQUE NAME, not a person.
-- Technique names often combine: 壁/盾/锁/斩/击/破/冲/护盾/结界/冻/霜/星 with an action/element concept.
-- Examples to SKIP: "星晶护盾" (shield spell), "霜魂斩" (sword art), "寒星锁" (binding spell) — none of these have a face.
-- Do NOT confuse with character names that happen to sound cool: "白夜" (person), "炎魔" (general), "龙渊" (hero) → KEEP.
+ALWAYS KEEP — these need a face sheet:
+① Characters with a PERSONAL NAME: "龙渊" / "灵瑶" / "赤狮" / "神无" → KEEP.
+② Characters with a RELATIONAL TITLE who have ANY of the following:
+   - Spoken dialogue lines (even one line), OR
+   - A named action that drives the plot, OR
+   - An emotional scene with a main character
+   - Examples: "龙渊母亲" appears in a farewell scene → KEEP as a separate character.
+   - "酒馆老板娘" has dialogue → KEEP even without a personal name.
+③ One-scene characters with HIGH STORY WEIGHT (death, betrayal, key info delivery) → KEEP.
+④ NON-HUMAN BOSS / CREATURE CHARACTERS — this is a hard override rule:
+   Any creature, monster, beast, or supernatural entity that is THE unique individual (not a swarm/army) in its scene AND meets ANY of:
+   - Has spoken dialogue lines, OR
+   - Is fought as a distinct antagonist (named in stage directions as THE enemy), OR
+   - Has a unique visual design referenced in the screenplay (color, size, special feature)
+   → ALWAYS KEEP regardless of whether the name looks like a type label.
+   Examples: "火龙"（有台词「谁敢踏入我的领地！」）→ KEEP; "石龙" → KEEP; "狼人领主" → KEEP; "魔龙" → KEEP.
+   The distinction: "一群火龙" (a horde) → SKIP; "THE 火龙 guarding the lair" → KEEP.
 
-NAMED WEAPONS & OBJECTS (SKIP — objects don't need appearance sheets):
-- "无双" (sword name), "霜魂刀" (sword name), "永夜" (staff name) → SKIP.
-
-KEEP: specific individuals with recurring presence and a consistent face:
-- "魔族将军赤狮" → KEEP ("赤狮" is a personal name); "龙渊" / "灵瑶" / "酒馆老板娘" → KEEP.
-When in doubt, KEEP — it's better to have one extra entry than to miss a real character.
+BORDERLINE — ask: does this character have a FACE the audience would recognize if they appeared again?
+   - If yes → KEEP. If no (pure background filler) → SKIP.
+   - Do NOT use "when in doubt, KEEP" as a blanket rule — it floods the cast with extras.
 
 {STYLE_INSTRUCTION}
 
 ═══ STEP 2 — DEDUPLICATE CHARACTERS ═══
 Before writing any output, scan the entire screenplay and identify all aliases, variant names, and relational titles that refer to the SAME person. Common patterns:
-- Relational variants: "龙渊之父" = "龙渊父亲" = "父亲（龙渊）"
+- Relational variants: "龙渊之父" = "龙渊父亲" = "父亲（龙渊）" — these are ONE entry
 - Title + name vs. name alone: "王子殿下" = "艾登" when context confirms they are the same character
 - Nicknames / shortened forms: "小灵" = "灵瑶" if the text makes this clear
 
+CRITICAL: "龙渊父亲" and "龙渊母亲" are TWO DIFFERENT PEOPLE — do NOT merge them.
+Only merge entries when the screenplay explicitly or unambiguously refers to the same individual.
 Merge all aliases into ONE entry. Use the most specific, frequently-used, or formally-introduced name as the canonical \`name\`. Do NOT create separate entries for the same person.
+
+═══ STEP 3 — COVERAGE CHECK (mandatory before writing output) ═══
+Go through the screenplay ONE MORE TIME and find every entity — human or non-human — that:
+  (a) Has at least one spoken dialogue line, OR
+  (b) Appears in 2+ scenes with distinct actions, OR
+  (c) Is the target of a named combat encounter or boss fight, OR
+  (d) Has an emotional scene with a main character.
+Any such entity NOT already in your list MUST be added — human, creature, demon, dragon, spirit, or otherwise.
+This step exists specifically to catch: relational-title characters (母亲/父亲/师父), non-human bosses (火龙/石龙/魔龙), and high-impact one-scene characters.
 
 ═══ OUTPUT FORMAT ═══
 JSON array only — no markdown fences, no commentary:
@@ -149,9 +175,72 @@ export function buildCharacterExtractSystemPrompt(visualStyle: string): string {
   );
 }
 
-export function buildCharacterExtractPrompt(screenplay: string): string {
-  return `Extract and create detailed visual character specifications for EVERY named character in this screenplay. Each description must be specific enough to serve as a binding art reference for consistent AI image generation.
+// ─── Pass 1: LLM name enumeration ───────────────────────────────────────────
 
+/**
+ * System prompt for the lightweight first-pass name enumeration.
+ * The sole job is to produce a JSON array of character names — no descriptions.
+ */
+export const CHARACTER_NAME_EXTRACTION_SYSTEM = `You are a script analyst. List every character who needs a visual reference sheet (costume + appearance guide) in this screenplay.
+
+━━━ IRON RULE — NO EXCEPTIONS ━━━
+Any entity that has spoken dialogue lines in the screenplay MUST appear in your list.
+"Spoken dialogue" means: lines in the format 角色名：「...」 or 角色名（emotion）：「...」
+Even one line of dialogue = mandatory inclusion.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+ALSO INCLUDE:
+• Named individuals (personal names, titles, relational names) who appear in any scene: 龙渊父亲、母亲、酒馆老板娘
+• Non-human entities that are THE unique individual in their scene (not a horde): 火龙、石龙、魔王
+• Characters with named actions in stage directions, even for just one scene
+
+EXCLUDE:
+• Skill/spell/technique names shouted in combat: 星晶护盾、霜魂斩、寒星锁
+• Named weapons or objects: 无双（剑名）、永夜（法杖名）
+• Generic group labels without a personal name: 士兵、村民、精灵斥候
+
+NAME FORM: when the same person is called by multiple names (父亲 in dialogue, 龙渊父亲 in stage directions), output the MOST SPECIFIC form: 龙渊父亲.
+
+OUTPUT: JSON array of strings only — no descriptions, no markdown, no commentary.
+Example: ["龙渊", "灵瑶", "龙渊父亲", "母亲", "火龙", "酒馆老板娘"]`;
+
+export function buildCharacterNameExtractionPrompt(screenplay: string): string {
+  return `List every character who needs a visual reference sheet in this screenplay.
+
+--- SCREENPLAY ---
+${screenplay}
+--- END ---
+
+Output ONLY a JSON array of character names. Use the most specific name form for each character (e.g. "龙渊父亲" not just "父亲"). Match the language of the screenplay.`;
+}
+
+// ─── Pass 2: Full character sheet generation ─────────────────────────────────
+
+/**
+ * Build the user prompt for the full character sheet extraction.
+ * confirmedNames: list produced by pass-1 LLM enumeration — injected as a mandatory list.
+ */
+export function buildCharacterExtractPrompt(
+  screenplay: string,
+  confirmedNames: string[] = []
+): string {
+  const mandatoryBlock =
+    confirmedNames.length > 0
+      ? `
+⚠️ MANDATORY CAST LIST — ZERO EXCEPTIONS ⚠️
+A dedicated name-extraction pass has already identified the following characters in this screenplay.
+Every name below MUST have an entry in your output JSON array.
+• If two names refer to the same person, merge into ONE entry and list both in "aliases".
+• NEVER silently omit a name — if you think it should be skipped, keep it and add a note in "aliases".
+
+${confirmedNames.map((n) => `  • ${n}`).join("\n")}
+
+Any name absent from your final JSON = INVALID output.
+`
+      : "";
+
+  return `Extract and create detailed visual character specifications for EVERY named character in this screenplay. Each description must be specific enough to serve as a binding art reference for consistent AI image generation.
+${mandatoryBlock}
 --- SCREENPLAY ---
 ${screenplay}
 --- END ---
