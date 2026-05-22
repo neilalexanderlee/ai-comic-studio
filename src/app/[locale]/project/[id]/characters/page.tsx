@@ -2,11 +2,15 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, ImageIcon } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { CharacterCard } from "@/components/editor/character-card";
 import Link from "next/link";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { InlineModelPicker } from "@/components/editor/model-selector";
+import { useModelStore } from "@/stores/model-store";
+import { useModelGuard } from "@/hooks/use-model-guard";
 
 interface Character {
   id: string;
@@ -46,6 +50,9 @@ export default function CharactersPage({
   const [characters, setCharacters] = useState<Character[]>([]);
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generatingImages, setGeneratingImages] = useState(false);
+  const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const imageGuard = useModelGuard("image");
 
   const fetchData = useCallback(async () => {
     const [chars, eps] = await Promise.all([
@@ -60,6 +67,30 @@ export default function CharactersPage({
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  async function handleBatchGenerateImages() {
+    if (!imageGuard()) return;
+    setGeneratingImages(true);
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_character_image",
+          modelConfig: getModelConfig(),
+        }),
+      });
+      const data = await response.json() as { results: Array<{ status: string }> };
+      if (data.results?.some((r) => r?.status === "error")) {
+        toast.warning(tc("batchPartialFailed"));
+      }
+    } catch (err) {
+      console.error("Batch character image error:", err);
+      toast.error(tc("generationFailed"));
+    }
+    setGeneratingImages(false);
+    fetchData();
+  }
 
   async function handleDelete(characterId: string, name: string) {
     if (!confirm(tChar("deleteConfirm", { name }))) return;
@@ -84,7 +115,7 @@ export default function CharactersPage({
   return (
     <div className="flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Link
             href={`/${locale}/project/${projectId}/episodes`}
@@ -101,6 +132,23 @@ export default function CharactersPage({
             </p>
           </div>
         </div>
+        {characters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <InlineModelPicker capability="image" />
+            <Button
+              onClick={handleBatchGenerateImages}
+              disabled={generatingImages}
+              size="sm"
+            >
+              {generatingImages ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ImageIcon className="h-3.5 w-3.5" />
+              )}
+              {generatingImages ? tc("generating") : tChar("batchGenerateImages")}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="mb-6 rounded-2xl border border-[--border-subtle] bg-white/70 px-4 py-3 text-xs leading-relaxed text-[--text-secondary] shadow-sm">

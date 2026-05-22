@@ -122,7 +122,7 @@ export default function EpisodeCharactersPage() {
             )}
             {extracting ? t("common.generating") : t("project.extractCharacters")}
           </Button>
-          {project.characters.length > 0 && hasCharactersWithoutImages && (
+          {project.characters.length > 0 && (
             <>
               <InlineModelPicker capability="image" />
               <Button

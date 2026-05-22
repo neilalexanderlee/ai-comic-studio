@@ -6,7 +6,9 @@
 export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string }> = {
   anime_2d: {
     label: "日本2D动漫",
-    tag: "日本现代2D动漫风格，8K高清，纯色背景，赛璐珞渲染，清晰线稿——",
+    // 不含"纯色背景"——场景帧需要渲染真实背景环境。
+    // 角色定妆图在 CHAR_IMAGE_LIGHTING_RENDERING slot 中已单独声明"纯白纯色背景"，不受影响。
+    tag: "日本现代2D动漫风格，8K高清，赛璐珞渲染，清晰线稿——",
   },
   realistic: {
     label: "写实真人",
