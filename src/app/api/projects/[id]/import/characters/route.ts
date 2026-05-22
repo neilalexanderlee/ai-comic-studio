@@ -16,6 +16,8 @@ import {
 import {
   buildImportCharacterExtractPrompt,
   buildImportCharacterExtractSystem,
+  buildImportCharacterNameExtractionPrompt,
+  IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM,
 } from "@/lib/ai/prompts/import-character-extract";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
 
@@ -72,6 +74,30 @@ export async function POST(
     ? `[官方角色名称表 — 所有角色名必须与下表完全一致]\n${charTableMatch[0].trim()}\n\n`
     : "";
 
+  // ── Pass 1: LLM name enumeration (full text, no chunks) ──────────────────
+  // Ask the model to list every character name first. Simple task → fast.
+  // The resulting list becomes a mandatory cast list injected into every chunk
+  // in pass-2, preventing characters from being silently dropped.
+  let confirmedNames: string[] = [];
+  try {
+    console.log("[ImportChars] ── Pass 1: extracting name list from full text ──");
+    const { text: nameListText } = await generateText({
+      model,
+      system: IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM,
+      prompt: buildImportCharacterNameExtractionPrompt(body.text),
+    });
+    console.log("[ImportChars] Pass-1 raw:", nameListText.slice(0, 400));
+    const parsed = JSON.parse(extractJSON(nameListText));
+    if (Array.isArray(parsed) && parsed.every((n) => typeof n === "string")) {
+      confirmedNames = parsed.filter((n) => n.trim().length > 0);
+      console.log(`[ImportChars] Pass-1 confirmed (${confirmedNames.length}):`, confirmedNames.join("、"));
+      await addImportLog(projectId, 2, "running",
+        `第一轮名单：${confirmedNames.join("、")}`);
+    }
+  } catch (err) {
+    console.warn("[ImportChars] Pass-1 FAILED (proceeding without mandatory list):", err);
+  }
+
   await addImportLog(
     projectId, 2, "running",
     `开始角色提取，共 ${chunks.length} 块`
@@ -98,7 +124,7 @@ export async function POST(
         const result = await generateText({
           model,
           system: importCharSystem,
-          prompt: buildImportCharacterExtractPrompt(chunkWithHeader),
+          prompt: buildImportCharacterExtractPrompt(chunkWithHeader, confirmedNames),
           providerOptions: jsonMode,
         });
 
@@ -113,7 +139,7 @@ export async function POST(
           const retry = await generateText({
             model,
             system: importCharSystem,
-            prompt: buildImportCharacterExtractPrompt(chunkWithHeader) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON array.",
+            prompt: buildImportCharacterExtractPrompt(chunkWithHeader, confirmedNames) + "\n\nIMPORTANT: Return COMPLETE, VALID JSON array.",
             providerOptions: jsonMode,
           });
           return JSON.parse(extractJSON(retry.text)) as ExtractedChar[];

@@ -1,4 +1,12 @@
-import { VISUAL_STYLE_PRESETS } from "./character-extract";
+import {
+  VISUAL_STYLE_PRESETS,
+  CHARACTER_NAME_EXTRACTION_SYSTEM,
+  buildCharacterNameExtractionPrompt,
+} from "./character-extract";
+
+// Re-export so import/characters/route.ts can import from one place
+export { CHARACTER_NAME_EXTRACTION_SYSTEM as IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM };
+export { buildCharacterNameExtractionPrompt as buildImportCharacterNameExtractionPrompt };
 
 function buildImportStyleInstruction(visualStyle: string): string {
   const preset = VISUAL_STYLE_PRESETS[visualStyle];
@@ -82,9 +90,30 @@ Respond ONLY with the JSON array. No markdown. No commentary.`;
 // Backward-compat export kept for any existing callers
 export const IMPORT_CHARACTER_EXTRACT_SYSTEM = buildImportCharacterExtractSystem("auto");
 
-export function buildImportCharacterExtractPrompt(textChunk: string): string {
-  return `Extract all named characters from the following text. For each character, produce a detailed visual specification suitable for AI image generation. Count their approximate appearances. If the text doesn't describe a character's appearance explicitly, INFER it from their role, era, and context (e.g. a Ming Dynasty emperor wears 龙袍, a soldier wears 铠甲).
+// ─── Pass 2: full character sheet extraction (per chunk) ─────────────────────
+// Pass-1 (name enumeration) is shared from character-extract.ts via re-exports above.
 
+export function buildImportCharacterExtractPrompt(
+  textChunk: string,
+  confirmedNames: string[] = []
+): string {
+  const mandatoryBlock =
+    confirmedNames.length > 0
+      ? `
+⚠️ MANDATORY CAST LIST — ZERO EXCEPTIONS ⚠️
+A dedicated name-extraction pass identified the following characters. Every name MUST appear in your output JSON.
+If two names refer to the same person, merge into ONE entry with the more specific name — but NEVER silently omit one.
+If a character from this list does not appear in the current text chunk, still include them with frequency=0 and infer their appearance from any context available.
+
+${confirmedNames.map((n) => `  • ${n}`).join("\n")}
+
+Any name absent from your output = INVALID response.
+
+`
+      : "";
+
+  return `Extract all named characters from the following text. For each character, produce a detailed visual specification suitable for AI image generation. Count their approximate appearances. If the text doesn't describe a character's appearance explicitly, INFER it from their role, era, and context (e.g. a Ming Dynasty emperor wears 龙袍, a soldier wears 铠甲).
+${mandatoryBlock}
 --- TEXT ---
 ${textChunk}
 --- END ---

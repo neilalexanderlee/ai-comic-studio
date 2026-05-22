@@ -10,6 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiFetch } from "@/lib/api-fetch";
+import { getUserId } from "@/lib/fingerprint";
 import { useModelStore } from "@/stores/model-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
@@ -98,6 +99,9 @@ export default function ImportPage({
   // Load existing logs on mount
   useEffect(() => {
     async function loadLogs() {
+      // getUserId() reads localStorage — may be null if FingerprintProvider hasn't
+      // synced the cookie yet. Skip the request to avoid a spurious 404.
+      if (!getUserId()) return;
       try {
         const res = await apiFetch(`/api/projects/${projectId}/import/logs`);
         const data = await res.json();
