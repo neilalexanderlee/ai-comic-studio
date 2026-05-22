@@ -13,7 +13,7 @@ import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
-import { buildShotSplitPrompt, buildShotSplitSystem } from "@/lib/ai/prompts/shot-split";
+import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
@@ -795,18 +795,12 @@ async function handleShotSplitStream(
 
   const model = createLanguageModel(modelConfig.text);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
+
+  // Registry is the single source of truth for shot_split system prompt.
+  // Slot defaults are S-grade; user overrides (if any) layer on top per slot.
   const shotSplitSlots = await resolveSlotContents("shot_split", { userId, projectId });
-  // If the user has customised any slot, respect their override (registry build).
-  // Otherwise use the high-fidelity buildShotSplitSystem which contains the full
-  // S-grade dialogue/action/atmosphere requirements that the registry defaults lack.
-  const hasUserCustomisation = Object.keys(shotSplitSlots).length > 0;
-  let systemPrompt: string;
-  if (hasUserCustomisation) {
-    const shotSplitDef = getPromptDefinition("shot_split")!;
-    systemPrompt = shotSplitDef.buildFullPrompt(shotSplitSlots, { maxDuration: videoMaxDuration });
-  } else {
-    systemPrompt = buildShotSplitSystem(videoMaxDuration);
-  }
+  const shotSplitDef = getPromptDefinition("shot_split")!;
+  const systemPrompt = shotSplitDef.buildFullPrompt(shotSplitSlots, { maxDuration: videoMaxDuration });
   
   // Use portable JSON mode if possible, fallback to plain text + extractJSON
   const useJsonMode = modelConfig.text.protocol === "openai";

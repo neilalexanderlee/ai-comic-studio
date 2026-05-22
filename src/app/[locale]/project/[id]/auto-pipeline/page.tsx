@@ -8,7 +8,6 @@ import {
   Check,
   ChevronRight,
   FileText,
-  Film,
   Layers,
   Loader2,
   RefreshCw,
@@ -272,7 +271,6 @@ export default function AutoPipelinePage({
       await step2_extractCharacters();
       await step3_splitEpisodes();
       await step4_generate();
-      await step5_generateStoryboard();
 
       toast.success("项目创建完成！正在跳转...");
       setTimeout(() => {
@@ -288,7 +286,7 @@ export default function AutoPipelinePage({
   async function retryFromFailed() {
     if (!textGuard()) return;
 
-    const failedStep = ([1, 2, 3, 4, 5] as StepNum[]).find(
+    const failedStep = ([1, 2, 3, 4] as StepNum[]).find(
       (s) => steps[s].status === "error"
     );
     if (!failedStep) return;
@@ -296,7 +294,7 @@ export default function AutoPipelinePage({
     // Reset failed step and all subsequent steps
     setSteps((prev) => {
       const next = { ...prev };
-      for (let s = failedStep; s <= 5; s++) {
+      for (let s = failedStep; s <= 4; s++) {
         next[s as StepNum] = { status: "idle", message: "" };
       }
       return next;
@@ -311,26 +309,20 @@ export default function AutoPipelinePage({
         await step2_extractCharacters();
         await step3_splitEpisodes();
         await step4_generate();
-        await step5_generateStoryboard();
       } else if (failedStep === 2) {
         characters.current = [];
         createdEpisodeIds.current = [];
         await step2_extractCharacters();
         await step3_splitEpisodes();
         await step4_generate();
-        await step5_generateStoryboard();
       } else if (failedStep === 3) {
         episodes.current = [];
         createdEpisodeIds.current = [];
         await step3_splitEpisodes();
         await step4_generate();
-        await step5_generateStoryboard();
-      } else if (failedStep === 4) {
+      } else {
         createdEpisodeIds.current = [];
         await step4_generate();
-        await step5_generateStoryboard();
-      } else {
-        await step5_generateStoryboard();
       }
 
       toast.success("项目创建完成！正在跳转...");
@@ -342,14 +334,14 @@ export default function AutoPipelinePage({
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const hasError = ([1, 2, 3, 4, 5] as StepNum[]).some(
+  const hasError = ([1, 2, 3, 4] as StepNum[]).some(
     (s) => steps[s].status === "error"
   );
-  const allDone = ([1, 2, 3, 4, 5] as StepNum[]).every(
+  const allDone = ([1, 2, 3, 4] as StepNum[]).every(
     (s) => steps[s].status === "done"
   );
 
-  const currentStep = ([1, 2, 3, 4, 5] as StepNum[]).find(
+  const currentStep = ([1, 2, 3, 4] as StepNum[]).find(
     (s) => steps[s].status === "running"
   );
 
@@ -645,7 +637,7 @@ export default function AutoPipelinePage({
                     ))}
 
                     {/* Show step completion messages */}
-                    {([1, 2, 3, 4, 5] as StepNum[]).map((num) => {
+                    {([1, 2, 3, 4] as StepNum[]).map((num) => {
                       const { status, message } = steps[num];
                       if (status === "done" || status === "error") {
                         return (

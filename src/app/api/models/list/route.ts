@@ -39,25 +39,61 @@ async function fetchModels(baseUrl: string, apiKey: string): Promise<ModelItem[]
   return data.data.map((m) => ({ id: m.id, name: m.id }));
 }
 
+// Common Gemini models — returned as fallback when googleapis.com is unreachable
+// (e.g. network blocked in some regions). Update this list as new models are released.
+const GEMINI_FALLBACK: ModelItem[] = [
+  { id: "gemini-2.5-pro-preview-05-06",    name: "Gemini 2.5 Pro Preview (05-06)" },
+  { id: "gemini-2.5-flash-preview-05-20",  name: "Gemini 2.5 Flash Preview (05-20)" },
+  { id: "gemini-2.0-flash",                name: "Gemini 2.0 Flash" },
+  { id: "gemini-2.0-flash-lite",           name: "Gemini 2.0 Flash Lite" },
+  { id: "gemini-1.5-pro",                  name: "Gemini 1.5 Pro" },
+  { id: "gemini-1.5-flash",                name: "Gemini 1.5 Flash" },
+  { id: "gemini-1.5-flash-8b",             name: "Gemini 1.5 Flash 8B" },
+];
+
 async function fetchGeminiModels(baseUrl: string, apiKey: string): Promise<ModelItem[]> {
   const base = baseUrl.replace(/\/+$/, "");
   const url = `${base}/v1beta/models?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url);
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${text.slice(0, 200)}`);
-  }
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      // Key is wrong / quota exceeded — surface the real error, don't fallback
+      throw new Error(`Gemini API ${res.status}: ${text.slice(0, 200)}`);
+    }
 
-  const data = (await res.json()) as { models?: { name: string; displayName?: string }[] };
-  if (!data.models || !Array.isArray(data.models)) {
-    throw new Error("Unexpected Gemini response format: missing models array");
+    const data = (await res.json()) as { models?: { name: string; displayName?: string }[] };
+    if (!data.models || !Array.isArray(data.models)) {
+      throw new Error("Unexpected Gemini response format: missing models array");
+    }
+    // Filter to text-capable models only (skip embedding / vision-only)
+    const textModels = data.models.filter(
+      (m) =>
+        m.name.includes("gemini") &&
+        !m.name.includes("embedding") &&
+        !m.name.includes("aqa")
+    );
+    return textModels.map((m) => {
+      const id = m.name.replace(/^models\//, "");
+      return { id, name: m.displayName || id };
+    });
+  } catch (err) {
+    // Network-level failure (blocked, timeout, DNS) — return hardcoded fallback
+    // so the user can still pick a model manually.
+    if (
+      err instanceof Error &&
+      (err.name === "TimeoutError" ||
+        err.message.startsWith("fetch failed") ||
+        err.message.includes("ECONNREFUSED") ||
+        err.message.includes("ENOTFOUND"))
+    ) {
+      console.warn("[models/list] Gemini API unreachable, returning fallback list:", err.message);
+      return GEMINI_FALLBACK;
+    }
+    throw err;
   }
-  return data.models.map((m) => {
-    const id = m.name.replace(/^models\//, "");
-    return { id, name: m.displayName || id };
-  });
 }
 
 export async function POST(request: Request) {
