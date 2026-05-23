@@ -861,11 +861,11 @@ async function handleShotSplitStream(
     sceneChunks.map(async (chunk, idx) => {
       // Distribute the episode target duration proportionally by scene count
       let chunkTargetDuration: number | null = null;
-      if (targetDurationSeconds && totalSceneCount > 0) {
+      if (targetDurationSeconds) {
         const chunkSceneCount = chunkSceneCounts[idx] ?? 0;
-        // Give each chunk a proportional share; if no scene markers, split evenly
-        const ratio = chunkSceneCount > 0
-          ? chunkSceneCount / totalSceneCount
+        // Proportional by scene count if markers detected; else split evenly across chunks
+        const ratio = totalSceneCount > 0
+          ? (chunkSceneCount > 0 ? chunkSceneCount / totalSceneCount : 1 / sceneChunks.length)
           : 1 / sceneChunks.length;
         chunkTargetDuration = Math.round(targetDurationSeconds * ratio);
         console.log(`[ShotSplit] Chunk ${idx + 1}: ${chunkSceneCount} scenes → targetDuration=${chunkTargetDuration}s`);
@@ -877,6 +877,11 @@ async function handleShotSplitStream(
           system: systemPrompt,
           prompt,
           providerOptions: jsonMode,
+          // S-grade shots are token-heavy (~500 tokens each).
+          // For reasoning models (Deepseek R1 / QwQ etc.), <think> tokens also count toward
+          // output quota — a long thinking chain can exhaust 16k before any JSON is written.
+          // 32k gives thinking models ~16k for reasoning + ~16k for JSON output.
+          maxOutputTokens: 32000,
         });
         
         if (!result.text) {
@@ -910,7 +915,7 @@ async function handleShotSplitStream(
   );
 
   // Merge and re-sequence
-  const allShots = chunkResults.flat();
+  let allShots = chunkResults.flat();
   allShots.forEach((s, i) => { s.sequence = i + 1; });
 
   if (allShots.length === 0) {
@@ -918,6 +923,103 @@ async function handleShotSplitStream(
       { error: `Failed to generate shots. ${lastError || "Check script format (needs SCENE markers)."}` },
       { status: 500 }
     );
+  }
+
+  // ── Duration top-up: if still short, ask model to insert gap shots ──
+  if (targetDurationSeconds) {
+    const actualDuration = allShots.reduce((s, shot) => s + (shot.duration ?? 0), 0);
+    const durationGap = targetDurationSeconds - actualDuration;
+    const lowThreshold = Math.round(targetDurationSeconds * 0.9);
+    const neededShots = Math.ceil(durationGap / 10); // estimate at 10s avg
+
+    if (actualDuration < lowThreshold && neededShots >= 2) {
+      console.log(`[ShotSplit] Top-up: actual=${actualDuration}s < target=${targetDurationSeconds}s, gap=${durationGap}s (~${neededShots} shots needed)`);
+      try {
+        const topUpPrompt = `You are completing a storyboard that is too short.
+
+Current storyboard (JSON):
+${JSON.stringify(allShots.map((s, i) => ({
+  sequence: i + 1,
+  sceneDescription: s.sceneDescription,
+  videoScript: s.videoScript,
+  duration: s.duration,
+})), null, 2)}
+
+Current total duration: ${actualDuration}s. Target: ${targetDurationSeconds}s. Gap: ${durationGap}s.
+
+Generate EXACTLY ${neededShots} additional shots to fill this gap. Choose insertion points that feel natural — after dialogue shots add listener reactions, after action shots add aftermath beats, after establishing shots add character detail shots.
+
+Output a JSON array of additional shots. Each shot MUST include:
+- "insertAfter": the sequence number after which this shot should be inserted (integer, 0 = insert before shot 1)
+- "sceneDescription": environment context matching the surrounding shots
+- "startFrame": S-grade image generation prompt (character position, expression, lighting, emotional tone)
+- "endFrame": S-grade image generation prompt (end state, visually stable, not mid-motion)
+- "motionScript": time-segmented, max 3s per segment, format "0-3s: ... 3-6s: ..."
+- "videoScript": 30-60 word Seedance prose with character name + visual tag, ONE action verb, camera formula, ONE sensory detail
+- "duration": integer between ${videoMaxDuration >= 10 ? 8 : 4} and ${Math.min(videoMaxDuration, 12)} seconds
+- "dialogues": array (empty [] if no dialogue)
+- "cameraDirection": camera instruction
+
+Shot types to use (pick based on context): REACTION SHOT (listener's micro-response), CHARACTER BEAT (internal conflict made visible), ENVIRONMENT DETAIL (world element that mirrors the emotional beat), TRANSITION SHOT (character moving, posture carrying subtext).
+
+IMPORTANT: Output language must match the existing storyboard. Respond ONLY with the JSON array.`;
+
+        const topUpResult = await generateText({
+          model,
+          prompt: topUpPrompt,
+          maxOutputTokens: 16000,
+        });
+
+        if (topUpResult.text) {
+          try {
+            const topUpRaw = extractJSON(topUpResult.text);
+            const topUpShots = JSON.parse(topUpRaw) as Array<{
+              insertAfter: number;
+              sceneDescription: string;
+              startFrame: string;
+              endFrame: string;
+              motionScript: string;
+              videoScript?: string;
+              duration: number;
+              dialogues: Array<{ character: string; text: string }>;
+              cameraDirection?: string;
+            }>;
+
+            if (Array.isArray(topUpShots) && topUpShots.length > 0) {
+              // Insert top-up shots at the specified positions
+              // Sort by insertAfter descending so earlier insertions don't shift later indices
+              topUpShots.sort((a, b) => b.insertAfter - a.insertAfter);
+              for (const extra of topUpShots) {
+                const insertIdx = Math.min(Math.max(extra.insertAfter, 0), allShots.length);
+                const newShot: ParsedShot = {
+                  sequence: insertIdx + 1, // will be re-sequenced below
+                  sceneDescription: extra.sceneDescription || "",
+                  startFrame: extra.startFrame || "",
+                  endFrame: extra.endFrame || "",
+                  motionScript: extra.motionScript || "",
+                  videoScript: extra.videoScript,
+                  duration: Math.min(Math.max(extra.duration ?? 8, 4), videoMaxDuration),
+                  dialogues: extra.dialogues ?? [],
+                  cameraDirection: extra.cameraDirection || "static",
+                };
+                allShots.splice(insertIdx, 0, newShot);
+              }
+              // Re-sequence after insertions
+              allShots.forEach((s, i) => { s.sequence = i + 1; });
+              const newTotal = allShots.reduce((s, shot) => s + (shot.duration ?? 0), 0);
+              console.log(`[ShotSplit] Top-up added ${topUpShots.length} shots → ${allShots.length} total, ${newTotal}s`);
+            }
+          } catch (parseErr) {
+            console.warn("[ShotSplit] Top-up parse failed, skipping:", parseErr);
+          }
+        }
+      } catch (topUpErr) {
+        console.warn("[ShotSplit] Top-up generation failed, skipping:", topUpErr);
+      }
+    } else {
+      const actualDuration2 = allShots.reduce((s, shot) => s + (shot.duration ?? 0), 0);
+      console.log(`[ShotSplit] Coverage OK: ${actualDuration2}s / ${targetDurationSeconds}s target`);
+    }
   }
 
   // 若前端传入 targetVersionId，验证它确实属于本项目+本集，防止跨项目 shot 清除

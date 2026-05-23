@@ -29,42 +29,70 @@ export function buildShotSplitPrompt(
 
   // Inject a narrative-coverage constraint when target duration is known.
   // Placed BEFORE the screenplay so the LLM internalises the budget first.
+  // DESIGN NOTE: Post-hoc "SUM after writing" instructions don't work — LLMs generate
+  // tokens sequentially and cannot go back. Instead, we use a PLAN-FIRST approach:
+  // the model must commit to a per-scene shot distribution BEFORE writing any JSON.
   const coverageRule = targetDurationSeconds
     ? (() => {
         const targetMin = Math.floor(targetDurationSeconds / 60);
         const targetSec = targetDurationSeconds % 60;
         const targetLabel = targetSec > 0 ? `${targetMin}分${targetSec}秒` : `${targetMin}分钟`;
-        const tolerance = Math.round(targetDurationSeconds * 0.1); // ±10%
-        const low = targetDurationSeconds - tolerance;
-        const high = targetDurationSeconds + tolerance;
+        // Only enforce a minimum (no cap) — overage is fine, underage is not.
+        const low = Math.round(targetDurationSeconds * 0.9);
+        const high = targetDurationSeconds + Math.round(targetDurationSeconds * 0.2);
         const minShots = Math.ceil(low / maxShotDuration);
-        const typicalShots = Math.ceil(targetDurationSeconds / 10);
+        // Plan at 9s/shot average (LLMs tend to generate 8-9s; planning at 10s leaves a structural gap)
+        const typicalShots = Math.ceil(targetDurationSeconds / 9);
         return `
-🎬 DURATION BUDGET — READ THIS BEFORE LOOKING AT THE SCREENPLAY
+🎬 DURATION BUDGET — PLAN FIRST, THEN WRITE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Target total duration: ${targetLabel} (${targetDurationSeconds}s). Acceptable range: ${low}s – ${high}s.
-At a typical 10s per shot, you need approximately ${typicalShots} shots.
-At the maximum ${maxShotDuration}s per shot, you need at least ${minShots} shots.
+Target total duration: ${targetLabel} (${targetDurationSeconds}s).
+HARD MINIMUM: ${low}s — underage output is a FAILED output. There is no acceptable underage.
+Soft ceiling: ${high}s — trim only if necessary.
+Minimum shot count: AT LEAST ${minShots} shots (at max ${maxShotDuration}s each).
+Typical target: AT LEAST ${typicalShots} shots (averaging 9s each).
 
-MANDATORY RULES — violation = failed output:
-① The screenplay's shot count is a STORY OUTLINE, NOT a shot list ceiling. You MUST generate as many shots as needed to reach ${low}s+.
-② NEVER stretch a single shot's duration to pad time — pacing matters. Split or insert instead.
-③ AFTER writing all shots, SUM every "duration" field silently:
-   • Sum in range [${low}s, ${high}s] → output as-is.
-   • Sum < ${low}s → YOU MUST INSERT additional shots (see types below) until sum ≥ ${low}s. Do not submit under-length output.
-   • Sum > ${high}s → trim establishing/atmosphere shots first (cap at 8–10s each).
+DURATION FLOOR — do not go below these minimums without a specific reason:
+  Dialogue / emotional beat shots: 10s minimum (slower pacing → more weight)
+  Environment / atmosphere shots: 9s minimum (need time to breathe)
+  Action / transition shots: 8s minimum (only pure cuts may be shorter)
 
-TYPES OF SHOTS TO INSERT (choose based on story context):
-  - REACTION SHOT: after key dialogue, cut to the listener's micro-response — held breath, hand tightening, gaze shifting away
-  - CHARACTER BEAT: internal conflict made visible — hesitation before a decision, a contradicting gesture, doubt behind the eyes
-  - ENVIRONMENT DETAIL: a world element that foreshadows, mirrors, or ironically contrasts the emotional beat (not random scenery)
-  - TRANSITION SHOT: character moving between locations, pace and posture carrying story subtext
-  - PARALLEL ACTION: what another character is simultaneously doing, adding irony or tension
+══ STEP 1 — MANDATORY PLANNING COMMENT (output this FIRST, before the JSON array) ══
+Begin your response with ONE line in exactly this format — then write the JSON:
 
-EVERY INSERTED SHOT MUST MEET S-GRADE STANDARDS:
+<!-- PLAN: Scene1=Ns(Xshots) | Scene2=Ns(Xshots) | ... | Total=Ns(Xshots) -->
+
+Example: <!-- PLAN: 篝火开场=30s(3shots) | 龙渊灵瑶对话=45s(4shots) | 白夜追击=50s(5shots) | 结尾=30s(3shots) | Total=155s(15shots) -->
+
+Commit to a shot count that reaches ≥${low}s TOTAL. Then write EXACTLY those shots.
+This planning step is MANDATORY — output without it is a protocol violation.
+
+══ STEP 2 — PER-SCENE EXPANSION RULES (apply while writing each scene) ══
+These are HARD MINIMUMS per scene type, not suggestions:
+
+DIALOGUE SCENE → AT LEAST: 1 speaker shot + 1 distinct listener reaction shot (≥2 shots per exchange)
+  Expand with: additional speaker/listener alternating cuts; environment reaction shots; pause/beat shots
+NEW LOCATION REVEAL → AT LEAST: 1 establishing wide shot + 2 character/action shots (≥3 shots)
+  Expand with: detail shots of props/environment; character exploration of space
+EMOTIONAL BEAT (realisation, confession, confrontation) → AT LEAST: 1 face close-up + 1 environment/reaction shot (≥2 shots)
+  Expand with: silent pause shots; other characters' reactions; symbolic environment details
+FIGHT/ACTION SEQUENCE → AT LEAST: wide approach + action contact + character response + aftermath (≥4 shots)
+  Expand with: weapon detail shots; spectator reactions; terrain/physics shots
+LOCATION TRANSITION → AT LEAST: 1 movement/bridging shot per transition
+CROWD/ATMOSPHERE SCENE → AT LEAST: 1 wide establishing + 1 detail/texture shot (≥2 shots)
+
+══ STEP 3 — SHOT INSERTION TYPES (use freely to reach the minimum) ══
+These shot types ADD duration without padding or stretching existing shots:
+  REACTION SHOT — listener's micro-response after dialogue: held breath, hand tightening, gaze shifting away (9–12s)
+  CHARACTER BEAT — internal conflict made visible: hesitation, contradicting gesture, doubt behind eyes (9–12s)
+  ENVIRONMENT DETAIL — world element that foreshadows or contrasts the emotional beat (9–14s)
+  PARALLEL ACTION — what another character simultaneously does, adding irony or tension (9–12s)
+  TRANSITION SHOT — character moving between locations, pace/posture carrying story subtext (8–11s)
+
+EVERY SHOT (including inserted ones) MUST MEET S-GRADE STANDARDS:
   ✅ videoScript: 30–60 word Seedance prose, character name + visual ID, ONE action verb, camera formula, ONE sensory detail
-  ✅ startFrame / endFrame: character position, expression, lighting, emotional tone
-  ✅ motionScript: time-segmented, max 3s per segment
+  ✅ startFrame / endFrame: character position, expression, lighting, emotional tone — NOT mid-motion
+  ✅ motionScript: time-segmented, max 3s per segment, all four layers (character/environment/camera/physics)
   ✅ Must advance: plot, character relationship, emotional state, or world-building
   ❌ No template videoScripts, no shots under 25 characters, no "character walks/sits" with no subtext
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -884,11 +884,12 @@ NEVER output a duration outside this range. There are NO exceptions.
 - COUNT your duration value before writing it. If it exceeds {{MAX_DURATION}}, you MUST split.
 Outputting duration={{MAX_DURATION_PLUS_ONE}} or higher is a CRITICAL ERROR.
 
-COVERAGE: Generate AT LEAST one shot per SCENE in the screenplay. Do NOT skip or merge scenes.`;
+COVERAGE: Generate AT LEAST one shot per SCENE in the screenplay. Do NOT skip or merge scenes.
+When a DURATION BUDGET is provided in the user prompt, follow those expansion rules — each scene requires MULTIPLE shots. One shot per scene is the bare minimum only when there is no duration target.`;
 
 const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, videoScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
 
-Respond ONLY with the JSON array. No markdown fences. No commentary.`;
+OUTPUT FORMAT: If a DURATION BUDGET planning step is requested in the user prompt, output the <!-- PLAN: ... --> comment on its own line FIRST, then output the JSON array with no other text. If no planning step is requested, output ONLY the JSON array. No markdown fences. No other commentary.`;
 
 const shotSplitDef: PromptDefinition = {
   key: "shot_split",
@@ -936,7 +937,7 @@ const shotSplitDef: PromptDefinition = {
       .replace(/\{\{MAX_DURATION\}\}/g, String(maxDuration))
       .replace(/\{\{DIALOGUE_MAX\}\}/g, String(Math.min(maxDuration, 12)))
       .replace(/\{\{ACTION_MAX\}\}/g, String(Math.min(maxDuration, 12)))
-      .replace(/\{\{ESTABLISHING_MAX\}\}/g, String(Math.min(maxDuration, 10)))
+      .replace(/\{\{ESTABLISHING_MAX\}\}/g, String(Math.min(maxDuration, 12)))
       .replace(/\{\{PROPORTIONAL_TIERS\}\}/g, proportionalTiers);
 
     return [
