@@ -55,11 +55,13 @@ RULES:
       - "永夜"(staff) / "无双"(sword) / "霜魂刀"(sword) → SKIP
    The key question: is there ONE specific INDIVIDUAL this name always refers to, with a FACE worth remembering?
    KEEP examples: "魔族将军赤狮" → KEEP (personal name "赤狮"); "龙渊" → KEEP; "酒馆老板娘" → KEEP (recurring individual)
-3. Count approximate appearances/mentions for each character
-4. Merge obvious aliases: "小明" and "明哥" are the same person; "老板娘" and "酒馆老板娘（矮人）" describing the same role are the same person — output ONE entry. When unsure, prefer the more descriptive name.
-5. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.
+   Also KEEP relational titles who appear in any scene with described appearance or named action:
+   "龙渊父亲" / "龙渊母亲" / "师父" → KEEP (one scene is enough — they need a consistent face)
+4. Count approximate appearances/mentions for each character
+5. Merge obvious aliases: "小明" and "明哥" are the same person; "老板娘" and "酒馆老板娘（矮人）" describing the same role are the same person — output ONE entry. When unsure, prefer the more descriptive name.
+6. "name" MUST match the script: if the source begins with a block titled like "CAST", "Character standard names", or "系统提取·角色标准名" listing official strings, copy those strings **verbatim** as each JSON "name" value. Otherwise use stable names from the narrative; avoid redundant adult-only age suffixes that duplicate a bare name (put age in "description"); output a **separate entry** when child vs adult is clearly a different look. Do not list weapons as characters.
    IMPORTANT: treat full-width brackets （ ） and half-width brackets ( ) as identical — "魔王（人形态）" and "魔王(人形态)" are the SAME character, output only ONE entry using the script's official name from the 系统提取·角色标准名 table if present.
-6. Do NOT include a "scope" field — character roles are determined by the user, not inferred here.
+7. Do NOT include a "scope" field — character roles are determined by the user, not inferred here.
 
 ${buildImportStyleInstruction(visualStyle)}
 

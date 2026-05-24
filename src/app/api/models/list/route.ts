@@ -145,7 +145,7 @@ export async function POST(request: Request) {
     // 参考文档：https://www.volcengine.com/docs/82379/1541523
     if (body.protocol === "doubao") {
       const DOUBAO_FALLBACK: ModelItem[] = [
-        { id: "doubao-seedream-5-0-lite-250113", name: "Doubao Seedream 5.0 Lite" },
+        { id: "doubao-seedream-5-0-260128",      name: "Doubao Seedream 5.0" },
         { id: "doubao-seedream-4-5-251128",      name: "Doubao Seedream 4.5" },
         { id: "doubao-seedream-4-0-250828",      name: "Doubao Seedream 4.0" },
       ];

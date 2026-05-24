@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "rm -rf .next/dev/server/app && next dev -p 3007",
+    "dev": "rm -rf .next/dev && next dev -p 3007",
     "build": "next build",
     "start": "next start -p 3007",
     "lint": "eslint",

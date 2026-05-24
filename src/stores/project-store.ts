@@ -75,6 +75,7 @@ interface Project {
   useProjectPrompts?: number;
   enhancePrompts?: number;
   visualStyle: string;
+  styleReferenceImage?: string | null;
   characters: Character[];
   shots: Shot[];
   versions: StoryboardVersion[];
@@ -88,6 +89,7 @@ interface ProjectStore {
   updateIdea: (idea: string) => void;
   updateScript: (script: string) => void;
   updateVisualStyle: (visualStyle: string) => void;
+  updateStyleReferenceImage: (styleReferenceImage: string | null) => void;
   setProject: (project: Project) => void;
 }
 
@@ -134,6 +136,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateVisualStyle: (visualStyle: string) => {
     set((state) => ({
       project: state.project ? { ...state.project, visualStyle } : null,
+    }));
+  },
+
+  updateStyleReferenceImage: (styleReferenceImage: string | null) => {
+    set((state) => ({
+      project: state.project ? { ...state.project, styleReferenceImage } : null,
     }));
   },
 

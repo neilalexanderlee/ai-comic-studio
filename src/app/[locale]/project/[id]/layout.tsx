@@ -8,6 +8,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, Settings, Wand2 } from "lucide-react";
 import { LogoIcon } from "@/components/logo";
 import { VisualStylePicker } from "@/components/editor/visual-style-picker";
+import { StyleReferenceUploader } from "@/components/editor/style-reference-uploader";
 
 export default function ProjectLayout({
   children,
@@ -60,6 +61,7 @@ export default function ProjectLayout({
         </div>
         <div className="flex items-center gap-2">
           <VisualStylePicker />
+          <StyleReferenceUploader />
           <div className="flex items-center gap-1">
           <Link
             href={`/zh/settings/prompts?scope=project&projectId=${id}`}

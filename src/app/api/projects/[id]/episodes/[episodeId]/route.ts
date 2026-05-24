@@ -142,6 +142,11 @@ export async function GET(
     status: episode.status,
     finalVideoUrl: episode.finalVideoUrl,
     generationMode: episode.generationMode,
+    // Project-level settings needed by the client store
+    visualStyle: project.visualStyle,
+    useProjectPrompts: project.useProjectPrompts,
+    enhancePrompts: project.enhancePrompts,
+    styleReferenceImage: project.styleReferenceImage,
     characters: epCharacters,
     shots: enrichedShots,
     versions: allVersions.map((v) => ({

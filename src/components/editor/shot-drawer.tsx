@@ -457,6 +457,7 @@ export function ShotDrawer({
                 : hasFrame ? t("shot.regenerateFrames") : t("project.generateFrames")
               }
             </Button>
+
           </section>
 
           {/* Step 3: Video Prompt */}

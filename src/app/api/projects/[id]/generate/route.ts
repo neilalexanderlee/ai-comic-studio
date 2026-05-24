@@ -91,6 +91,14 @@ function buildShotCharacterText(shot: {
 }
 
 
+/** Strip <think>...</think> reasoning blocks from LLM output (DeepSeek R1 / QwQ etc.) */
+function stripThinkingBlocks(text: string): string {
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/g, "")
+    .replace(/<think>[\s\S]*/g, "") // truncated block with no closing tag
+    .trim();
+}
+
 async function getVersionedUploadDir(versionId: string | null | undefined): Promise<string> {
   if (!versionId) return process.env.UPLOAD_DIR || "./uploads";
   const [version] = await db
@@ -1463,9 +1471,9 @@ async function handleBatchFrameGenerate(
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
 
-  // Fetch project visualStyle for style lock injection
+  // Fetch project visualStyle + styleReferenceImage for style lock injection
   const [batchProject] = await db
-    .select({ visualStyle: projects.visualStyle })
+    .select({ visualStyle: projects.visualStyle, styleReferenceImage: projects.styleReferenceImage })
     .from(projects)
     .where(eq(projects.id, projectId));
   const batchVisualStyleTag = (() => {
@@ -1473,6 +1481,7 @@ async function handleBatchFrameGenerate(
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
+  const batchStyleRefImage = batchProject?.styleReferenceImage ?? null;
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
 
@@ -1495,7 +1504,7 @@ async function handleBatchFrameGenerate(
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
-    userId, projectId, skipCount, batchVisualStyleTag, frameCharacterContext,
+    userId, projectId, skipCount, batchVisualStyleTag, batchStyleRefImage, frameCharacterContext,
     enhancePrompts, batchTextProvider, batchImageProtocol,
   };
 
@@ -1503,7 +1512,7 @@ async function handleBatchFrameGenerate(
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const { allShots, copiedFirstFrame, overwrite, frameCharacters,
-              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
+              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag, batchStyleRefImage,
               frameCharacterContext, enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
 
       function emit(data: object) {
@@ -1569,10 +1578,14 @@ async function handleBatchFrameGenerate(
             const firstPrompt = enhancePrompts && batchTextProvider
               ? await enhanceImagePrompt(firstPromptRaw, batchImageProtocol, batchTextProvider)
               : firstPromptRaw;
+            const batchFirstCharRefs = resolvedChars.map((c) => c.imagePath);
+            const batchFirstEffectiveRefs = batchFirstCharRefs.length > 0
+              ? batchFirstCharRefs
+              : batchStyleRefImage ? [batchStyleRefImage] : [];
             firstFramePath = await ai.generateImage(firstPrompt, {
               ...imageOpts,
               quality: "hd",
-              referenceImages: resolvedChars.map((c) => c.imagePath),
+              referenceImages: batchFirstEffectiveRefs,
               referenceLabels: resolvedChars.map((c) => c.name),
             });
           } else {
@@ -1630,10 +1643,14 @@ async function handleBatchFrameGenerate(
           const lastPrompt = enhancePrompts && batchTextProvider
             ? await enhanceImagePrompt(lastPromptRaw, batchImageProtocol, batchTextProvider)
             : lastPromptRaw;
+          const batchLastCharRefs = resolvedChars2.map((c) => c.imagePath);
+          const batchLastEffectiveRefs = batchLastCharRefs.length > 0
+            ? batchLastCharRefs
+            : batchStyleRefImage ? [batchStyleRefImage] : [];
           const lastFramePath = await ai.generateImage(lastPrompt, {
             ...imageOpts,
             quality: "hd",
-            referenceImages: [firstFramePath, ...resolvedChars2.map((c) => c.imagePath)],
+            referenceImages: [firstFramePath, ...batchLastEffectiveRefs],
             referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
           });
 
@@ -1790,9 +1807,9 @@ async function handleSingleFrameGenerate(
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
-  // Fetch project visualStyle for art-style lock (same as batch/chain generation)
+  // Fetch project visualStyle + styleReferenceImage for art-style lock
   const [singleProject] = await db
-    .select({ visualStyle: projects.visualStyle })
+    .select({ visualStyle: projects.visualStyle, styleReferenceImage: projects.styleReferenceImage })
     .from(projects)
     .where(eq(projects.id, projectId));
   const singleVisualStyleTag = (() => {
@@ -1800,6 +1817,9 @@ async function handleSingleFrameGenerate(
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
+  // When no named characters are present, inject the project-level style reference image
+  // so the model has a visual anchor for art style even in crowd/establishing shots.
+  const singleStyleRefImage = singleProject?.styleReferenceImage ?? null;
 
   // Clean cameraDirection (remove markdown bold markers)
   const singleCleanedCamera = shot.cameraDirection?.replace(/^\*+\s*/, "").replace(/\*+$/, "").trim() || undefined;
@@ -1830,10 +1850,15 @@ async function handleSingleFrameGenerate(
       const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
+      const firstEffectiveRefs = charRefImages.length > 0
+        ? charRefImages
+        : singleStyleRefImage ? [singleStyleRefImage] : [];
+      console.log(`[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${charRefImages.length} styleRef=${!!singleStyleRefImage}`);
+      console.log(`[SingleFrameGenerate][PROMPT DEBUG] finalPrompt:\n${firstPrompt}`);
       const firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: charRefImages,
+        referenceImages: firstEffectiveRefs,
       });
       await db
         .update(shots)
@@ -1911,10 +1936,13 @@ async function handleSingleFrameGenerate(
       const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
+      const effectiveRefsForFirst = charRefImages.length > 0
+        ? charRefImages
+        : singleStyleRefImage ? [singleStyleRefImage] : [];
       firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: charRefImages,
+        referenceImages: effectiveRefsForFirst,
       });
     }
 
@@ -1956,15 +1984,22 @@ async function handleSingleFrameGenerate(
     const lastPrompt = enhancePrompts && singleTextProvider
       ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
       : lastPromptRaw;
+    const effectiveRefsForLast = charRefImages.length > 0
+      ? charRefImages
+      : singleStyleRefImage ? [singleStyleRefImage] : [];
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
-      referenceImages: [firstFramePath, ...charRefImages],
+      referenceImages: [firstFramePath, ...effectiveRefsForLast],
     });
 
     await db
       .update(shots)
-      .set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" })
+      .set({
+        firstFrame: firstFramePath,
+        lastFrame: lastFramePath,
+        status: "completed",
+      })
       .where(eq(shots.id, shotId));
 
     // Sync next shot's firstFrame to maintain continuity chain — only when chaining is enabled
@@ -3202,7 +3237,7 @@ async function handleSingleReferenceVideo(
           images: [sceneFramePath],
           temperature: 0.7,
         });
-        videoPrompt = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
+        videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
       } catch (err) {
         console.warn("[SingleReferenceVideo] Vision prompt generation failed, falling back:", err);
         videoPrompt = buildReferenceVideoPrompt({
@@ -3432,7 +3467,7 @@ async function handleBatchReferenceVideo(
               images: [sceneFramePath],
               temperature: 0.7,
             });
-            videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
+            videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
           } catch (err) {
             console.warn("[BatchReferenceVideo] Vision prompt generation failed, falling back:", err);
             videoPromptRaw = buildReferenceVideoPrompt({
@@ -3671,6 +3706,7 @@ async function handleSingleVideoPrompt(
       motionScript: motionContext,
       cameraDirection: shot.cameraDirection || "static",
       duration: effectiveDuration,
+      frameCount: visionFrames.length,
       characters: shotCharacters,
       dialogues: dialogueList.length > 0 ? dialogueList : undefined,
     });
@@ -3679,7 +3715,7 @@ async function handleSingleVideoPrompt(
       systemPrompt: refVideoSystem,
       images: visionFrames,
     });
-    const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
+    const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
     console.log(`[SingleVideoPrompt] Shot ${shot.sequence} videoPrompt length=${videoPrompt.length}`);
     await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shotId));
     return NextResponse.json({ shotId, videoPrompt, status: "ok" });
@@ -3766,6 +3802,7 @@ async function handleBatchVideoPrompt(
           motionScript: motionContext,
           cameraDirection: shot.cameraDirection || "static",
           duration: effectiveDuration,
+          frameCount: visionFrames.length,
           characters: batchCharacters,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
         });
@@ -3773,7 +3810,7 @@ async function handleBatchVideoPrompt(
           systemPrompt: refVideoSystem,
           images: visionFrames,
         });
-        const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${rawPrompt.trim()}`;
+        const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
         await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shot.id));
         console.log(`[BatchVideoPrompt] Shot ${shot.sequence} done (${((Date.now() - shotStart) / 1000).toFixed(1)}s, ${visionFrames.length} frames)`);
         return { shotId: shot.id, status: "ok" };
