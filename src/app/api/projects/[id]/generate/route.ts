@@ -40,6 +40,7 @@ import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
 import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
 import { enhanceImagePrompt, enhanceVideoPrompt } from "@/lib/ai/prompt-enhancer";
+import { resolveFrameMode } from "@/lib/storyboard/frame-generation-strategy";
 
 export const maxDuration = 300;
 
@@ -1578,20 +1579,37 @@ async function handleBatchFrameGenerate(
             firstFramePath = previousLastFrame;
           }
 
-          // CROWD SHOT: no named characters → skip lastFrame generation.
-          // Video generation will auto-detect no lastFrame → reference mode (initialImage only).
-          // Seedance returns the actual video end frame, which becomes lastFrame after video generation.
-          if (batchCurrentShotChars.length === 0) {
+          // Resolve frame generation mode via intelligent strategy:
+          //   - deterministic: crowd shots, short duration, missing endFrameDesc, near-identical descs
+          //   - LLM semantic: ambiguous cases (camera intent, scene-jump risk, etc.)
+          // batchCurrentShotChars already computed above — pass hasChars flag.
+          const batchFrameDecision = await resolveFrameMode(
+            {
+              duration: shot.duration,
+              cameraDirection: cleanedCamera,
+              startFrameDesc: shot.startFrameDesc,
+              endFrameDesc: shot.endFrameDesc,
+              prompt: shot.prompt,
+            },
+            batchCurrentShotChars.length > 0,
+            enhancePrompts ? modelConfig?.text ?? null : null
+          );
+
+          if (batchFrameDecision.mode === "first_only") {
             await db.update(shots).set({ firstFrame: firstFramePath, status: "completed" }).where(eq(shots.id, shot.id));
-            previousLastFrame = undefined; // don't inherit crowd frame into next shot's chain
+            // Don't inherit a crowd/skip frame into the next shot's continuity chain
+            if (batchCurrentShotChars.length === 0) previousLastFrame = undefined;
             okCount++;
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed — crowd shot, skipping lastFrame (${elapsed}s)`);
+            console.log(
+              `[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} — first_only` +
+              ` (${batchFrameDecision.source}: ${batchFrameDecision.reason}) (${elapsed}s)`
+            );
             emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath });
             continue;
           }
 
-          // Character shot: generate lastFrame as usual
+          // Both frames: generate lastFrame
           const shotText2 = buildShotCharacterText(shot);
           const shotChars2 = filterShotCharacters(shotText2, frameCharacters, { contextText: frameCharacterContext });
           const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
@@ -1900,10 +1918,24 @@ async function handleSingleFrameGenerate(
       });
     }
 
-    // CROWD SHOT (no named characters): skip lastFrame — video generation will use reference mode.
-    // Seedance returns the actual video end frame after generation, which becomes lastFrame then.
-    if (charsForFrame.length === 0) {
-      console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: crowd shot — skipping lastFrame, video will use reference mode`);
+    // Intelligent frame strategy: decide whether to generate the last frame.
+    const singleFrameDecision = await resolveFrameMode(
+      {
+        duration: shot.duration,
+        cameraDirection: singleCleanedCamera ?? null,
+        startFrameDesc: shot.startFrameDesc,
+        endFrameDesc: shot.endFrameDesc,
+        prompt: shot.prompt,
+      },
+      charsForFrame.length > 0,
+      enhancePrompts ? modelConfig?.text ?? null : null
+    );
+
+    if (singleFrameDecision.mode === "first_only") {
+      console.log(
+        `[SingleFrameGenerate] Shot ${shot.sequence}: first_only` +
+        ` (${singleFrameDecision.source}: ${singleFrameDecision.reason})`
+      );
       await db
         .update(shots)
         .set({ firstFrame: firstFramePath, status: "completed" })
@@ -1911,7 +1943,7 @@ async function handleSingleFrameGenerate(
       return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
     }
 
-    // Character shot: generate lastFrame as usual
+    // Both frames: generate lastFrame
     const lastPromptRaw = buildLastFramePrompt({
       sceneDescription: shot.prompt || "",
       endFrameDesc: shot.endFrameDesc || shot.prompt || "",

@@ -39,7 +39,8 @@ AIComicBuilder/
 ├── CLAUDE.md                  # ← 本文件
 ├── docs/
 │   ├── ARCHITECTURE.md        # 系统架构详解
-│   └── EVAL.md                # Eval 框架说明
+│   ├── EVAL.md                # Eval 框架说明
+│   └── APIs/                  # 火山方舟/Kling 官方 API PDF 文档
 ├── drizzle/                   # SQL migration 文件
 │   └── meta/_journal.json     # Migration 注册表（必须与 .sql 文件同步更新）
 ├── src/
@@ -47,6 +48,7 @@ AIComicBuilder/
 │   │   ├── api/               # Next.js Route Handlers (Server)
 │   │   │   └── projects/[id]/
 │   │   │       ├── generate/route.ts   # 核心生成入口（SSE 流式输出）
+│   │   │       ├── import/split/       # 导入时自动分集
 │   │   │       ├── episodes/           # 剧集 CRUD
 │   │   │       └── ...
 │   │   └── [locale]/          # 国际化页面
@@ -57,11 +59,19 @@ AIComicBuilder/
 │   │   │   ├── character-router.ts    # 角色图片路由（智能状态选择）
 │   │   │   ├── prompt-enhancer.ts     # 模型感知 prompt 增强
 │   │   │   ├── prompts/               # Prompt 构建函数 + 注册表
+│   │   │   │   ├── outline-expand.ts  # AI 自动生成（大纲→S级剧本）
+│   │   │   │   ├── shot-complete.ts   # 解析分镜 LLM 字段补全
+│   │   │   │   ├── frame-strategy-judge.ts  # 帧生成策略 LLM judge prompt
+│   │   │   │   └── ...
 │   │   │   └── providers/             # 各模型实现（openai/gemini/kling/seedance/jimeng/...）
 │   │   ├── db/
 │   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源）
 │   │   │   └── index.ts               # DB 实例 + idempotent migration runner
 │   │   ├── storyboard/                # 分镜工具函数
+│   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
+│   │   │   ├── detect-structured-storyboard.ts
+│   │   │   ├── extract-shot-script.ts
+│   │   │   └── complete-extracted-shots.ts
 │   │   └── bootstrap.ts              # 启动序列（migrations → providers → worker）
 │   ├── stores/                # Zustand 客户端状态
 │   │   ├── project-store.ts
@@ -171,7 +181,11 @@ const visualStyleTag = VISUAL_STYLE_PRESETS[project.visualStyle]?.tag ?? "";
 
 ### 4. enhancePrompts — 存 DB，不存 localStorage
 
-`projects.enhance_prompts` 字段（integer，默认 1）控制是否在生成前调用 `enhanceImagePrompt` / `enhanceVideoPrompt`。通过 `PATCH /api/projects/:id` 持久化，不使用 localStorage。
+`projects.enhance_prompts` 字段（integer，默认 1）对应 UI 上的「AI 增强」开关，控制两件事：
+1. 生成图片/视频前调用 `enhanceImagePrompt` / `enhanceVideoPrompt` 进行 prompt 改写
+2. 帧生成策略（`resolveFrameMode`）中启用 LLM 语义判断（关闭时仅走确定性规则）
+
+通过 `PATCH /api/projects/:id` 持久化，不使用 localStorage。
 
 ### 5. SSE 流式生成 — loopCtx 模式
 
@@ -190,7 +204,30 @@ const charExtractSystem = buildCharacterExtractSystemPrompt(proj?.visualStyle ||
 const charExtractSystem = await resolvePrompt("character_extract", { userId, projectId });
 ```
 
-### 7. Drizzle null 比较
+### 7. 帧生成策略 — resolveFrameMode
+
+`src/lib/storyboard/frame-generation-strategy.ts` 决定每个分镜生成「首帧+尾帧」还是「仅首帧」。
+
+**三层决策（按顺序）：**
+
+| 层 | 触发条件 | 结果 |
+|---|---|---|
+| 确定性（无 LLM） | 无命名角色 / duration < 5s / endFrameDesc 为空 / 首尾帧描述相似度 > 82% | `first_only` |
+| LLM 语义判断 | 确定性规则未命中 + `enhancePrompts=true` | LLM 分析摄影机意图、首尾帧差异、场景跳变风险 |
+| 安全兜底 | LLM 报错/超时 或 无 textConfig | `both`（保守默认） |
+
+**关键设计决策：**
+- LLM judge 绑定在 `enhancePrompts`（「AI 增强」开关）上——关掉 AI 功能时仅走确定性规则，不产生额外 LLM 调用
+- `first_only` 结果：只保存 firstFrame，不生成 lastFrame；视频生成时自动检测 `!shot.lastFrame` → 参考图模式
+- Seedance 在参考图模式下会返回视频实际尾帧（`return_last_frame`），此尾帧会被保存为 `seedanceLastFrame`，供下一镜继承
+
+**与「独立首帧」开关的区别：**
+- 「独立首帧」(`independentFirstFrame`/`disableChaining`) = 禁止把本镜尾帧传给下一镜作为首帧（控制帧链式继承）
+- 帧生成策略 = 决定当前镜头本身要不要生成尾帧（控制生成成本和视频质量）
+
+两者相互独立，可以同时开启。
+
+### 8. Drizzle null 比较
 
 ```typescript
 // ✅ 正确：用 isNull() / isNotNull()
@@ -210,6 +247,46 @@ where(eq(storyboardVersions.episodeId, null))
 - `enhanceImagePrompt(rawPrompt, protocol, textProvider)` — 图片帧 prompt
 
 每个 protocol 对应专属的 system prompt（如 Seedance 五段式、Kling 四要素、DALL-E 英文格式等）。新增 provider 时必须在对应的 `VIDEO_ENHANCE_SYSTEM_PROMPTS` 或 `IMAGE_ENHANCE_SYSTEM_PROMPTS` map 里添加条目。增强失败时静默回退到原始 prompt，不阻塞生成。
+
+---
+
+## S 级分镜标准集成
+
+系统所有 AI 生成分镜内容的路径均已集成 S 级分镜标准（首帧/尾帧/videoScript 四要素/微表情词汇/禁用模板列表）。
+
+### 覆盖的四条路径
+
+| 功能入口 | 文件 | 说明 |
+|---|---|---|
+| AI 自动生成（大纲扩写） | `src/lib/ai/prompts/outline-expand.ts` | 将故事大纲扩写为完整多集 S 级剧本 |
+| 解析分镜（LLM 字段补全） | `src/lib/ai/prompts/shot-complete.ts` | 解析结构化剧本时补全缺失的首帧/尾帧/videoScript |
+| 单镜头改写按钮 | `generate/route.ts` → `handleSingleShotRewrite` | 分镜描述面板底部的刷新按钮 |
+| 散文剧本切镜 | `src/lib/ai/prompts/registry.ts` → `shot_split` | LLM 从散文剧本切分分镜时已内置 S 级规范 |
+
+### 不在此范围内的路径
+
+- `handleAiOptimizeText` — 通用文字优化，执行用户自定义指令，不生成分镜结构
+- `import/split/route.ts` — 剧集级文本分割，不涉及分镜字段
+- `ref-video-prompt-generate.ts` — 视频 prompt 精炼，有独立的模型专属系统
+
+### S 级核心规范速查
+
+**videoScript 四要素**（缺一不可）：
+1. 角色名（视觉 ID 字符串）+ 在画面中的精确位置/姿态
+2. 单一动词驱动的核心动作
+3. 摄影机公式：起幅 + 运镜动作 + 速度 + 落幅
+4. 单一感官细节（光线/粒子/材质/声音，只选其一）
+
+**首帧/尾帧配对规则**：
+- 首帧 = 动作开始前的静止状态（不写运动过程）
+- 尾帧 = 动作完成后的稳定状态（必须与首帧不同，体现起止位移）
+- 禁止：两帧相同 / 用情绪形容词代替身体解剖描述
+
+**禁用模板**（出现即质量失败）：
+- "说话人面部表情随台词情绪流动，神情专注"
+- "中景跟拍：捕捉[XX]动作过程"
+- "角色情绪丰富" / "神情坚定" / "眼神复杂"
+- videoScript 超过 80 字 / 纯摄影机描述无角色动作
 
 ---
 
