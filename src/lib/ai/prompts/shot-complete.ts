@@ -15,19 +15,22 @@ export function buildShotCompletePrompt(
   params: ShotCompletePromptParams
 ): string {
   const hintBlock = params.characterVisualHints?.length
-    ? `\n角色视觉标识（如果人物出现在补全字段里，优先沿用这些描述）：\n${params.characterVisualHints
+    ? `\n角色视觉标识（必须在 videoScript/startFrameDesc/endFrameDesc 中用括号标注，例如「龙渊（黑甲银纹琥珀眼）」）：\n${params.characterVisualHints
         .map((c) => `${c.name}：${c.visualHint}`)
         .join("\n")}`
     : "";
 
-  return `你是一位分镜导演。请在不改写已有镜头意图的前提下，只补全这个镜头缺失的字段，让它更适合后续 AI 画面和视频生成。
+  const hasDialogue = params.dialogues.length > 0;
+  const dialogueBlock = hasDialogue
+    ? params.dialogues.map((d) => `${d.character}: ${d.text}`).join(" | ")
+    : "（无）";
 
-要求：
-1. 不要改写已经提供的字段内容，除非该字段为空。
-2. 优先保留原剧本中的措辞、人物关系和动作设计。
-3. 如果剧本已经包含明确的镜头语言，就按原文延展，不要另起炉灶。
-4. 所有中文输入都用中文输出；只有 cameraDirection 使用英文技术词。
-5. 如果某字段已经有值，请原样返回。
+  return `你是一位 S 级漫剧分镜导演，负责补全分镜缺失字段，让每个镜头达到可直接驱动 Seedance/Kling AI 视频生成的专业品质。
+
+核心原则：
+1. 不改写已有字段内容（非空字段原样返回）。
+2. 优先保留剧本原有措辞、人物关系和动作设计。
+3. 所有文本用中文；只有 cameraDirection 使用英文技术词。
 
 全剧上下文：
 ${params.script}
@@ -38,20 +41,57 @@ ${hintBlock}
 
 当前镜头：
 - 场景描述: ${params.prompt || ""}
-- 首帧: ${params.startFrameDesc || ""}
-- 尾帧: ${params.endFrameDesc || ""}
-- 动作脚本: ${params.motionScript || ""}
-- 运镜: ${params.cameraDirection || ""}
-- 时长: ${params.duration ?? ""}
-- 台词: ${params.dialogues.map((d) => `${d.character}: ${d.text}`).join(" | ")}
+- 首帧: ${params.startFrameDesc || "（待补全）"}
+- 尾帧: ${params.endFrameDesc || "（待补全）"}
+- 动作脚本: ${params.motionScript || "（待补全）"}
+- 运镜: ${params.cameraDirection || "（待补全）"}
+- 时长: ${params.duration ?? ""}s
+- 台词: ${dialogueBlock}
 
+═══ S 级字段规范（仅对「待补全」字段生效）═══
+
+【startFrameDesc / endFrameDesc】——AI 图像生成锚点
+格式：景别/视角 + 角色精确位置和姿态 + 光线来源和质感 + 情绪身体表现（禁用情绪形容词，改用身体解剖细节）
+- startFrameDesc = 动作开始前的静止状态（不写运动）
+- endFrameDesc = 动作完成后的静止状态，必须与 startFrameDesc 不同，体现这个镜头的起止位移
+- 禁止：两帧相同 / 用情绪形容词（"紧张"、"坚定"）替代身体描述
+- 示例：「龙渊（黑甲银纹）侧身，右手刚离开地图伸向剑柄，尚未握住；侧面低角度，逆光轮廓清晰，眉心一道细纹」
+
+【motionScript】——时间分段动作脚本
+格式：「0-Xs: [动作]. Xs-Ys: [动作]. ...」每段最多 3 秒
+要求：每段同时写 ①身体哪个关节在动（具体到骨节/肌肉）②环境反应 ③摄影机运动（起幅→动作→落幅）④物理细节（声音/光线/材质）
+
+【videoScript】——Seedance AI 视频生成主驱动（最重要字段）
+四要素公式（缺一不可）：
+① 角色名（视觉ID字符串）+ 在画面中的精确位置/姿态
+② 单一动词驱动：围绕一个核心动作（禁止同时写多个动作）
+③ 摄影机公式：起幅构图 + 运镜动作 + 速度 + 落幅构图
+④ 单一感官细节：光线颜色/来源，或粒子/材质质感，或声音质感（只选其一）
+字数：30-60 字，流畅散文，无段落标签，无台词文本
+
+${hasDialogue ? `⚠️ 本镜头有台词，videoScript 额外必须包含：
+- 角色在画面中的具体位置（左/中/右，站立/坐下，远近）
+- 说话前或说话过程中的一个微动作（头部角度、手的方向、眼神方向、下颌收紧等，解剖学精确）
+- 表情跨镜头的变化弧（不是"神情专注"，而是"眉心在最后一字落下时微微松开"）
+- 摄影机含速度和终点（"镜头从中景缓慢推至颈部以上近景"，不只是"推镜"）` : ""}
+
+禁用模板（出现即失败）：
+- "说话人面部表情随台词情绪流动，神情专注"
+- "中景跟拍：捕捉[XX]动作过程"
+- "特写推镜：捕捉情绪细节"（无具体人物和变化）
+- 超过 80 字
+- 纯摄影机描述无角色动作
+
+【cameraDirection】——英文技术运镜词
+示例：slow dolly in / low-angle tracking shot / rack focus / 360 orbit / handheld chaos / static medium shot
+
+═══════════════════════════════════════════
 请返回一个 JSON 对象，不要加 markdown，不要解释：
 {
-  "startFrameDesc": "如果原值非空则原样返回，否则补全",
-  "endFrameDesc": "如果原值非空则原样返回，否则补全",
-  "motionScript": "如果原值非空则原样返回，否则补全",
-  "videoScript": "补一条 1-2 句的视频动态描述，30-60 字左右",
-  "cameraDirection": "如果原值非空则原样返回，否则补一个最合适的英文运镜词",
-  "duration": ${params.duration ?? 10}
+  "startFrameDesc": "原值非空则原样返回；否则按 S 级规范补全（景别+角色精确位置+光线+身体情绪表现）",
+  "endFrameDesc": "原值非空则原样返回；否则按 S 级规范补全（必须与 startFrameDesc 不同，体现起止位移）",
+  "motionScript": "原值非空则原样返回；否则按时间分段格式补全（每段≤3s，四层并行）",
+  "videoScript": "按 S 级四要素公式补全，30-60 字流畅散文",
+  "cameraDirection": "原值非空则原样返回；否则补具体英文运镜词（带速度和方向）"
 }`;
 }

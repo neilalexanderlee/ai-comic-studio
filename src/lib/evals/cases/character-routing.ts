@@ -18,29 +18,7 @@ import {
   SHOT_SINGLE_CHARACTER,
   CHARACTERS,
 } from "../fixtures/shots";
-
-// ── Inline filterShotCharacters (same spec as the production function) ────────
-
-function extractBaseName(name: string): string {
-  return name.replace(/[（(【\[].+$/, "").trim();
-}
-
-function filterShotCharacters<T extends { name: string }>(
-  shotText: string,
-  allCharacters: T[]
-): T[] {
-  if (allCharacters.length === 0) return [];
-  if (!shotText) return [];
-  const text = shotText.toLowerCase();
-  return allCharacters.filter((c) => {
-    if (!c.name) return false;
-    const fullName = c.name.toLowerCase();
-    const baseName = extractBaseName(c.name).toLowerCase();
-    if (text.includes(fullName)) return true;
-    if (baseName && text.includes(baseName)) return true;
-    return false;
-  });
-}
+import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 
 // ── Eval suite ────────────────────────────────────────────────────────────────
 

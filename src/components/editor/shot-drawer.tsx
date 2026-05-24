@@ -132,7 +132,6 @@ export function ShotDrawer({
   const hasNext = currentIndex < shots.length - 1;
 
   const hasFrame = !!(shot.sceneRefFrame || shot.firstFrame || shot.lastFrame);
-  const hasFramePair = !!(shot.firstFrame && shot.lastFrame);
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
   const localGenerating = generatingFrames || generatingSceneFrame || generatingVideo || generatingPrompt || rewritingText;
@@ -506,7 +505,7 @@ export function ShotDrawer({
               size="xs"
               variant={hasVideoPrompt && !hasVideo ? "default" : "outline"}
               onClick={handleGenerateVideo}
-              disabled={generatingVideo || (generationMode === "keyframe" && !hasFramePair) || anyGenerating}
+              disabled={generatingVideo || (generationMode === "keyframe" && !shot.firstFrame) || anyGenerating}
             >
               {generatingVideo ? <Loader2 className="h-3 w-3 animate-spin" /> : <VideoIcon className="h-3 w-3" />}
               {generatingVideo

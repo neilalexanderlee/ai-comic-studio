@@ -29,7 +29,6 @@ import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
 import { apiFetch } from "@/lib/api-fetch";
 import { toast } from "sonner";
-import { GenerationModeTab } from "@/components/editor/generation-mode-tab";
 import { ShotDrawer } from "@/components/editor/shot-drawer";
 import { CharactersInlinePanel } from "@/components/editor/characters-inline-panel";
 import { ShotKanban } from "@/components/editor/shot-kanban";
@@ -186,7 +185,9 @@ export default function EpisodeStoryboardPage() {
   const shotsWithFrames = project.shots.filter(
     (s) => s.firstFrame && s.lastFrame
   ).length;
-  const generationMode = (project.generationMode || "keyframe") as "keyframe" | "reference";
+  // Storyboard generation now uses one smart keyframe workflow. Shots with only a
+  // first frame fall back to video reference mode automatically on the backend.
+  const generationMode = "keyframe" as "keyframe" | "reference";
   const shotsWithVideo = project.shots.filter((s) =>
     generationMode === "reference" ? s.referenceVideoUrl : s.videoUrl
   ).length;
@@ -195,6 +196,7 @@ export default function EpisodeStoryboardPage() {
   const shotsWithFrameAny = project.shots.filter(
     (s) => s.sceneRefFrame || s.firstFrame || s.lastFrame
   ).length;
+  const shotsReadyForVideo = project.shots.filter((s) => s.firstFrame).length;
   const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
   const hasReferenceImages = charactersWithRefs.length > 0;
 
@@ -670,8 +672,6 @@ export default function EpisodeStoryboardPage() {
       <div className="rounded-2xl border border-[--border-subtle] bg-white p-4 space-y-3">
         {/* Generation mode + version tabs row */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          <GenerationModeTab />
-
           {/* Version tabs */}
           <div className="flex items-center gap-1 flex-wrap">
             {/* Show 2 newest versions — each tab has a delete ✕ on hover */}
@@ -1052,7 +1052,7 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(false)
                   : handleBatchGenerateVideos(false)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsWithFrames === 0)}
+              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsReadyForVideo === 0)}
               variant={shotsWithVideo === totalShots && totalShots > 0 ? "outline" : "default"}
               size="sm"
             >
@@ -1073,7 +1073,7 @@ export default function EpisodeStoryboardPage() {
                   ? handleBatchGenerateReferenceVideos(true)
                   : handleBatchGenerateVideos(true)
               }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsWithFrames === 0)}
+              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsReadyForVideo === 0)}
               variant="ghost"
               size="icon"
               title={t("project.batchGenerateVideosOverwrite")}

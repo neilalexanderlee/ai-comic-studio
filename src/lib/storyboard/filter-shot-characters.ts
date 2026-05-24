@@ -19,6 +19,21 @@ export function extractBaseName(name: string): string {
   return name.replace(/[（(][^）)]*[）)]/g, "").trim();
 }
 
+function extractAge(name: string): string | null {
+  const match = name.match(/(\d+)\s*岁/);
+  return match?.[1] ?? null;
+}
+
+function hasAgeCue(text: string, baseName: string, age: string): boolean {
+  const escapedBase = baseName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`${age}\\s*岁\\s*的?\\s*${escapedBase}`, "i"),
+    new RegExp(`${escapedBase}\\s*[（(]\\s*${age}\\s*岁\\s*[）)]`, "i"),
+    new RegExp(`${escapedBase}\\s*${age}\\s*岁`, "i"),
+  ];
+  return patterns.some((pattern) => pattern.test(text));
+}
+
 /**
  * 从 shot 的文本字段中筛选出被提及的角色列表。
  *
@@ -30,17 +45,62 @@ export function extractBaseName(name: string): string {
  */
 export function filterShotCharacters<T extends { name: string }>(
   shotText: string,
-  allCharacters: T[]
+  allCharacters: T[],
+  options?: { contextText?: string | null }
 ): T[] {
   if (allCharacters.length === 0) return [];
   if (!shotText) return [];
   const text = shotText.toLowerCase();
-  return allCharacters.filter((c) => {
-    if (!c.name) return false;
-    const fullName = c.name.toLowerCase();
-    const baseName = extractBaseName(c.name).toLowerCase();
-    if (text.includes(fullName)) return true;
-    if (baseName && text.includes(baseName)) return true;
-    return false;
-  });
+  const contextText = (options?.contextText ?? "").toLowerCase();
+  const matches: T[] = [];
+  const grouped = new Map<string, T[]>();
+
+  for (const character of allCharacters) {
+    if (!character.name) continue;
+    const baseName = extractBaseName(character.name).toLowerCase();
+    if (!baseName) continue;
+    grouped.set(baseName, [...(grouped.get(baseName) ?? []), character]);
+  }
+
+  for (const [baseName, group] of grouped) {
+    const ageMatches = group.filter((character) => {
+      const age = extractAge(character.name);
+      return age ? hasAgeCue(text, baseName, age) : false;
+    });
+    if (ageMatches.length > 0) {
+      matches.push(...ageMatches);
+      continue;
+    }
+
+    const exactMatches = group.filter((character) =>
+      character.name.toLowerCase() !== baseName && text.includes(character.name.toLowerCase())
+    );
+    if (exactMatches.length > 0) {
+      matches.push(...exactMatches);
+      continue;
+    }
+
+    if (!text.includes(baseName)) continue;
+
+    const defaultVariants = group.filter((character) => !extractAge(character.name));
+    const contextualAgeMatches = contextText
+      ? group.filter((character) => {
+          const age = extractAge(character.name);
+          return age ? hasAgeCue(contextText, baseName, age) : false;
+        })
+      : [];
+    const uniqueContextualAgeMatches = contextualAgeMatches.length === 1
+      ? contextualAgeMatches
+      : [];
+
+    matches.push(
+      ...(uniqueContextualAgeMatches.length > 0
+        ? uniqueContextualAgeMatches
+        : defaultVariants.length > 0
+          ? defaultVariants
+          : group)
+    );
+  }
+
+  return matches;
 }

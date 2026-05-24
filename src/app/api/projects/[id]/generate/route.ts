@@ -35,7 +35,6 @@ import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
   getShotCharacters,
   persistStoryboardVersion,
-  type PersistableShot,
 } from "@/lib/storyboard/persist-storyboard-version";
 import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted-shots";
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
@@ -72,6 +71,81 @@ function isCharacterOnScreen(
 ): boolean {
   const text = `${videoScript} ${startFrameDesc ?? ""}`;
   return text.includes(characterName);
+}
+
+function buildShotCharacterText(shot: {
+  prompt?: string | null;
+  startFrameDesc?: string | null;
+  endFrameDesc?: string | null;
+  motionScript?: string | null;
+  videoScript?: string | null;
+}): string {
+  return [
+    shot.prompt,
+    shot.startFrameDesc,
+    shot.endFrameDesc,
+    shot.motionScript,
+    shot.videoScript,
+  ].filter(Boolean).join(" ");
+}
+
+function hasMeaningfulTailFrame(shot: {
+  startFrameDesc?: string | null;
+  endFrameDesc?: string | null;
+}): boolean {
+  const start = (shot.startFrameDesc ?? "").trim();
+  const end = (shot.endFrameDesc ?? "").trim();
+  if (!end || end.length < 12) return false;
+  if (!start) return true;
+  const normalize = (value: string) => value.replace(/\s+/g, "").replace(/[，。,.；;：:、]/g, "");
+  return normalize(start) !== normalize(end);
+}
+
+function shouldGenerateLastFrameForShot(shot: {
+  prompt?: string | null;
+  startFrameDesc?: string | null;
+  endFrameDesc?: string | null;
+  motionScript?: string | null;
+  videoScript?: string | null;
+  cameraDirection?: string | null;
+  duration?: number | null;
+}, namedCharacterCount: number): { generate: boolean; reason: string } {
+  if (!hasMeaningfulTailFrame(shot)) {
+    return { generate: false, reason: "missing-or-duplicate-tail" };
+  }
+
+  const text = buildShotCharacterText(shot);
+  const camera = shot.cameraDirection ?? "";
+  const combined = `${text} ${camera}`.toLowerCase();
+
+  if (/硬切|跳切|转场|切至|切回|平行切|蒙太奇|闪回|jump cut|cut to|whip pan/i.test(combined)) {
+    return { generate: false, reason: "cut-or-montage-language" };
+  }
+
+  const isEstablishingOrAtmosphere =
+    /全景|远景|大远景|俯拍全景|航拍|环境|空镜|街景|城镇|村庄|森林|山脉|夜空|月亮|篝火|灯笼|浓烟|火光|氛围|establishing|wide shot|crane up/i.test(combined);
+  const hasCrowdOnlyLanguage =
+    /群演|群众|人群|村民|士兵们|孩子们|数十|围观|路人|crowd|extras/i.test(combined);
+  const hasExplicitActionEndpoint =
+    /走到|跑到|转身|回头|抬头|低头|跪下|站起|倒下|摔倒|落下|砸落|打开|关闭|拔出|收剑|举起|放下|握住|抱起|伸出|消失|出现|变成|抵达|停在|定格|完成|最终|最后/i.test(combined);
+  const hasStrongObjectEndpoint =
+    /门|礼盒|瓶|剑|法杖|宝石|火焰|火幕|屋梁|卷轴|旗帜|月饼|产品|道具/i.test(combined) && hasExplicitActionEndpoint;
+
+  if (namedCharacterCount > 0) {
+    return { generate: true, reason: "named-character-tail-control" };
+  }
+
+  if (hasStrongObjectEndpoint) {
+    return { generate: true, reason: "object-or-action-tail-control" };
+  }
+
+  if (isEstablishingOrAtmosphere || hasCrowdOnlyLanguage || (shot.duration ?? 0) <= 8) {
+    return { generate: false, reason: "first-frame-video-sufficient" };
+  }
+
+  return hasExplicitActionEndpoint
+    ? { generate: true, reason: "explicit-action-tail-control" }
+    : { generate: false, reason: "no-tail-control-benefit" };
 }
 
 
@@ -785,14 +859,66 @@ async function handleShotSplitStream(
     );
   }
 
+  const shotCharacters = await getShotCharacters(projectId, episodeId);
+
+  // 若前端传入 targetVersionId，验证它确实属于本项目+本集，防止跨项目 shot 清除
+  let verifiedTargetVersionId: string | null = null;
+  if (options?.targetVersionId) {
+    const versionWhereClause = episodeId
+      ? and(
+          eq(storyboardVersions.projectId, projectId),
+          eq(storyboardVersions.episodeId, episodeId),
+          eq(storyboardVersions.id, options.targetVersionId)
+        )
+      : and(
+          eq(storyboardVersions.projectId, projectId),
+          eq(storyboardVersions.id, options.targetVersionId)
+        );
+    const [verifiedVersion] = await db
+      .select({ id: storyboardVersions.id })
+      .from(storyboardVersions)
+      .where(versionWhereClause)
+      .limit(1);
+    if (verifiedVersion) {
+      verifiedTargetVersionId = verifiedVersion.id;
+    } else {
+      console.warn(`[ShotSplit] targetVersionId ${options.targetVersionId} not found in project ${projectId} — creating new version instead`);
+    }
+  }
+
+  // Structured storyboard path: preserve author-authored shot boundaries and exact
+  // timecode durations. LLM splitting is only for unstructured scripts, because it
+  // may rebalance duration even when the screenplay already has explicit timings.
+  if (!options?.forceAi) {
+    const extracted = extractShotsFromScript(script);
+    if (extracted.detection.matched && extracted.shots.length > 0) {
+      const persistableShots = finalizeExtractedShotsForDb(extracted.shots);
+      const { versionId: persistedVersionId } = await persistStoryboardVersion({
+        projectId,
+        episodeId: episodeId ?? null,
+        shotCharacters,
+        shots: persistableShots,
+        existingVersionId: verifiedTargetVersionId,
+      });
+      const totalDuration = persistableShots.reduce((sum, shot) => sum + (shot.duration ?? 0), 0);
+      console.log(
+        `[ShotSplit] Structured extraction: ${persistableShots.length} shots, ${totalDuration}s total, version=${persistedVersionId}`
+      );
+      return NextResponse.json({
+        shots: persistableShots.length,
+        mode: "extracted",
+        versionId: persistedVersionId,
+        warnings: extracted.warnings,
+      });
+    }
+  }
+
   if (!modelConfig?.text) {
     return NextResponse.json(
       { error: "No text model configured" },
       { status: 400 }
     );
   }
-
-  const shotCharacters = await getShotCharacters(projectId, episodeId);
 
   const characterDescriptions = shotCharacters
     .map((c) => `${c.name}: ${c.description}`)
@@ -840,9 +966,6 @@ async function handleShotSplitStream(
     cameraDirection?: string;
   };
 
-  // 始终走 LLM S 级 shot_split 路径，保证分镜质量达到电影级标准。
-  // 快速路径（extractShotsFromScript）已废弃：它只是照抄剧本内容，
-  // 无法补全运镜、首尾帧四要素、videoScript 等 S 级必要字段。
   console.log(`[ShotSplit] Using LLM with S-grade system prompt (script length=${fullScript.length})`);
 
 
@@ -915,7 +1038,7 @@ async function handleShotSplitStream(
   );
 
   // Merge and re-sequence
-  let allShots = chunkResults.flat();
+  const allShots = chunkResults.flat();
   allShots.forEach((s, i) => { s.sequence = i + 1; });
 
   if (allShots.length === 0) {
@@ -929,31 +1052,6 @@ async function handleShotSplitStream(
   if (targetDurationSeconds) {
     const actualDuration = allShots.reduce((s, shot) => s + (shot.duration ?? 0), 0);
     console.log(`[ShotSplit] Duration: ${actualDuration}s / ${targetDurationSeconds}s target (${allShots.length} shots)`);
-  }
-
-  // 若前端传入 targetVersionId，验证它确实属于本项目+本集，防止跨项目 shot 清除
-  let verifiedTargetVersionId: string | null = null;
-  if (options?.targetVersionId) {
-    const versionWhereClause = episodeId
-      ? and(
-          eq(storyboardVersions.projectId, projectId),
-          eq(storyboardVersions.episodeId, episodeId),
-          eq(storyboardVersions.id, options.targetVersionId)
-        )
-      : and(
-          eq(storyboardVersions.projectId, projectId),
-          eq(storyboardVersions.id, options.targetVersionId)
-        );
-    const [verifiedVersion] = await db
-      .select({ id: storyboardVersions.id })
-      .from(storyboardVersions)
-      .where(versionWhereClause)
-      .limit(1);
-    if (verifiedVersion) {
-      verifiedTargetVersionId = verifiedVersion.id;
-    } else {
-      console.warn(`[ShotSplit] targetVersionId ${options.targetVersionId} not found in project ${projectId} — creating new version instead`);
-    }
   }
 
   const { versionId: persistedVersionId } = await persistStoryboardVersion({
@@ -974,9 +1072,9 @@ async function handleShotSplitStream(
     existingVersionId: verifiedTargetVersionId,
   });
 
-  console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks${verifiedTargetVersionId ? ` (reused version ${verifiedTargetVersionId})` : ""}`);
+  console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks, version=${persistedVersionId}${verifiedTargetVersionId ? ` (reused version ${verifiedTargetVersionId})` : ""}`);
 
-  return NextResponse.json({ shots: allShots.length });
+  return NextResponse.json({ shots: allShots.length, versionId: persistedVersionId });
 }
 
 async function handleShotExtractPreview(projectId: string, episodeId?: string) {
@@ -1108,37 +1206,75 @@ async function handleSingleShotRewrite(
 
   const model = createLanguageModel(modelConfig.text);
 
-  const prompt = `You are an S-rank storyboard director for theatrical-quality animated short films. Rewrite the fields for a single shot to reach S-grade production quality AND avoid AI content filter triggers.
+  const prompt = `你是一位 S 级漫剧分镜导演，专门为 Seedance/Kling AI 视频生成模型改写分镜，使其达到院线级制作品质。保持原有场景、人物和叙事意图不变，只提升字段质量。
 
-${rewriteVisualStyleTag ? `PROJECT ART STYLE (MANDATORY — preserve in all descriptions): ${rewriteVisualStyleTag}` : ""}
+${rewriteVisualStyleTag ? `【画风硬锁，最高优先级，所有描述必须遵守】：${rewriteVisualStyleTag}` : ""}
 
-Current shot (sequence ${shot.sequence}):
-- Scene description: ${shot.prompt || ""}
-- Start frame: ${shot.startFrameDesc || ""}
-- End frame: ${shot.endFrameDesc || ""}
-- Motion script: ${shot.motionScript || ""}
-- Video script: ${shot.videoScript || ""}
-- Camera direction: ${shot.cameraDirection || "static"}
-- Duration: ${shot.duration}s
+当前镜头（序号 ${shot.sequence}，时长 ${shot.duration}s）：
+- 场景描述: ${shot.prompt || ""}
+- 首帧: ${shot.startFrameDesc || ""}
+- 尾帧: ${shot.endFrameDesc || ""}
+- 动作脚本: ${shot.motionScript || ""}
+- 视频脚本: ${shot.videoScript || ""}
+- 运镜: ${shot.cameraDirection || "static"}
 
-${characterDescriptions ? `Character references:\n${characterDescriptions}` : ""}
-${characterVisualHints ? `\nCHARACTER VISUAL IDs (MANDATORY — use these exact identifiers in parentheses on first mention, e.g. 天枢真君（银发金瞳）. Never invent alternatives):\n${characterVisualHints}` : ""}
+${characterDescriptions ? `角色参考：\n${characterDescriptions}` : ""}
+${characterVisualHints ? `\n角色视觉ID（必须在首次提及时括号标注，例如「龙渊（黑甲银纹琥珀眼）」，严禁自创替代词）：\n${characterVisualHints}` : ""}
 
-Return ONLY a JSON object (no markdown fences) with these fields:
+═══ S 级字段规范 ═══
+
+【videoScript】——最重要字段，直接驱动 AI 视频生成
+四要素公式（缺一不可）：
+① 角色名（视觉ID字符串）+ 在画面中的精确位置/姿态
+② 单一动词驱动：围绕一个核心动作（禁止同时写多个动作）
+③ 摄影机公式：起幅构图 + 运镜动作 + 速度 + 落幅构图
+④ 单一感官细节：光线颜色/来源，或粒子/材质质感，或声音质感（只选其一）
+字数：30-60 字，流畅散文，无段落标签，无台词文本
+
+对白镜头额外要求：
+- 角色在画面中的具体位置（左/中/右，站/坐，远近）
+- 说话前或说话过程中的一个微动作（头部角度、手的方向、眼神方向、下颌收紧——解剖学精确）
+- 表情跨镜头的变化弧（不是"神情专注"，而是"眉心在最后一字落下时微微松开"）
+- 摄影机含速度和终点（"镜头从中景缓慢推至颈部以上近景"，不只是"推镜"）
+
+动作/战斗镜头额外要求：
+- 武器/技能视觉特征：刃色、能量轨迹颜色和形状、粒子类型
+- 身体动量：哪只脚踏地、身体向哪侧倾、跟随弧线
+- 冲击/结果的单一视觉：火花颜色、冲击波半径、碎片轨迹
+
+微表情词汇库（替代情绪形容词，用身体解剖描述情绪）：
+手部：关节泛白（握拳时）/ 指尖微颤（紧张/愤怒压制）/ 拇指无意识摩挲（焦虑）/ 手指逐一单独放下（从紧绷到放松）
+面部：下颌角收紧/线条冷硬（压制情绪）/ 喉结轻动（吞咽/压抑）/ 眼睑轻颤（极度压制）/ 嘴角先抿紧再微开（想说又忍住）/ 眉心细纹（苦涩/凝重）
+姿态：肩线细微收紧/某侧肩膀下沉（承压）/ 脊背微微挺直（拿定主意）/ 步伐第N步比N-1步稍慢半拍（情绪扰动）
+
+【startFrameDesc / endFrameDesc】——AI 图像生成锚点
+格式：景别/视角 + 角色精确位置和姿态 + 光线来源和质感 + 情绪身体表现（禁用情绪形容词）
+- startFrameDesc = 动作开始前的静止状态
+- endFrameDesc = 动作完成后的静止状态，必须与 startFrameDesc 不同，体现这个镜头的起止位移
+- 物理规律：受重力物体（灯笼/旗帜/布料）只能向下垂挂或随风飘展，不能"延伸至四角"或"辐射"
+- 禁止：两帧相同 / 用情绪形容词替代身体描述 / mid-motion 的不稳定状态做尾帧
+
+【motionScript】——时间分段动作脚本
+格式：「0-Xs: [动作]. Xs-Ys: [动作].」每段最多 3 秒
+每段同时写：①身体哪个关节在动 ②环境反应 ③摄影机运动（起幅→动作→落幅）④物理细节
+
+═══ 绝对禁用模板（出现即判失败）═══
+- "说话人面部表情随台词情绪流动，神情专注"
+- "中景跟拍：捕捉[XX]动作过程"
+- "特写推镜：捕捉情绪细节"
+- "角色情绪丰富" / "神情坚定" / "眼神复杂"（抽象情绪词替代身体描述）
+- videoScript 超过 80 字
+- videoScript 只有摄影机描述、无角色动作
+
+仅返回 JSON 对象（无 markdown，无注释）：
 {
-  "prompt": "Scene/environment: setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood",
-  "startFrameDesc": "Static opening frame composition — character position/posture/expression BEFORE action begins, ambient lighting, environment. 40-60 words. Physical reality: objects obey gravity, camera matches cameraDirection.",
-  "endFrameDesc": "Static closing frame composition — character position/posture/expression AFTER action completes, stable pose. 40-60 words. Same physical reality rules.",
-  "motionScript": "Time-segmented action script: 0s-Xs: [precise body mechanics], Xs-Ys: [continuation], final Zs: [resolution]. Anatomically specific (which joint, which direction, force level).",
-  "videoScript": "S-grade Seedance 2.0 prose (30-60 words, NO section labels): ① character name (visual-id) + precise current position/posture ② ONE action verb with anatomical detail (which joint, arc direction, force) ③ camera: opening-composition → speed+method → closing-composition ④ ONE sharp atmospheric detail (light color+source+position, or particle/mist motion). DIALOGUE SHOTS additionally require: exact frame position, ONE pre-speech micro-action (head tilt angle / jaw set / eye direction), expression arc across shot.",
-  "cameraDirection": "Specific camera instruction with speed and endpoint (e.g. '缓慢推至颈部以上近景' not just '推镜')"
-}
-
-CRITICAL RULES:
-- Keep identical scene, characters, and narrative intent — only improve quality and rephrase to avoid safety triggers
-- videoScript must be 30-60 words of seamless prose — NOT a template, NOT a list
-- Physical reality: objects subject to gravity hang/fall straight down; no impossible spatial relationships
-- Match language of the original text (中文→中文, English→English)`;
+  "prompt": "场景/环境描述：地点、建筑、道具、天气、时间、光线设置、色调、氛围",
+  "startFrameDesc": "首帧静止构图：景别+视角，角色精确位置/姿态/光线/情绪身体表现，动作开始前状态",
+  "endFrameDesc": "尾帧静止构图：景别+视角，角色精确位置/姿态/光线，动作完成后稳定状态（必须与首帧不同）",
+  "motionScript": "时间分段动作脚本：0-Xs: [关节+环境+镜头+物理]. Xs-Ys: [续]. 每段≤3s",
+  "videoScript": "S级四要素散文，30-60字，无段落标签",
+  "cameraDirection": "具体运镜词含速度和终点（如'缓慢推至颈部以上近景'，不只是'推镜'）"
+}`;
 
   console.log(`[SingleShotRewrite] Shot ${shot.sequence} prompt length=${prompt.length}`);
 
@@ -1399,7 +1535,13 @@ async function handleBatchFrameGenerate(
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
 
   const overwrite = payload?.overwrite === true;
-  const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
+  const frameCharacterContext = allShots.map(buildShotCharacterText).join("\n");
+  const needProcess = allShots.filter((s) => {
+    if (overwrite || !s.firstFrame) return true;
+    const shotChars = filterShotCharacters(buildShotCharacterText(s), frameCharacters, { contextText: frameCharacterContext });
+    const tailDecision = shouldGenerateLastFrameForShot(s, shotChars.length);
+    return tailDecision.generate && !s.lastFrame;
+  });
   const skipCount = allShots.length - needProcess.length;
 
   console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}, style: ${batchVisualStyleTag || "auto"}`);
@@ -1415,7 +1557,7 @@ async function handleBatchFrameGenerate(
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
-    userId, projectId, skipCount, batchVisualStyleTag,
+    userId, projectId, skipCount, batchVisualStyleTag, frameCharacterContext,
     enhancePrompts, batchTextProvider, batchImageProtocol,
   };
 
@@ -1424,7 +1566,7 @@ async function handleBatchFrameGenerate(
     async start(controller) {
       const { allShots, copiedFirstFrame, overwrite, frameCharacters,
               frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
-              enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
+              frameCharacterContext, enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
 
       function emit(data: object) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
@@ -1437,7 +1579,9 @@ async function handleBatchFrameGenerate(
       for (let i = 0; i < allShots.length; i++) {
         const shot = allShots[i];
 
-        if (!overwrite && shot.firstFrame && shot.lastFrame) {
+        const existingShotChars = filterShotCharacters(buildShotCharacterText(shot), frameCharacters, { contextText: frameCharacterContext });
+        const existingTailDecision = shouldGenerateLastFrameForShot(shot, existingShotChars.length);
+        if (!overwrite && shot.firstFrame && (!existingTailDecision.generate || shot.lastFrame)) {
           // Prefer seedanceLastFrame (actual video last frame) for chain continuity
           previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
@@ -1454,14 +1598,14 @@ async function handleBatchFrameGenerate(
           let firstFramePath: string;
 
           // 群演→主角切换检测：上一分镜无命名角色、当前分镜有命名角色时打断继承链，独立生成首帧
-          const batchCurrentShotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-          const batchCurrentShotChars = filterShotCharacters(batchCurrentShotText, frameCharacters);
+          const batchCurrentShotText = buildShotCharacterText(shot);
+          const batchCurrentShotChars = filterShotCharacters(batchCurrentShotText, frameCharacters, { contextText: frameCharacterContext });
           const batchPrevShot = i > 0 ? allShots[i - 1] : null;
           const batchPrevShotText = batchPrevShot
-            ? [batchPrevShot.prompt, batchPrevShot.motionScript, batchPrevShot.videoScript].filter(Boolean).join(" ")
+            ? buildShotCharacterText(batchPrevShot)
             : "";
           const batchPrevShotChars = batchPrevShot
-            ? filterShotCharacters(batchPrevShotText, frameCharacters)
+            ? filterShotCharacters(batchPrevShotText, frameCharacters, { contextText: frameCharacterContext })
             : [];
           const isCrowdToCharCutBatch = batchPrevShotChars.length === 0 && batchCurrentShotChars.length > 0;
 
@@ -1499,22 +1643,21 @@ async function handleBatchFrameGenerate(
             firstFramePath = previousLastFrame;
           }
 
-          // CROWD SHOT: no named characters → skip lastFrame generation.
-          // Video generation will auto-detect no lastFrame → reference mode (initialImage only).
-          // Seedance returns the actual video end frame, which becomes lastFrame after video generation.
-          if (batchCurrentShotChars.length === 0) {
+          const tailDecision = shouldGenerateLastFrameForShot(shot, batchCurrentShotChars.length);
+          // Shots whose tail frame adds little control value use first-frame video mode.
+          if (!tailDecision.generate) {
             await db.update(shots).set({ firstFrame: firstFramePath, status: "completed" }).where(eq(shots.id, shot.id));
-            previousLastFrame = undefined; // don't inherit crowd frame into next shot's chain
+            previousLastFrame = undefined; // wait for Seedance return_last_frame before chaining
             okCount++;
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed — crowd shot, skipping lastFrame (${elapsed}s)`);
-            emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath });
+            console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed — first-frame only (${tailDecision.reason}, ${elapsed}s)`);
+            emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath, frameMode: "first-only", reason: tailDecision.reason });
             continue;
           }
 
           // Character shot: generate lastFrame as usual
-          const shotText2 = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-          const shotChars2 = filterShotCharacters(shotText2, frameCharacters);
+          const shotText2 = buildShotCharacterText(shot);
+          const shotChars2 = filterShotCharacters(shotText2, frameCharacters, { contextText: frameCharacterContext });
           const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
           await saveShotWarnings(shot.id, resolvedChars2);
           // Build character descriptions with visualHint for characters in THIS shot
@@ -1601,13 +1744,29 @@ async function handleSingleFrameGenerate(
 
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
+  const siblingShotsForContext = shot.versionId
+    ? await db
+        .select()
+        .from(shots)
+        .where(and(eq(shots.projectId, projectId), eq(shots.versionId, shot.versionId)))
+        .orderBy(asc(shots.sequence))
+    : shotEpisodeId
+      ? await db
+          .select()
+          .from(shots)
+          .where(and(eq(shots.projectId, projectId), eq(shots.episodeId, shotEpisodeId)))
+          .orderBy(asc(shots.sequence))
+      : await db
+          .select()
+          .from(shots)
+          .where(eq(shots.projectId, projectId))
+          .orderBy(asc(shots.sequence));
+  const singleFrameCharacterContext = siblingShotsForContext.map(buildShotCharacterText).join("\n");
 
   // Filter to only the characters mentioned in this shot's text —
   // avoids injecting every episode character's reference image into unrelated frames.
-  const shotText = [shot.prompt, shot.startFrameDesc, shot.motionScript, shot.videoScript]
-    .filter(Boolean)
-    .join(" ");
-  const shotCharacters = filterShotCharacters(shotText, projectCharacters);
+  const shotText = buildShotCharacterText(shot);
+  const shotCharacters = filterShotCharacters(shotText, projectCharacters, { contextText: singleFrameCharacterContext });
   // Use only characters mentioned in this shot — if none matched (crowd scene / no named chars),
   // pass an empty list so no ref images are injected.
   const charsForFrame = shotCharacters;
@@ -1770,10 +1929,10 @@ async function handleSingleFrameGenerate(
     let firstFramePath: string;
     // disableChaining is read from payload above (hoisted before frameTarget checks)
     const prevShotTextSingle = previousShot
-      ? [previousShot.prompt, previousShot.motionScript, previousShot.videoScript].filter(Boolean).join(" ")
+      ? buildShotCharacterText(previousShot)
       : "";
     const prevShotCharsSingle = previousShot
-      ? filterShotCharacters(prevShotTextSingle, projectCharacters)
+      ? filterShotCharacters(prevShotTextSingle, projectCharacters, { contextText: singleFrameCharacterContext })
       : [];
     const isCrowdToCharCutSingle = prevShotCharsSingle.length === 0 && charsForFrame.length > 0;
     const shouldChainSingle = !disableChaining && !!previousShot?.lastFrame && !isCrowdToCharCutSingle;
@@ -1805,15 +1964,15 @@ async function handleSingleFrameGenerate(
       });
     }
 
-    // CROWD SHOT (no named characters): skip lastFrame — video generation will use reference mode.
-    // Seedance returns the actual video end frame after generation, which becomes lastFrame then.
-    if (charsForFrame.length === 0) {
-      console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: crowd shot — skipping lastFrame, video will use reference mode`);
+    const tailDecision = shouldGenerateLastFrameForShot(shot, charsForFrame.length);
+    // If the tail frame won't add useful control, keep this as first-frame video mode.
+    if (!tailDecision.generate) {
+      console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: first-frame only (${tailDecision.reason})`);
       await db
         .update(shots)
         .set({ firstFrame: firstFramePath, status: "completed" })
         .where(eq(shots.id, shotId));
-      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
+      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok", frameMode: "first-only", reason: tailDecision.reason });
     }
 
     // Character shot: generate lastFrame as usual
@@ -1883,20 +2042,36 @@ async function handleSingleVideoGenerate(
 
   const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
 
-  const shotCharacters = await db
-    .select()
-    .from(characters)
-    .where(eq(characters.projectId, shot.projectId));
+  const shotCharacters = await getEpisodeCharacters(projectId, shot.episodeId);
+  const singleVideoSiblingShots = shot.versionId
+    ? await db
+        .select()
+        .from(shots)
+        .where(and(eq(shots.projectId, projectId), eq(shots.versionId, shot.versionId)))
+        .orderBy(asc(shots.sequence))
+    : shot.episodeId
+      ? await db
+          .select()
+          .from(shots)
+          .where(and(eq(shots.projectId, projectId), eq(shots.episodeId, shot.episodeId)))
+          .orderBy(asc(shots.sequence))
+      : await db
+          .select()
+          .from(shots)
+          .where(eq(shots.projectId, projectId))
+          .orderBy(asc(shots.sequence));
+  const singleVideoCharacterContext = singleVideoSiblingShots.map(buildShotCharacterText).join("\n");
   const characterDescriptions = shotCharacters
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
   // Detect crowd shot: no named characters in this shot's text → use reference mode
-  const singleVideoShotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-  const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters);
+  const singleVideoShotText = buildShotCharacterText(shot);
+  const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters, { contextText: singleVideoCharacterContext });
   const isSingleVideoCrowdShot = singleVideoShotChars.length === 0;
+  const useSingleVideoReferenceMode = isSingleVideoCrowdShot || !shot.lastFrame;
 
-  if (!isSingleVideoCrowdShot && !shot.lastFrame) {
+  if (!useSingleVideoReferenceMode && !shot.lastFrame) {
     return NextResponse.json({ error: "Shot last frame not generated yet" }, { status: 400 });
   }
 
@@ -1965,10 +2140,10 @@ async function handleSingleVideoGenerate(
     // vision-informed, model-specific prompt — use it directly without re-enhancement.
     // Only build from scratch + enhance when no pre-generated prompt exists.
     const hasPreGeneratedPrompt = !!shot.videoPrompt;
-    // Crowd shots: use reference prompt (no frame anchors, model freely generates ending)
-    // Character shots: use keyframe prompt (with startFrameDesc/endFrameDesc interpolation anchors)
+    // Reference-mode shots use only the first frame as the initial image. This covers
+    // crowd shots and any shot that intentionally has no generated lastFrame.
     const videoPromptRaw = shot.videoPrompt || (
-      isSingleVideoCrowdShot
+      useSingleVideoReferenceMode
         ? buildReferenceVideoPrompt({
             videoScript,
             cameraDirection: shot.cameraDirection || "static",
@@ -1997,8 +2172,8 @@ async function handleSingleVideoGenerate(
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
-    // Crowd shots use reference mode (initialImage = firstFrame only).
-    // Character shots use keyframe mode (firstFrame + lastFrame).
+    // Shots without lastFrame use reference mode (initialImage = firstFrame only).
+    // Full frame-pair shots use keyframe mode (firstFrame + lastFrame).
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
         remoteVideoUrl: videoUrl,
@@ -2009,7 +2184,7 @@ async function handleSingleVideoGenerate(
       }).where(eq(shots.id, shotId));
     };
     const result = await videoProvider.generateVideo(
-      isSingleVideoCrowdShot
+      useSingleVideoReferenceMode
         ? { initialImage: shot.firstFrame, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
         : { firstFrame: shot.firstFrame, lastFrame: shot.lastFrame!, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
     );
@@ -2017,9 +2192,9 @@ async function handleSingleVideoGenerate(
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
     await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "重新生成前");
 
-    // For crowd shots: save the actual video last frame (from Seedance return_last_frame) as lastFrame.
+    // For reference-mode shots: save the actual video last frame (from Seedance return_last_frame) as lastFrame.
     let singleLastFrameUpdate: Record<string, unknown> = {};
-    if (isSingleVideoCrowdShot && result.lastFrameUrl) {
+    if (useSingleVideoReferenceMode && result.lastFrameUrl) {
       try {
         const fs = await import("node:fs");
         const nodePath = await import("node:path");
@@ -2031,10 +2206,10 @@ async function handleSingleVideoGenerate(
           const framePath = nodePath.join(framesDir, `${shotId}_lastframe.png`);
           fs.writeFileSync(framePath, buffer);
           singleLastFrameUpdate = { lastFrame: framePath, seedanceLastFrame: framePath };
-          console.log(`[SingleVideoGenerate] Crowd shot ${shotId}: saved video last frame → ${framePath}`);
+          console.log(`[SingleVideoGenerate] Reference-mode shot ${shotId}: saved video last frame → ${framePath}`);
         }
       } catch (frameErr) {
-        console.warn(`[SingleVideoGenerate] Crowd shot ${shotId}: failed to save last frame:`, frameErr);
+        console.warn(`[SingleVideoGenerate] Reference-mode shot ${shotId}: failed to save last frame:`, frameErr);
       }
     }
 
@@ -2080,20 +2255,21 @@ async function handleBatchVideoGenerate(
 
   const overwrite = payload?.overwrite === true;
   const batchCharacters = await getEpisodeCharacters(projectId, episodeId);
+  const batchVideoCharacterContext = allShots.map(buildShotCharacterText).join("\n");
 
   // Pre-detect crowd shots so we can include them in eligible list even without lastFrame
   const isCrowdShotMap = new Map<string, boolean>();
   for (const s of allShots) {
-    const shotText = [s.prompt, s.motionScript, s.videoScript].filter(Boolean).join(" ");
-    const shotNamedChars = filterShotCharacters(shotText, batchCharacters);
+    const shotText = buildShotCharacterText(s);
+    const shotNamedChars = filterShotCharacters(shotText, batchCharacters, { contextText: batchVideoCharacterContext });
     isCrowdShotMap.set(s.id, shotNamedChars.length === 0);
   }
 
   const eligible = allShots.filter((s) => {
     if (!s.firstFrame) return false;
     if (overwrite || !s.videoUrl) {
-      // Crowd shots only need firstFrame; character shots need both frames
-      return isCrowdShotMap.get(s.id) ? true : !!s.lastFrame;
+      // Shots with only firstFrame are generated in reference mode; full pairs use keyframe mode.
+      return true;
     }
     return false;
   });
@@ -2173,10 +2349,11 @@ async function handleBatchVideoGenerate(
         });
 
         const isBatchCrowdShot = isCrowdShotMap.get(shot.id) ?? false;
+        const useBatchReferenceMode = isBatchCrowdShot || !shot.lastFrame;
         const batchHasPreGenPrompt = !!shot.videoPrompt;
-        // Crowd shots: reference prompt (no frame anchors); Character shots: keyframe prompt with anchors
+        // Reference-mode shots: no tail-frame anchor; frame-pair shots: keyframe prompt with anchors.
         const videoPromptRaw = shot.videoPrompt || (
-          isBatchCrowdShot
+          useBatchReferenceMode
             ? buildReferenceVideoPrompt({
                 videoScript,
                 cameraDirection: shot.cameraDirection || "static",
@@ -2216,7 +2393,7 @@ async function handleBatchVideoGenerate(
         };
 
         const result = await videoProvider.generateVideo(
-          isBatchCrowdShot
+          useBatchReferenceMode
             ? {
                 initialImage: shot.firstFrame!,
                 prompt: videoPrompt,
@@ -2236,9 +2413,9 @@ async function handleBatchVideoGenerate(
               }
         );
 
-        // Crowd shots: save actual video last frame (from Seedance return_last_frame) as lastFrame
+        // Reference-mode shots: save actual video last frame (from Seedance return_last_frame) as lastFrame
         let batchLastFrameUpdate: Record<string, unknown> = {};
-        if (isBatchCrowdShot && result.lastFrameUrl) {
+        if (useBatchReferenceMode && result.lastFrameUrl) {
           try {
             const batchFs = await import("node:fs");
             const batchNodePath = await import("node:path");
@@ -2250,10 +2427,10 @@ async function handleBatchVideoGenerate(
               const framePath = batchNodePath.join(framesDir, `${shot.id}_lastframe.png`);
               batchFs.writeFileSync(framePath, buffer);
               batchLastFrameUpdate = { lastFrame: framePath, seedanceLastFrame: framePath };
-              console.log(`[BatchVideoGenerate] Crowd shot ${shot.sequence}: saved video last frame → ${framePath}`);
+              console.log(`[BatchVideoGenerate] Reference-mode shot ${shot.sequence}: saved video last frame → ${framePath}`);
             }
           } catch (frameErr) {
-            console.warn(`[BatchVideoGenerate] Crowd shot ${shot.sequence}: failed to save last frame:`, frameErr);
+            console.warn(`[BatchVideoGenerate] Reference-mode shot ${shot.sequence}: failed to save last frame:`, frameErr);
           }
         }
 
@@ -2265,7 +2442,7 @@ async function handleBatchVideoGenerate(
           .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...batchLastFrameUpdate })
           .where(eq(shots.id, shot.id));
 
-        console.log(`[BatchVideoGenerate] Shot ${shot.sequence} completed${isBatchCrowdShot ? " [crowd→reference mode]" : ""}`);
+        console.log(`[BatchVideoGenerate] Shot ${shot.sequence} completed${useBatchReferenceMode ? " [reference mode]" : ""}`);
         return { shotId: shot.id, sequence: shot.sequence, status: "ok", videoUrl: result.filePath };
       } catch (err) {
         console.error(`[BatchVideoGenerate] Error for shot ${shot.sequence}:`, err);
@@ -2352,6 +2529,7 @@ async function handleBatchChainGenerate(
   const chainTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
   const chainImageProtocol = modelConfig?.image?.protocol ?? "";
   const chainVideoProtocol = modelConfig?.video?.protocol ?? "";
+  const chainCharacterContext = allShots.map(buildShotCharacterText).join("\n");
 
   // Slot contents
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
@@ -2402,8 +2580,8 @@ async function handleBatchChainGenerate(
           let firstFramePath: string;
 
           // Compute current shot's named characters for smart chain-break decision
-          const shotText = [shot.prompt, shot.motionScript, shot.videoScript].filter(Boolean).join(" ");
-          const shotChars = filterShotCharacters(shotText, chainCharacters);
+          const shotText = buildShotCharacterText(shot);
+          const shotChars = filterShotCharacters(shotText, chainCharacters, { contextText: chainCharacterContext });
 
           // Smart chain-break: if the previous shot was a crowd/establishing scene (no named
           // characters) and the current shot introduces named characters, generating the first
@@ -2411,9 +2589,9 @@ async function handleBatchChainGenerate(
           // inheriting a crowd image and asking the model to morph it into a character shot.
           const prevShot = i > 0 ? allShots[i - 1] : null;
           const prevShotText = prevShot
-            ? [prevShot.prompt, prevShot.motionScript, prevShot.videoScript].filter(Boolean).join(" ")
+            ? buildShotCharacterText(prevShot)
             : "";
-          const prevShotChars = prevShot ? filterShotCharacters(prevShotText, chainCharacters) : [];
+          const prevShotChars = prevShot ? filterShotCharacters(prevShotText, chainCharacters, { contextText: chainCharacterContext }) : [];
           const isCrowdToCharacterCut = prevShotChars.length === 0 && shotChars.length > 0;
 
           const shouldChain = !isCrowdToCharacterCut && i > 0 && !!chainPreviousFrame;
@@ -2532,7 +2710,7 @@ async function handleBatchChainGenerate(
 
           // 只传与本镜头相关的角色（过滤无关角色），并附带 description 以保留服装信息
           // 若无匹配（群演/无名角色镜头），传空列表而非全部角色
-          const shotCharsForVideo = filterShotCharacters(videoScript, chainCharacters);
+          const shotCharsForVideo = filterShotCharacters(videoScript, chainCharacters, { contextText: chainCharacterContext });
           const videoCharacters = shotCharsForVideo.map((c) => ({
             name: c.name,
             visualHint: c.visualHint,

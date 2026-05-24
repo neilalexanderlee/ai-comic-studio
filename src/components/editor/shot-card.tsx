@@ -258,7 +258,6 @@ export function ShotCard({
   // Derived state
   const hasText = !!(prompt || startFrameDesc || motionScript);
   const hasFrame = !!(sceneRefFrame || firstFrame || lastFrame);
-  const hasFramePair = !!(firstFrame && lastFrame);
   const hasVideoPrompt = !!videoPrompt;
   const hasVideo = !!videoUrl;
   const remoteExpiresAtMs = remoteVideoExpiresAt ? new Date(remoteVideoExpiresAt).getTime() : null;
@@ -1066,7 +1065,7 @@ export function ShotCard({
               size="xs"
               variant={nextStep === "video" ? "default" : "outline"}
               onClick={handleGenerateVideo}
-              disabled={generatingVideo || batchGeneratingVideos || isGenerating || enhancingVideo || (generationMode === "keyframe" && !hasFramePair)}
+              disabled={generatingVideo || batchGeneratingVideos || isGenerating || enhancingVideo || (generationMode === "keyframe" && !firstFrame)}
             >
               {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
                 ? <Loader2 className="h-3 w-3 animate-spin" />

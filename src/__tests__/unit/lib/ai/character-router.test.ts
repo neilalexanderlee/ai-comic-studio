@@ -6,32 +6,8 @@
  * should receive an empty array so that no reference images are injected.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// ── Inline the logic under test so we can test it without DB ─────────────────
-// The real filterShotCharacters lives inside generate/route.ts (module-private).
-// We duplicate it here as the canonical tested specification.
-
-function extractBaseName(name: string): string {
-  return name.replace(/[（(【\[].+$/, "").trim();
-}
-
-function filterShotCharacters<T extends { name: string }>(
-  shotText: string,
-  allCharacters: T[]
-): T[] {
-  if (allCharacters.length === 0) return [];
-  if (!shotText) return [];
-  const text = shotText.toLowerCase();
-  return allCharacters.filter((c) => {
-    if (!c.name) return false;
-    const fullName = c.name.toLowerCase();
-    const baseName = extractBaseName(c.name).toLowerCase();
-    if (text.includes(fullName)) return true;
-    if (baseName && text.includes(baseName)) return true;
-    return false;
-  });
-}
+import { describe, it, expect } from "vitest";
+import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -97,6 +73,41 @@ describe("filterShotCharacters", () => {
     // This is acceptable — both should match (substring logic)
     expect(result.length).toBeGreaterThanOrEqual(1);
     expect(result.some((c) => c.name === "林峰")).toBe(true);
+  });
+
+  it("prefers the age-specific variant when the shot includes an age cue", () => {
+    const cast = [
+      { id: "1", name: "龙渊" },
+      { id: "2", name: "龙渊（10岁）" },
+      { id: "3", name: "灵瑶" },
+      { id: "4", name: "灵瑶（8岁）" },
+    ];
+    const result = filterShotCharacters(
+      "10岁龙渊拉着8岁灵瑶钻进稻草堆",
+      cast
+    );
+    expect(result.map((c) => c.name)).toEqual(["龙渊（10岁）", "灵瑶（8岁）"]);
+  });
+
+  it("does not include child variants for an unqualified adult name when a default exists", () => {
+    const cast = [
+      { id: "1", name: "龙渊" },
+      { id: "2", name: "龙渊（10岁）" },
+    ];
+    const result = filterShotCharacters("龙渊拔出背后的无名剑", cast);
+    expect(result.map((c) => c.name)).toEqual(["龙渊"]);
+  });
+
+  it("uses episode context to keep an age-specific variant for later unqualified mentions", () => {
+    const cast = [
+      { id: "1", name: "龙渊" },
+      { id: "2", name: "龙渊（10岁）" },
+      { id: "3", name: "灵瑶" },
+      { id: "4", name: "灵瑶（8岁）" },
+    ];
+    const contextText = "10岁龙渊拉着8岁灵瑶滚进稻草堆。龙渊哭着握住灵瑶的手。";
+    const result = filterShotCharacters("龙渊哭着握住灵瑶的手", cast, { contextText });
+    expect(result.map((c) => c.name)).toEqual(["龙渊（10岁）", "灵瑶（8岁）"]);
   });
 });
 

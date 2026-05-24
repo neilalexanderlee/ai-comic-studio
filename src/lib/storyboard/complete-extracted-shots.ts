@@ -55,7 +55,8 @@ interface CompleteShotsParams {
 }
 
 function needsCompletion(shot: ExtractedShot): boolean {
-  return !shot.startFrameDesc || !shot.endFrameDesc || !shot.motionScript || !shot.cameraDirection;
+  // videoScript is the most critical S-grade field — trigger completion if missing
+  return !shot.startFrameDesc || !shot.endFrameDesc || !shot.motionScript || !shot.cameraDirection || !shot.videoScript;
 }
 
 export async function completeExtractedShots(
@@ -97,7 +98,6 @@ export async function completeExtractedShots(
         motionScript?: string;
         videoScript?: string;
         cameraDirection?: string;
-        duration?: number;
       };
 
       return {
@@ -108,7 +108,7 @@ export async function completeExtractedShots(
         motionScript: shot.motionScript ?? parsed.motionScript ?? null,
         videoScript: parsed.videoScript ?? null,
         cameraDirection: shot.cameraDirection ?? parsed.cameraDirection ?? "static",
-        duration: shot.duration ?? parsed.duration ?? 10,
+        duration: shot.duration ?? 10,
         dialogues: shot.dialogues,
       } satisfies PersistableShot;
     })
