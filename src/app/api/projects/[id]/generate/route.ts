@@ -91,18 +91,6 @@ function buildShotCharacterText(shot: {
 }
 
 
-/**
- * 当用画风参考图（无角色定妆图）时追加到帧提示词末尾，防止模型把参考图的建筑/人物内容搬入新帧。
- * 必须在 enhance 之后追加，保证不被 AI 改写。
- */
-const STYLE_REF_ONLY_NOTE = `
-
-【画风参考图说明 — 仅限风格参考】
-已附加一张项目画风参考图（非角色定妆图）。使用规则：
-✅ 仅参考：整体色调、渲染笔触与质感、线稿清晰度、光影氛围、色彩饱和度
-❌ 禁止复制：参考图中任何具体建筑造型、人物外形、场景元素、构图布局
-请完全按照上方的分镜描述生成全新场景，不得将参考图中的视觉内容元素搬入本帧。`;
-
 /** Strip <think>...</think> reasoning blocks from LLM output (DeepSeek R1 / QwQ etc.) */
 function stripThinkingBlocks(text: string): string {
   return text
@@ -1483,9 +1471,9 @@ async function handleBatchFrameGenerate(
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
 
-  // Fetch project visualStyle + styleReferenceImage for style lock injection
+  // Fetch project visualStyle for style lock injection
   const [batchProject] = await db
-    .select({ visualStyle: projects.visualStyle, styleReferenceImage: projects.styleReferenceImage })
+    .select({ visualStyle: projects.visualStyle })
     .from(projects)
     .where(eq(projects.id, projectId));
   const batchVisualStyleTag = (() => {
@@ -1493,7 +1481,6 @@ async function handleBatchFrameGenerate(
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
-  const batchStyleRefImage = batchProject?.styleReferenceImage ?? null;
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
 
@@ -1516,7 +1503,7 @@ async function handleBatchFrameGenerate(
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
-    userId, projectId, skipCount, batchVisualStyleTag, batchStyleRefImage, frameCharacterContext,
+    userId, projectId, skipCount, batchVisualStyleTag, frameCharacterContext,
     enhancePrompts, batchTextProvider, batchImageProtocol,
   };
 
@@ -1524,7 +1511,7 @@ async function handleBatchFrameGenerate(
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const { allShots, copiedFirstFrame, overwrite, frameCharacters,
-              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag, batchStyleRefImage,
+              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
               frameCharacterContext, enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
 
       function emit(data: object) {
@@ -1587,20 +1574,14 @@ async function handleBatchFrameGenerate(
               cameraDirection: cleanedCamera,
               slotContents: frameFirstSlots,
             });
-            const firstPromptEnhanced = enhancePrompts && batchTextProvider
+            const batchFirstCharRefs = resolvedChars.map((c) => c.imagePath);
+            const firstPrompt = enhancePrompts && batchTextProvider
               ? await enhanceImagePrompt(firstPromptRaw, batchImageProtocol, batchTextProvider)
               : firstPromptRaw;
-            const batchFirstCharRefs = resolvedChars.map((c) => c.imagePath);
-            const batchFirstEffectiveRefs = batchFirstCharRefs.length > 0
-              ? batchFirstCharRefs
-              : batchStyleRefImage ? [batchStyleRefImage] : [];
-            const firstPrompt = (batchFirstCharRefs.length === 0 && batchStyleRefImage)
-              ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
-              : firstPromptEnhanced;
             firstFramePath = await ai.generateImage(firstPrompt, {
               ...imageOpts,
               quality: "hd",
-              referenceImages: batchFirstEffectiveRefs,
+              referenceImages: batchFirstCharRefs,
               referenceLabels: resolvedChars.map((c) => c.name),
             });
           } else {
@@ -1655,20 +1636,14 @@ async function handleBatchFrameGenerate(
             cameraDirection: cleanedCamera,
             slotContents: frameLastSlots,
           });
-          const lastPromptEnhanced = enhancePrompts && batchTextProvider
+          const batchLastCharRefs = resolvedChars2.map((c) => c.imagePath);
+          const lastPrompt = enhancePrompts && batchTextProvider
             ? await enhanceImagePrompt(lastPromptRaw, batchImageProtocol, batchTextProvider)
             : lastPromptRaw;
-          const batchLastCharRefs = resolvedChars2.map((c) => c.imagePath);
-          const batchLastEffectiveRefs = batchLastCharRefs.length > 0
-            ? batchLastCharRefs
-            : batchStyleRefImage ? [batchStyleRefImage] : [];
-          const lastPrompt = (batchLastCharRefs.length === 0 && batchStyleRefImage)
-            ? lastPromptEnhanced + STYLE_REF_ONLY_NOTE
-            : lastPromptEnhanced;
           const lastFramePath = await ai.generateImage(lastPrompt, {
             ...imageOpts,
             quality: "hd",
-            referenceImages: [firstFramePath, ...batchLastEffectiveRefs],
+            referenceImages: [firstFramePath, ...batchLastCharRefs],
             referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
           });
 
@@ -1825,9 +1800,9 @@ async function handleSingleFrameGenerate(
   const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
   const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
 
-  // Fetch project visualStyle + styleReferenceImage for art-style lock
+  // Fetch project visualStyle for art-style lock
   const [singleProject] = await db
-    .select({ visualStyle: projects.visualStyle, styleReferenceImage: projects.styleReferenceImage })
+    .select({ visualStyle: projects.visualStyle })
     .from(projects)
     .where(eq(projects.id, projectId));
   const singleVisualStyleTag = (() => {
@@ -1835,9 +1810,6 @@ async function handleSingleFrameGenerate(
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
-  // When no named characters are present, inject the project-level style reference image
-  // so the model has a visual anchor for art style even in crowd/establishing shots.
-  const singleStyleRefImage = singleProject?.styleReferenceImage ?? null;
 
   // Clean cameraDirection (remove markdown bold markers)
   const singleCleanedCamera = shot.cameraDirection?.replace(/^\*+\s*/, "").replace(/\*+$/, "").trim() || undefined;
@@ -1865,22 +1837,15 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
-      const firstPromptEnhanced = enhancePrompts && singleTextProvider
+      const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
-      const firstEffectiveRefs = charRefImages.length > 0
-        ? charRefImages
-        : singleStyleRefImage ? [singleStyleRefImage] : [];
-      // Append style-only note AFTER enhancement so it's never stripped by the AI enhancer
-      const firstPrompt = (charRefImages.length === 0 && singleStyleRefImage)
-        ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
-        : firstPromptEnhanced;
-      console.log(`[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${charRefImages.length} styleRef=${!!singleStyleRefImage}`);
+      console.log(`[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${charRefImages.length}`);
       console.log(`[SingleFrameGenerate][PROMPT DEBUG] finalPrompt:\n${firstPrompt}`);
       const firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: firstEffectiveRefs,
+        referenceImages: charRefImages,
       });
       await db
         .update(shots)
@@ -1955,19 +1920,13 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
-      const firstPromptEnhanced = enhancePrompts && singleTextProvider
+      const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
-      const effectiveRefsForFirst = charRefImages.length > 0
-        ? charRefImages
-        : singleStyleRefImage ? [singleStyleRefImage] : [];
-      const firstPrompt = (charRefImages.length === 0 && singleStyleRefImage)
-        ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
-        : firstPromptEnhanced;
       firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: effectiveRefsForFirst,
+        referenceImages: charRefImages,
       });
     }
 
@@ -2006,19 +1965,13 @@ async function handleSingleFrameGenerate(
       cameraDirection: singleCleanedCamera,
       slotContents: frameLastSlots,
     });
-    const lastPromptEnhanced = enhancePrompts && singleTextProvider
+    const lastPrompt = enhancePrompts && singleTextProvider
       ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
       : lastPromptRaw;
-    const effectiveRefsForLast = charRefImages.length > 0
-      ? charRefImages
-      : singleStyleRefImage ? [singleStyleRefImage] : [];
-    const lastPrompt = (charRefImages.length === 0 && singleStyleRefImage)
-      ? lastPromptEnhanced + STYLE_REF_ONLY_NOTE
-      : lastPromptEnhanced;
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
-      referenceImages: [firstFramePath, ...effectiveRefsForLast],
+      referenceImages: [firstFramePath, ...charRefImages],
     });
 
     await db

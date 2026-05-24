@@ -146,7 +146,6 @@ export async function GET(
     visualStyle: project.visualStyle,
     useProjectPrompts: project.useProjectPrompts,
     enhancePrompts: project.enhancePrompts,
-    styleReferenceImage: project.styleReferenceImage,
     characters: epCharacters,
     shots: enrichedShots,
     versions: allVersions.map((v) => ({
