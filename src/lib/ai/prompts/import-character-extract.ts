@@ -34,21 +34,26 @@ export function buildImportCharacterExtractSystem(visualStyle = "auto"): string 
 RULES:
 1. Extract ONLY characters who need a CONSISTENT, RECOGNIZABLE face across multiple scenes — characters that a director would give a dedicated costume fitting and makeup reference sheet.
 2. A character qualifies if it has a PERSONAL IDENTITY: a real name, a distinct personality, or a role where the same individual recurs and must look the same every time.
-3. SKIP characters whose "name" is actually a TYPE, GROUP LABEL, or NON-CHARACTER ENTITY — even if they appear frequently:
-   a) TYPE/GROUP LABELS — a category of interchangeable people, not one specific person:
-      - "魔族士兵" → SKIP (type label, interchangeable soldiers)
-      - "人族斥候" → SKIP (type label)
+3. SKIP characters whose "name" is actually a TYPE, GROUP LABEL, or NON-CHARACTER ENTITY — even if they appear frequently or have dialogue lines:
+   SUBSTITUTION TEST (apply first): "Could a different person with the same label do the exact same thing in this scene?" If YES → SKIP.
+   a) INTERCHANGEABLE HUMAN CROWD/FUNCTIONAL ROLES — even with spoken dialogue lines:
+      - "旁观佣兵" → SKIP (any bystander mercenary could say that line)
+      - "魔族士兵" / "人族斥候" / "精灵哨兵" → SKIP (type labels, interchangeable)
       - "村民" / "百姓" / "路人" → SKIP (crowd types)
-      - "守卫" / "士兵" / "卫兵" → SKIP (interchangeable background roles)
-      - "信使" / "传令兵" → SKIP (functional role, not a person)
-   b) SKILLS, SPELLS, ABILITIES, AND TECHNIQUE NAMES — words shouted during combat or magic use are NOT characters:
-      - If a name appears ONLY in the pattern 「NAME！」 or 「NAME！」 shouted as a battle cry or spell invocation, it is a SKILL NAME, not a character.
-      - Skills often contain words like: 壁/盾/锁/斩/击/破/冲/炮/结界/护盾/刺/爆/裂/冻/燃/霜/星/龙/魂 combined with an action concept.
-      - Examples to SKIP: "星晶护盾" (magic shield skill), "霜魂斩" (sword technique), "寒星锁" (binding spell), "永夜壁" (barrier skill)
-      - KEEP proper character names even if they sound action-like: "龙渊" (character), "白夜" (character), "炎魔" (general's title)
-   c) WEAPONS AND OBJECTS — even named ones are not characters:
-      - "永夜" (staff name) → SKIP; "无双" (sword name) → SKIP; "霜魂刀" (sword name) → SKIP
-   The key question: is there ONE specific PERSON this name always refers to, with a FACE worth remembering?
+      - "守卫" / "士兵" / "卫兵" / "信使" / "传令兵" → SKIP (interchangeable functional roles)
+      - "[race]的[role]" patterns: "人族的斥候"、"精灵的卫兵" → SKIP
+   b) NON-HUMAN BOSS / CREATURE INDIVIDUALS — HARD OVERRIDE, always KEEP:
+      Any creature, monster, or supernatural entity that is THE unique individual in its scene
+      (not a generic horde) → KEEP regardless of name form, even if it looks like a type label.
+      - "狼人领主" / "火龙" / "魔龙" / "石龙" / "魔王" → KEEP (unique individual with distinct design)
+      - Distinction: "一群火龙"(horde) → SKIP; "THE 火龙 guarding the lair" → KEEP
+   c) SKILLS, SPELLS, ABILITIES, AND TECHNIQUE NAMES:
+      - Shouted as a battle cry or spell invocation → SKIP
+      - Examples to SKIP: "星晶护盾", "霜魂斩", "寒星锁", "永夜壁"
+      - KEEP character names that sound action-like: "龙渊", "白夜", "炎魔"
+   d) WEAPONS AND OBJECTS — even named ones:
+      - "永夜"(staff) / "无双"(sword) / "霜魂刀"(sword) → SKIP
+   The key question: is there ONE specific INDIVIDUAL this name always refers to, with a FACE worth remembering?
    KEEP examples: "魔族将军赤狮" → KEEP (personal name "赤狮"); "龙渊" → KEEP; "酒馆老板娘" → KEEP (recurring individual)
 3. Count approximate appearances/mentions for each character
 4. Merge obvious aliases: "小明" and "明哥" are the same person; "老板娘" and "酒馆老板娘（矮人）" describing the same role are the same person — output ONE entry. When unsure, prefer the more descriptive name.
@@ -100,14 +105,14 @@ export function buildImportCharacterExtractPrompt(
   const mandatoryBlock =
     confirmedNames.length > 0
       ? `
-⚠️ MANDATORY CAST LIST — ZERO EXCEPTIONS ⚠️
-A dedicated name-extraction pass identified the following characters. Every name MUST appear in your output JSON.
-If two names refer to the same person, merge into ONE entry with the more specific name — but NEVER silently omit one.
+⚠️ MANDATORY CAST LIST ⚠️
+A dedicated name-extraction pass identified the following characters. Include every name UNLESS it is clearly a TYPE/GROUP LABEL (see SKIP rules above — e.g. "旁观佣兵", "人族斥候" are role descriptions, not individuals).
+If two names refer to the same person, merge into ONE entry with the more specific name.
 If a character from this list does not appear in the current text chunk, still include them with frequency=0 and infer their appearance from any context available.
 
 ${confirmedNames.map((n) => `  • ${n}`).join("\n")}
 
-Any name absent from your output = INVALID response.
+Exception: if a name from this list is an obvious group/type label with no personal identity, you may OMIT it (the name-extraction pass sometimes makes mistakes on compound role labels).
 
 `
       : "";

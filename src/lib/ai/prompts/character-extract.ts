@@ -112,6 +112,11 @@ Go through the screenplay ONE MORE TIME and find every entity — human or non-h
 Any such entity NOT already in your list MUST be added — human, creature, demon, dragon, spirit, or otherwise.
 This step exists specifically to catch: relational-title characters (母亲/父亲/师父), non-human bosses (火龙/石龙/魔龙), and high-impact one-scene characters.
 
+COVERAGE CHECK GUARD — do NOT add back entities that were correctly excluded:
+  Interchangeable human crowd roles remain EXCLUDED even if they have dialogue:
+  "旁观佣兵" / "人族斥候" / "守卫" / "士兵" / "路过商人" → these pass criteria (a) but are still SKIP.
+  Apply the substitution test: "could a different person of the same label do the same thing?" If YES, do not add.
+
 ═══ OUTPUT FORMAT ═══
 JSON array only — no markdown fences, no commentary:
 [
@@ -185,26 +190,39 @@ export function buildCharacterExtractSystemPrompt(visualStyle: string): string {
  */
 export const CHARACTER_NAME_EXTRACTION_SYSTEM = `You are a script analyst. List every character who needs a visual reference sheet (costume + appearance guide) in this screenplay.
 
-━━━ IRON RULE — NO EXCEPTIONS ━━━
-Any entity that has spoken dialogue lines in the screenplay MUST appear in your list.
-"Spoken dialogue" means: lines in the format 角色名：「...」 or 角色名（emotion）：「...」
-Even one line of dialogue = mandatory inclusion.
+Apply these rules IN ORDER — higher priority overrides lower:
+
+━━━ PRIORITY 1 — HARD KEEP (non-human boss/creature individuals) ━━━
+Any creature, monster, beast, or supernatural entity that is THE unique individual in its scene
+(not a generic horde) → ALWAYS include, regardless of name form.
+  ✓ "火龙"（有台词） / "狼人领主" / "魔龙" / "石龙" / "魔王" → KEEP
+  ✗ "一群火龙" / "魔族群兽" (horde, not an individual) → SKIP
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-ALSO INCLUDE:
-• Named individuals (personal names, titles, relational names) who appear in any scene: 龙渊父亲、母亲、酒馆老板娘
-• Non-human entities that are THE unique individual in their scene (not a horde): 火龙、石龙、魔王
-• Characters with named actions in stage directions, even for just one scene
+━━━ PRIORITY 2 — HARD SKIP (interchangeable human crowd/functional roles) ━━━
+Human roles where any same-type person could be substituted with zero story impact
+→ SKIP even if they have spoken dialogue lines.
+  THE TEST: "Could a different person of the same label deliver this line?" If YES → SKIP.
+  ✗ "旁观佣兵（惊讶）：..." → SKIP (any bystander mercenary would say this)
+  ✗ "人族斥候（喘息）：..." → SKIP (any scout messenger would bring this news)
+  ✗ "路过商人：..." / "受伤士卒：..." / "守卫甲：..." → SKIP
+  ✗ "[race]的[role]" patterns: "人族的斥候"、"精灵的卫兵" → SKIP
+  ✗ Generic crowd: "士兵" / "村民" / "百姓" / "守卫" / "信使" → SKIP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-EXCLUDE:
-• Skill/spell/technique names shouted in combat: 星晶护盾、霜魂斩、寒星锁
-• Named weapons or objects: 无双（剑名）、永夜（法杖名）
-• Generic group labels without a personal name: 士兵、村民、精灵斥候
+INCLUDE (after priority checks above):
+• Personal names: "龙渊" / "灵瑶" / "赤狮" → INCLUDE
+• Relational titles who appear in 2+ scenes OR have dialogue that drives plot: "龙渊父亲" / "酒馆老板娘" → INCLUDE
+• One-scene characters with high story weight (death, betrayal, key info) → INCLUDE
 
-NAME FORM: when the same person is called by multiple names (父亲 in dialogue, 龙渊父亲 in stage directions), output the MOST SPECIFIC form: 龙渊父亲.
+EXCLUDE always (no priority override):
+• Skill/spell/technique names: 星晶护盾、霜魂斩、寒星锁
+• Named weapons/objects: 无双（剑名）、永夜（法杖名）、霜魂刀
+
+NAME FORM: use the MOST SPECIFIC form — "龙渊父亲" not just "父亲".
 
 OUTPUT: JSON array of strings only — no descriptions, no markdown, no commentary.
-Example: ["龙渊", "灵瑶", "龙渊父亲", "母亲", "火龙", "酒馆老板娘"]`;
+Example: ["龙渊", "灵瑶", "龙渊父亲", "母亲", "火龙", "狼人领主", "酒馆老板娘"]`;
 
 export function buildCharacterNameExtractionPrompt(screenplay: string): string {
   return `List every character who needs a visual reference sheet in this screenplay.
@@ -229,11 +247,11 @@ export function buildCharacterExtractPrompt(
   const mandatoryBlock =
     confirmedNames.length > 0
       ? `
-⚠️ MANDATORY CAST LIST — ZERO EXCEPTIONS ⚠️
+⚠️ MANDATORY CAST LIST ⚠️
 A dedicated name-extraction pass has already identified the following characters in this screenplay.
-Every name below MUST have an entry in your output JSON array.
+Every name below MUST have an entry in your output JSON array — UNLESS it is clearly a TYPE/GROUP LABEL (see SKIP rules: compound labels like "旁观佣兵", "[race]的[role]" patterns, etc. have no personal identity and may be omitted).
 • If two names refer to the same person, merge into ONE entry and list both in "aliases".
-• NEVER silently omit a name — if you think it should be skipped, keep it and add a note in "aliases".
+• If a name is an obvious group/type label with no individual identity, you may omit it (name-extraction sometimes makes mistakes on compound role labels).
 
 ${confirmedNames.map((n) => `  • ${n}`).join("\n")}
 
