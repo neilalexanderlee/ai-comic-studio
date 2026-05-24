@@ -91,6 +91,18 @@ function buildShotCharacterText(shot: {
 }
 
 
+/**
+ * 当用画风参考图（无角色定妆图）时追加到帧提示词末尾，防止模型把参考图的建筑/人物内容搬入新帧。
+ * 必须在 enhance 之后追加，保证不被 AI 改写。
+ */
+const STYLE_REF_ONLY_NOTE = `
+
+【画风参考图说明 — 仅限风格参考】
+已附加一张项目画风参考图（非角色定妆图）。使用规则：
+✅ 仅参考：整体色调、渲染笔触与质感、线稿清晰度、光影氛围、色彩饱和度
+❌ 禁止复制：参考图中任何具体建筑造型、人物外形、场景元素、构图布局
+请完全按照上方的分镜描述生成全新场景，不得将参考图中的视觉内容元素搬入本帧。`;
+
 /** Strip <think>...</think> reasoning blocks from LLM output (DeepSeek R1 / QwQ etc.) */
 function stripThinkingBlocks(text: string): string {
   return text
@@ -1575,13 +1587,16 @@ async function handleBatchFrameGenerate(
               cameraDirection: cleanedCamera,
               slotContents: frameFirstSlots,
             });
-            const firstPrompt = enhancePrompts && batchTextProvider
+            const firstPromptEnhanced = enhancePrompts && batchTextProvider
               ? await enhanceImagePrompt(firstPromptRaw, batchImageProtocol, batchTextProvider)
               : firstPromptRaw;
             const batchFirstCharRefs = resolvedChars.map((c) => c.imagePath);
             const batchFirstEffectiveRefs = batchFirstCharRefs.length > 0
               ? batchFirstCharRefs
               : batchStyleRefImage ? [batchStyleRefImage] : [];
+            const firstPrompt = (batchFirstCharRefs.length === 0 && batchStyleRefImage)
+              ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
+              : firstPromptEnhanced;
             firstFramePath = await ai.generateImage(firstPrompt, {
               ...imageOpts,
               quality: "hd",
@@ -1640,13 +1655,16 @@ async function handleBatchFrameGenerate(
             cameraDirection: cleanedCamera,
             slotContents: frameLastSlots,
           });
-          const lastPrompt = enhancePrompts && batchTextProvider
+          const lastPromptEnhanced = enhancePrompts && batchTextProvider
             ? await enhanceImagePrompt(lastPromptRaw, batchImageProtocol, batchTextProvider)
             : lastPromptRaw;
           const batchLastCharRefs = resolvedChars2.map((c) => c.imagePath);
           const batchLastEffectiveRefs = batchLastCharRefs.length > 0
             ? batchLastCharRefs
             : batchStyleRefImage ? [batchStyleRefImage] : [];
+          const lastPrompt = (batchLastCharRefs.length === 0 && batchStyleRefImage)
+            ? lastPromptEnhanced + STYLE_REF_ONLY_NOTE
+            : lastPromptEnhanced;
           const lastFramePath = await ai.generateImage(lastPrompt, {
             ...imageOpts,
             quality: "hd",
@@ -1847,12 +1865,16 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
-      const firstPrompt = enhancePrompts && singleTextProvider
+      const firstPromptEnhanced = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
       const firstEffectiveRefs = charRefImages.length > 0
         ? charRefImages
         : singleStyleRefImage ? [singleStyleRefImage] : [];
+      // Append style-only note AFTER enhancement so it's never stripped by the AI enhancer
+      const firstPrompt = (charRefImages.length === 0 && singleStyleRefImage)
+        ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
+        : firstPromptEnhanced;
       console.log(`[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${charRefImages.length} styleRef=${!!singleStyleRefImage}`);
       console.log(`[SingleFrameGenerate][PROMPT DEBUG] finalPrompt:\n${firstPrompt}`);
       const firstFramePath = await ai.generateImage(firstPrompt, {
@@ -1933,12 +1955,15 @@ async function handleSingleFrameGenerate(
         cameraDirection: singleCleanedCamera,
         slotContents: frameFirstSlots,
       });
-      const firstPrompt = enhancePrompts && singleTextProvider
+      const firstPromptEnhanced = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
       const effectiveRefsForFirst = charRefImages.length > 0
         ? charRefImages
         : singleStyleRefImage ? [singleStyleRefImage] : [];
+      const firstPrompt = (charRefImages.length === 0 && singleStyleRefImage)
+        ? firstPromptEnhanced + STYLE_REF_ONLY_NOTE
+        : firstPromptEnhanced;
       firstFramePath = await ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
@@ -1981,12 +2006,15 @@ async function handleSingleFrameGenerate(
       cameraDirection: singleCleanedCamera,
       slotContents: frameLastSlots,
     });
-    const lastPrompt = enhancePrompts && singleTextProvider
+    const lastPromptEnhanced = enhancePrompts && singleTextProvider
       ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
       : lastPromptRaw;
     const effectiveRefsForLast = charRefImages.length > 0
       ? charRefImages
       : singleStyleRefImage ? [singleStyleRefImage] : [];
+    const lastPrompt = (charRefImages.length === 0 && singleStyleRefImage)
+      ? lastPromptEnhanced + STYLE_REF_ONLY_NOTE
+      : lastPromptEnhanced;
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
