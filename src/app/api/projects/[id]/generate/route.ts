@@ -89,65 +89,6 @@ function buildShotCharacterText(shot: {
   ].filter(Boolean).join(" ");
 }
 
-function hasMeaningfulTailFrame(shot: {
-  startFrameDesc?: string | null;
-  endFrameDesc?: string | null;
-}): boolean {
-  const start = (shot.startFrameDesc ?? "").trim();
-  const end = (shot.endFrameDesc ?? "").trim();
-  if (!end || end.length < 12) return false;
-  if (!start) return true;
-  const normalize = (value: string) => value.replace(/\s+/g, "").replace(/[，。,.；;：:、]/g, "");
-  return normalize(start) !== normalize(end);
-}
-
-function shouldGenerateLastFrameForShot(shot: {
-  prompt?: string | null;
-  startFrameDesc?: string | null;
-  endFrameDesc?: string | null;
-  motionScript?: string | null;
-  videoScript?: string | null;
-  cameraDirection?: string | null;
-  duration?: number | null;
-}, namedCharacterCount: number): { generate: boolean; reason: string } {
-  if (!hasMeaningfulTailFrame(shot)) {
-    return { generate: false, reason: "missing-or-duplicate-tail" };
-  }
-
-  const text = buildShotCharacterText(shot);
-  const camera = shot.cameraDirection ?? "";
-  const combined = `${text} ${camera}`.toLowerCase();
-
-  if (/硬切|跳切|转场|切至|切回|平行切|蒙太奇|闪回|jump cut|cut to|whip pan/i.test(combined)) {
-    return { generate: false, reason: "cut-or-montage-language" };
-  }
-
-  const isEstablishingOrAtmosphere =
-    /全景|远景|大远景|俯拍全景|航拍|环境|空镜|街景|城镇|村庄|森林|山脉|夜空|月亮|篝火|灯笼|浓烟|火光|氛围|establishing|wide shot|crane up/i.test(combined);
-  const hasCrowdOnlyLanguage =
-    /群演|群众|人群|村民|士兵们|孩子们|数十|围观|路人|crowd|extras/i.test(combined);
-  const hasExplicitActionEndpoint =
-    /走到|跑到|转身|回头|抬头|低头|跪下|站起|倒下|摔倒|落下|砸落|打开|关闭|拔出|收剑|举起|放下|握住|抱起|伸出|消失|出现|变成|抵达|停在|定格|完成|最终|最后/i.test(combined);
-  const hasStrongObjectEndpoint =
-    /门|礼盒|瓶|剑|法杖|宝石|火焰|火幕|屋梁|卷轴|旗帜|月饼|产品|道具/i.test(combined) && hasExplicitActionEndpoint;
-
-  if (namedCharacterCount > 0) {
-    return { generate: true, reason: "named-character-tail-control" };
-  }
-
-  if (hasStrongObjectEndpoint) {
-    return { generate: true, reason: "object-or-action-tail-control" };
-  }
-
-  if (isEstablishingOrAtmosphere || hasCrowdOnlyLanguage || (shot.duration ?? 0) <= 8) {
-    return { generate: false, reason: "first-frame-video-sufficient" };
-  }
-
-  return hasExplicitActionEndpoint
-    ? { generate: true, reason: "explicit-action-tail-control" }
-    : { generate: false, reason: "no-tail-control-benefit" };
-}
-
 
 async function getVersionedUploadDir(versionId: string | null | undefined): Promise<string> {
   if (!versionId) return process.env.UPLOAD_DIR || "./uploads";
@@ -1535,13 +1476,7 @@ async function handleBatchFrameGenerate(
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
 
   const overwrite = payload?.overwrite === true;
-  const frameCharacterContext = allShots.map(buildShotCharacterText).join("\n");
-  const needProcess = allShots.filter((s) => {
-    if (overwrite || !s.firstFrame) return true;
-    const shotChars = filterShotCharacters(buildShotCharacterText(s), frameCharacters, { contextText: frameCharacterContext });
-    const tailDecision = shouldGenerateLastFrameForShot(s, shotChars.length);
-    return tailDecision.generate && !s.lastFrame;
-  });
+  const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
   const skipCount = allShots.length - needProcess.length;
 
   console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}, style: ${batchVisualStyleTag || "auto"}`);
@@ -1554,6 +1489,8 @@ async function handleBatchFrameGenerate(
   const batchImageProtocol = modelConfig?.image?.protocol ?? "";
 
   // Capture all loop variables needed inside the stream start callback
+  const frameCharacterContext = allShots.map(buildShotCharacterText).join("\n");
+
   const loopCtx = {
     allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
@@ -1579,9 +1516,7 @@ async function handleBatchFrameGenerate(
       for (let i = 0; i < allShots.length; i++) {
         const shot = allShots[i];
 
-        const existingShotChars = filterShotCharacters(buildShotCharacterText(shot), frameCharacters, { contextText: frameCharacterContext });
-        const existingTailDecision = shouldGenerateLastFrameForShot(shot, existingShotChars.length);
-        if (!overwrite && shot.firstFrame && (!existingTailDecision.generate || shot.lastFrame)) {
+        if (!overwrite && shot.firstFrame && shot.lastFrame) {
           // Prefer seedanceLastFrame (actual video last frame) for chain continuity
           previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
@@ -1643,15 +1578,16 @@ async function handleBatchFrameGenerate(
             firstFramePath = previousLastFrame;
           }
 
-          const tailDecision = shouldGenerateLastFrameForShot(shot, batchCurrentShotChars.length);
-          // Shots whose tail frame adds little control value use first-frame video mode.
-          if (!tailDecision.generate) {
+          // CROWD SHOT: no named characters → skip lastFrame generation.
+          // Video generation will auto-detect no lastFrame → reference mode (initialImage only).
+          // Seedance returns the actual video end frame, which becomes lastFrame after video generation.
+          if (batchCurrentShotChars.length === 0) {
             await db.update(shots).set({ firstFrame: firstFramePath, status: "completed" }).where(eq(shots.id, shot.id));
-            previousLastFrame = undefined; // wait for Seedance return_last_frame before chaining
+            previousLastFrame = undefined; // don't inherit crowd frame into next shot's chain
             okCount++;
             const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed — first-frame only (${tailDecision.reason}, ${elapsed}s)`);
-            emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath, frameMode: "first-only", reason: tailDecision.reason });
+            console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed — crowd shot, skipping lastFrame (${elapsed}s)`);
+            emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath });
             continue;
           }
 
@@ -1964,15 +1900,15 @@ async function handleSingleFrameGenerate(
       });
     }
 
-    const tailDecision = shouldGenerateLastFrameForShot(shot, charsForFrame.length);
-    // If the tail frame won't add useful control, keep this as first-frame video mode.
-    if (!tailDecision.generate) {
-      console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: first-frame only (${tailDecision.reason})`);
+    // CROWD SHOT (no named characters): skip lastFrame — video generation will use reference mode.
+    // Seedance returns the actual video end frame after generation, which becomes lastFrame then.
+    if (charsForFrame.length === 0) {
+      console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: crowd shot — skipping lastFrame, video will use reference mode`);
       await db
         .update(shots)
         .set({ firstFrame: firstFramePath, status: "completed" })
         .where(eq(shots.id, shotId));
-      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok", frameMode: "first-only", reason: tailDecision.reason });
+      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
     }
 
     // Character shot: generate lastFrame as usual
