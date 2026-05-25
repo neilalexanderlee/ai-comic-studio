@@ -221,24 +221,18 @@ export default function EpisodeStoryboardPage() {
   }));
 
   async function handleGenerateShots() {
-    // 当前版本已有生成的帧或视频时提示用户——重新解析会覆盖并删除这些文件
+    // 当前版本有已生成的帧或视频时，自动新建版本保护现有资产，不再弹确认框。
+    // 只有当前版本完全没有生成资产时，才在原版本上覆盖（空版本重解析，安全）。
     const hasGeneratedAssets = project?.shots?.some(
-      (s) => s.firstFrame || s.lastFrame || s.videoUrl || s.sceneRefFrame
+      (s) => s.firstFrame || s.lastFrame || s.videoUrl || s.sceneRefFrame || s.referenceVideoUrl
     );
-    if (hasGeneratedAssets) {
-      if (!confirm("当前版本已有生成的帧/视频，重新解析分镜会覆盖并删除这些文件。\n\n如需保留，请先点「新建版本」。继续吗？")) return;
-    }
-    return handleGenerateShotsWithMode();
+    return handleGenerateShotsWithMode(hasGeneratedAssets ? undefined : (selectedVersionId ?? undefined));
   }
 
-  async function handleGenerateShotsWithMode() {
+  async function handleGenerateShotsWithMode(targetVersionId?: string) {
     if (!project) return;
     if (!textGuard()) return;
     setGenerating(true);
-
-    // 始终覆盖当前已选版本（和重新生成帧/视频的行为一致）。
-    // 想保留旧分镜的话，用户应先点「新建版本」再解析。
-    const targetVersionId = selectedVersionId ?? undefined;
 
     try {
       const response = await apiFetch(`/api/projects/${project.id}/generate`, {
@@ -268,7 +262,7 @@ export default function EpisodeStoryboardPage() {
     }
 
     setGenerating(false);
-    // 覆盖当前版本后 selectedVersionId 不变，直接刷新即可
+    // 若传了 targetVersionId 则刷回该版本，否则刷新最新版本（新建的那个）
     await fetchProject(
       project.id,
       (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!,

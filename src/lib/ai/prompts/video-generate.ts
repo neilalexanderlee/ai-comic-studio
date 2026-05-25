@@ -90,6 +90,8 @@ export function buildReferenceVideoPrompt(params: {
   slotContents?: Record<string, string>;
   /** 项目画风标签，用于注入画风锁定前缀（如 "日本现代2D动漫风格，8K高清，赛璐珞渲染——"）*/
   visualStyleTag?: string;
+  /** 场景级音效提示（来自 【音效】 标签，注入视频 prompt 引导模型生成原生 SFX）*/
+  soundEffectNote?: string | null;
 }): string {
   const lines: string[] = [];
 
@@ -110,6 +112,12 @@ export function buildReferenceVideoPrompt(params: {
 
   lines.push(``);
   lines.push(`Camera: ${params.cameraDirection}.`);
+
+  // 音效提示：来自剧本 【音效】 标签，引导 Seedance/Kling 生成原生 SFX
+  if (params.soundEffectNote) {
+    lines.push(``);
+    lines.push(`【音效】${params.soundEffectNote}`);
+  }
 
   if (params.dialogues?.length) {
     // Resolve dialogue format slot to extract labels
@@ -156,6 +164,8 @@ export function buildVideoPrompt(params: {
   slotContents?: Record<string, string>;
   /** 项目画风标签，用于注入画风锁定前缀（如 "日本现代2D动漫风格，8K高清，赛璐珞渲染——"）*/
   visualStyleTag?: string;
+  /** 场景级音效提示（来自 【音效】 标签，注入视频 prompt 引导模型生成原生 SFX）*/
+  soundEffectNote?: string | null;
 }): string {
   const lines: string[] = [];
 
@@ -186,6 +196,12 @@ export function buildVideoPrompt(params: {
 
   lines.push(``);
   lines.push(`Camera: ${params.cameraDirection}.`);
+
+  // 音效提示：来自剧本 【音效】 标签，引导 Seedance/Kling 生成原生 SFX
+  if (params.soundEffectNote) {
+    lines.push(``);
+    lines.push(`【音效】${params.soundEffectNote}`);
+  }
 
   const hasStart = !!params.startFrameDesc;
   const hasEnd = !!params.endFrameDesc;

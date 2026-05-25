@@ -17,6 +17,10 @@ export interface ExtractedShot {
   endFrameDesc?: string | null;
   videoScript?: string | null;
   motionScript?: string | null;
+  /** 场景级音效提示（用于视频生成 prompt，如"火焰噼啪、金属碰撞"）*/
+  soundEffectNote?: string | null;
+  /** 背景音乐注记（仅供后期参考，绝不注入视频生成 prompt）*/
+  bgmNote?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
   dialogues: ExtractedDialogue[];
@@ -98,6 +102,8 @@ function buildShot(
     motionParts: string[];
     combatParts: string[];
     cameraParts: string[];
+    soundEffectParts: string[];
+    bgmParts: string[];
     duration: number | null;
     dialogues: ExtractedDialogue[];
   }
@@ -112,6 +118,10 @@ function buildShot(
   }
   const motionScript = motionSegments.join("\n").trim() || null;
   const cameraDirection = fields.cameraParts.join(" / ").trim() || null;
+  // 音效：场景级 SFX（可用于视频生成）
+  const soundEffectNote = fields.soundEffectParts.join("、").trim() || null;
+  // 背景音乐：仅供后期参考，不注入视频生成 prompt
+  const bgmNote = fields.bgmParts.join(" | ").trim() || null;
 
   if (!prompt && !motionScript && fields.dialogues.length === 0) {
     return null;
@@ -125,6 +135,8 @@ function buildShot(
     endFrameDesc,
     videoScript,
     motionScript,
+    soundEffectNote,
+    bgmNote,
     cameraDirection,
     duration: fields.duration,
     dialogues: fields.dialogues.map((d, i) => ({ ...d, sequence: i })),
@@ -168,6 +180,8 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     motionParts: [] as string[],
     combatParts: [] as string[],
     cameraParts: [] as string[],
+    soundEffectParts: [] as string[],
+    bgmParts: [] as string[],
     duration: null as number | null,
     dialogues: [] as ExtractedDialogue[],
   };
@@ -181,6 +195,8 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     | "motion"
     | "combat"
     | "camera"
+    | "soundEffect"
+    | "bgm"
     | "ignore"
     | null =
     null;
@@ -199,6 +215,8 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
       motionParts: [],
       combatParts: [],
       cameraParts: [],
+      soundEffectParts: [],
+      bgmParts: [],
       duration: null,
       dialogues: [],
     };
@@ -304,9 +322,13 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           if (value) currentShotFields.cameraParts.push(value);
           break;
         case "音效":
+          currentSection = "soundEffect";
+          if (value) currentShotFields.soundEffectParts.push(value);
+          break;
         case "背景音":
-          currentSection = "motion";
-          if (value) currentShotFields.motionParts.push(value);
+          // 背景音乐仅供后期参考，绝不注入视频生成 prompt
+          currentSection = "bgm";
+          if (value) currentShotFields.bgmParts.push(value);
           break;
         case "字幕":
           currentSection = "ignore";
@@ -384,8 +406,10 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "camera";
           break;
         case "音效":
+          currentSection = "soundEffect";
+          break;
         case "背景音":
-          currentSection = "motion";
+          currentSection = "bgm";
           break;
         case "字幕":
           currentSection = "ignore";
@@ -456,9 +480,13 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           if (value) currentShotFields.cameraParts.push(value);
           break;
         case "音效":
+          currentSection = "soundEffect";
+          if (value) currentShotFields.soundEffectParts.push(value);
+          break;
         case "背景音":
-          currentSection = "motion";
-          if (value) currentShotFields.motionParts.push(value);
+          // 背景音乐仅供后期参考，绝不注入视频生成 prompt
+          currentSection = "bgm";
+          if (value) currentShotFields.bgmParts.push(value);
           break;
         case "字幕":
           currentSection = "ignore";
@@ -496,7 +524,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     const dialogueParsed = tryParseDialogueLine(line);
     if (
       dialogueParsed &&
-      !["prompt", "start", "end", "videoScript", "motion", "combat", "camera", "ignore"].includes(
+      !["prompt", "start", "end", "videoScript", "motion", "combat", "camera", "soundEffect", "bgm", "ignore"].includes(
         currentSection ?? ""
       )
     ) {
@@ -529,6 +557,13 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         break;
       case "camera":
         currentShotFields.cameraParts.push(line);
+        break;
+      case "soundEffect":
+        currentShotFields.soundEffectParts.push(line);
+        break;
+      case "bgm":
+        // 背景音乐仅存为后期注记，不累积到 motionParts，不进入任何生成 prompt
+        currentShotFields.bgmParts.push(line);
         break;
       case "ignore":
         break;

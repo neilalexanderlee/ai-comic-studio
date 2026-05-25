@@ -118,6 +118,8 @@ export class KlingVideoProvider implements VideoProvider {
           tail_image: tailImageData,
           duration,
           aspect_ratio: aspectRatio,
+          // sound: "on" — 保留场景级音效（打击声、关门声、环境音）的原生生成
+          // BGM 由后期剪辑统一叠加；videoScript 层已禁止写入配乐/BGM 描述
           sound: "on",
         }),
       });

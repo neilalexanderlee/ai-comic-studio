@@ -110,6 +110,57 @@ function escapeSubtitlePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "'\\''");
 }
 
+/**
+ * 检测视频文件是否有音频轨道。
+ * 用于判断是否需要对该片段执行音频处理（无音轨片段跳过）。
+ */
+async function hasAudioTrack(videoPath: string): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    ffmpeg.ffprobe(videoPath, (err, metadata) => {
+      if (err) { resolve(false); return; }
+      const hasAudio = metadata.streams.some((s) => s.codec_type === "audio");
+      resolve(hasAudio);
+    });
+  });
+}
+
+/**
+ * 对单个视频片段的音频做预处理：
+ * - 在片段开头 fade-in 0.5s（消除突入感）
+ * - 在片段结尾 fade-out 1s（为下一片段入场留出过渡空间）
+ * - loudnorm 响度归一化至 -14 LUFS（统一各片段音量基准）
+ * 输出为同目录的临时文件，返回临时文件路径。
+ */
+async function preprocessClipAudio(
+  inputPath: string,
+  duration: number,
+  outputDir: string,
+  idx: number
+): Promise<string> {
+  const outPath = path.resolve(outputDir, `clip-audio-${idx}-${Date.now()}.mp4`);
+  const fadeOutStart = Math.max(0, duration - 1);
+
+  await new Promise<void>((resolve, reject) => {
+    ffmpeg(inputPath)
+      .outputOptions([
+        "-c:v", "copy",                        // 视频流直接复制，不重编码
+        "-c:a", "aac",
+        "-af", [
+          `afade=t=in:st=0:d=0.5`,             // 开头 0.5s 淡入
+          `afade=t=out:st=${fadeOutStart}:d=1`, // 结尾 1s 淡出
+          `loudnorm=I=-14:LRA=11:TP=-1.5`,     // 响度归一化 (-14 LUFS)
+        ].join(","),
+        "-y",
+      ])
+      .output(outPath)
+      .on("end", () => resolve())
+      .on("error", (err) => reject(new Error(`Audio preprocess failed: ${err.message}`)))
+      .run();
+  });
+
+  return outPath;
+}
+
 export async function assembleVideo(params: AssembleParams): Promise<string> {
   const { videoPaths, subtitles, projectId, shotDurations } = params;
   const outputDir = path.resolve(uploadDir, "videos");
@@ -118,13 +169,37 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
   const concatOutputPath = path.resolve(outputDir, `${projectId}-concat-${fileId}.mp4`);
   const outputPath = path.resolve(outputDir, `${projectId}-final-${fileId}.mp4`);
 
-  // Step 1: Concatenate video clips
-  if (videoPaths.length === 1) {
-    fs.copyFileSync(path.resolve(videoPaths[0]), concatOutputPath);
+  // 记录预处理产生的临时文件，最终统一清理
+  const tempFiles: string[] = [];
+
+  // Step 1: 音频预处理 — 对有音轨的片段做淡入淡出 + 响度归一化
+  // 目的：消除多片段拼接时各自独立 BGM/音效的硬切和音量不一致问题
+  const processedPaths: string[] = [];
+  for (let i = 0; i < videoPaths.length; i++) {
+    const vp = videoPaths[i];
+    const dur = shotDurations[i] ?? 10;
+    try {
+      const hasAudio = await hasAudioTrack(path.resolve(vp));
+      if (hasAudio) {
+        const processed = await preprocessClipAudio(path.resolve(vp), dur, outputDir, i);
+        tempFiles.push(processed);
+        processedPaths.push(processed);
+      } else {
+        processedPaths.push(path.resolve(vp));
+      }
+    } catch (err) {
+      console.warn(`[FFmpeg] Audio preprocess failed for clip ${i}, using original: ${err}`);
+      processedPaths.push(path.resolve(vp));
+    }
+  }
+
+  // Step 2: Concatenate video clips
+  if (processedPaths.length === 1) {
+    fs.copyFileSync(processedPaths[0], concatOutputPath);
   } else {
     const concatListPath = path.resolve(outputDir, `${projectId}-concat.txt`);
-    const concatContent = videoPaths
-      .map((p) => `file '${path.resolve(p)}'`)
+    const concatContent = processedPaths
+      .map((p) => `file '${p}'`)
       .join("\n");
     fs.writeFileSync(concatListPath, concatContent);
 
@@ -136,6 +211,10 @@ export async function assembleVideo(params: AssembleParams): Promise<string> {
         .output(concatOutputPath)
         .on("end", () => {
           fs.unlinkSync(concatListPath);
+          // 清理音频预处理临时文件
+          for (const tf of tempFiles) {
+            try { fs.unlinkSync(tf); } catch { /* ignore */ }
+          }
           resolve();
         })
         .on("error", (err) => {

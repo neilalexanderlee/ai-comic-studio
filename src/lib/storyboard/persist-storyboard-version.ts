@@ -31,6 +31,10 @@ export interface PersistableShot {
   videoScript?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
+  /** 背景音乐注记（仅后期参考，不注入视频 prompt） */
+  bgmNote?: string | null;
+  /** 场景级音效提示（注入视频 prompt 供 Seedance/Kling 生成原生 SFX） */
+  soundEffectNote?: string | null;
   dialogues: Array<{ character: string; text: string; sequence?: number }>;
   warnings?: string[];
 }
@@ -168,6 +172,8 @@ export async function persistStoryboardVersion(params: {
       videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration ?? 10,
+      bgmNote: shot.bgmNote ?? null,
+      soundEffectNote: shot.soundEffectNote ?? null,
       episodeId: episodeId ?? null,
       warnings: shot.warnings?.join("; ") || null,
     });

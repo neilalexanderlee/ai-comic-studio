@@ -37,6 +37,8 @@ export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): Persistable
       videoScript: shot.videoScript ?? null,
       cameraDirection: cameraDirection ?? "static",
       duration: shot.duration ?? 10,
+      bgmNote: shot.bgmNote ?? null,
+      soundEffectNote: shot.soundEffectNote ?? null,
       dialogues: shot.dialogues.map((d, i) => ({
         character: d.character,
         text: d.text,

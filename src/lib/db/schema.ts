@@ -174,6 +174,17 @@ export const shots = sqliteTable("shots", {
    * 用途：下一镜的 frame-generate 优先用此作为 previousLastFrame，比 AI 生成的 lastFrame 更连贯。
    */
   seedanceLastFrame: text("seedance_last_frame"),
+  /**
+   * 背景音乐注记（从剧本 【背景音】 标签提取）。
+   * 仅供后期剪辑参考，绝不注入视频生成 prompt。
+   * 存储后用于精确剔除 motionScript/videoScript 中可能残留的 BGM 描述（取代正则匹配）。
+   */
+  bgmNote: text("bgm_note"),
+  /**
+   * 场景级音效提示（从剧本 【音效】 标签提取，如"火焰噼啪、金属碰撞、脚步声"）。
+   * 在视频生成 prompt 中作为 SFX 提示注入，引导 Seedance/Kling 生成对应的原生音效。
+   */
+  soundEffectNote: text("sound_effect_note"),
 });
 
 /** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */

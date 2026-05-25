@@ -217,6 +217,7 @@ export function ShotCard({
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
+  const [restoringText, setRestoringText] = useState(false);
   const [enhancingVideo, setEnhancingVideo] = useState(false);
 
   // UI state
@@ -509,6 +510,25 @@ export function ShotCard({
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
     setRewritingText(false);
+  }
+
+  async function handleRestoreTextFromScript() {
+    setRestoringText(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "single_shot_restore_from_script",
+          payload: { shotId: id },
+        }),
+      });
+      onUpdate();
+      toast.success("已从原始剧本还原文本字段");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "从剧本还原失败");
+    }
+    setRestoringText(false);
   }
 
   async function handleClearFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
@@ -857,15 +877,27 @@ export function ShotCard({
                 placeholder="static / pan-left / zoom-in ..."
               />
             </div>
-            <Button
-              size="xs"
-              variant="outline"
-              onClick={handleRewriteText}
-              disabled={rewritingText}
-            >
-              {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-              {rewritingText ? t("common.generating") : t("shot.rewriteText")}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleRewriteText}
+                disabled={rewritingText || restoringText}
+              >
+                {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                {rewritingText ? t("common.generating") : t("shot.rewriteText")}
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleRestoreTextFromScript}
+                disabled={restoringText || rewritingText}
+                title="从原始剧本还原此镜头的文本字段（不影响已生成的首尾帧和视频）"
+              >
+                {restoringText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                {restoringText ? "还原中…" : "从剧本还原"}
+              </Button>
+            </div>
           </div>
         </StepRow>
 
