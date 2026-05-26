@@ -118,6 +118,8 @@ export interface ScriptSplitEpisode {
   keywords: string;
   idea: string;
   script: string;
+  /** 仅本集内容（不含卷首 preamble），用于角色匹配；script 字段含 preamble 供分镜生成使用 */
+  episodeScript?: string;
   characters?: string[];
 }
 
@@ -183,14 +185,14 @@ export function splitMarkdownByEpisodeHeadings(
       e + 1 < headingLineIndexes.length
         ? headingLineIndexes[e + 1]
         : lines.length;
-    let body = lines.slice(start, end).join("\n").trim();
-    if (e === 0 && preamble) {
-      body = `${preamble}\n\n${body}`;
-    }
+    // episodeOnly：集本身的纯内容（不含卷首 preamble），用于角色匹配
+    const episodeOnly = lines.slice(start, end).join("\n").trim();
+    // body：供分镜生成使用的完整内容（第一集拼上 preamble 提供世界观上下文）
+    const body = (e === 0 && preamble) ? `${preamble}\n\n${episodeOnly}` : episodeOnly;
 
     const title = headingTitles[e] || `第 ${e + 1} 集`;
-    const description = extractSynopsisFromSegment(body);
-    const duration = extractDurationHint(body);
+    const description = extractSynopsisFromSegment(episodeOnly);
+    const duration = extractDurationHint(episodeOnly);
     const keywords = duration ? `时长,${duration.replace(/,/g, "，")}` : "";
 
     episodes.push({
@@ -199,6 +201,7 @@ export function splitMarkdownByEpisodeHeadings(
       keywords,
       idea: body,
       script: body,
+      episodeScript: episodeOnly,  // 仅本集正文，不含 preamble，供角色匹配用
       characters: [],
     });
   }

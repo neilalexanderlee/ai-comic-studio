@@ -36,6 +36,7 @@ import {
   Wand2,
   History,
   RotateCcw,
+  Plus,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
@@ -81,8 +82,10 @@ interface ShotCardProps {
   videoResolution?: string | null;
   /** 生成视频时使用的分辨率，传递给后端 */
   videoGenerationResolution?: "480p" | "720p";
-  /** 上一镜 Seedance 生成视频的真实尾帧，可直接用作本镜首帧（跳过 Seedream 重新生成） */
+  /** 上一镜 Seedance 视频真实尾帧（优先于 prevLastFrame） */
   prevSeedanceLastFrame?: string | null;
+  /** 上一镜 AI 生成的尾帧图 */
+  prevLastFrame?: string | null;
   /** 是否开启 AI Prompt 增强（透传给生成 API） */
   enhancePrompts?: boolean;
   /** 独立生成首帧：true 时不继承上一镜尾帧，每个分镜首帧独立生成 */
@@ -182,10 +185,14 @@ export function ShotCard({
   videoResolution,
   videoGenerationResolution,
   prevSeedanceLastFrame,
+  prevLastFrame,
   enhancePrompts = false,
   independentFirstFrame = false,
 }: ShotCardProps) {
   const t = useTranslations();
+  const prevChainFrame = prevSeedanceLastFrame ?? prevLastFrame ?? null;
+  const prevChainFrameSource: "video" | "ai" | null =
+    prevSeedanceLastFrame ? "video" : prevLastFrame ? "ai" : null;
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
   const [splittingShot, setSplittingShot] = useState(false);
@@ -219,6 +226,31 @@ export function ShotCard({
   const [rewritingText, setRewritingText] = useState(false);
   const [restoringText, setRestoringText] = useState(false);
   const [enhancingVideo, setEnhancingVideo] = useState(false);
+
+  // 台词编辑状态
+  type EditDialogue = { id?: string; characterName: string; text: string };
+  const [editingDialogues, setEditingDialogues] = useState(false);
+  const [editDialogues, setEditDialogues] = useState<EditDialogue[]>(
+    dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text }))
+  );
+  const [savingDialogues, setSavingDialogues] = useState(false);
+  useEffect(() => {
+    setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
+  }, [dialogues]);
+
+  async function handleSaveDialogues() {
+    setSavingDialogues(true);
+    try {
+      await patchShot({ dialogues: editDialogues });
+      setEditingDialogues(false);
+      onUpdate();
+      toast.success("台词已保存");
+    } catch (err) {
+      toast.error("保存台词失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSavingDialogues(false);
+    }
+  }
 
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -299,11 +331,11 @@ export function ShotCard({
   }
 
   const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
-  async function handleAdoptPrevSeedanceFrame() {
-    if (!prevSeedanceLastFrame) return;
+  async function handleAdoptPrevChainFrame() {
+    if (!prevChainFrame) return;
     setAdoptingPrevFrame(true);
     try {
-      await patchShot({ firstFrame: prevSeedanceLastFrame });
+      await patchShot({ firstFrame: prevChainFrame });
       onUpdate();
     } finally {
       setAdoptingPrevFrame(false);
@@ -365,8 +397,14 @@ export function ShotCard({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "single_frame_generate",
-          payload: { shotId: id, ratio: videoRatio, frameTarget: target },
+          payload: {
+            shotId: id,
+            ratio: videoRatio,
+            frameTarget: target,
+            disableChaining: independentFirstFrame,
+          },
           modelConfig: getModelConfig(),
+          enhancePrompts,
         }),
       });
       onUpdate();
@@ -877,6 +915,88 @@ export function ShotCard({
                 placeholder="static / pan-left / zoom-in ..."
               />
             </div>
+            {/* 台词区域 */}
+            <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+                  <MessageCircle className="h-3 w-3" />
+                  台词
+                </p>
+                {!editingDialogues ? (
+                  <button
+                    onClick={() => {
+                      setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
+                      setEditingDialogues(true);
+                    }}
+                    className="text-[10px] text-primary hover:underline"
+                  >
+                    编辑
+                  </button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditingDialogues(false)} className="text-[10px] text-[--text-muted] hover:underline">取消</button>
+                    <button onClick={handleSaveDialogues} disabled={savingDialogues} className="text-[10px] text-primary font-semibold hover:underline disabled:opacity-50">
+                      {savingDialogues ? "保存中…" : "保存"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {!editingDialogues ? (
+                dialogues.length > 0 ? (
+                  dialogues.map((d) => (
+                    <p key={d.id} className="text-[12px]">
+                      <span className="font-semibold text-primary">{d.characterName}</span>
+                      <span className="mx-1.5 text-[--text-muted]">—</span>
+                      <span className="text-[--text-secondary]">{d.text}</span>
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-[11px] text-[--text-muted]">无台词，点「编辑」可添加</p>
+                )
+              ) : (
+                <div className="space-y-2">
+                  {editDialogues.map((d, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      <input
+                        value={d.characterName}
+                        onChange={(e) => {
+                          const next = [...editDialogues];
+                          next[i] = { ...next[i], characterName: e.target.value };
+                          setEditDialogues(next);
+                        }}
+                        placeholder="角色名"
+                        className="w-20 shrink-0 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] font-semibold text-primary outline-none focus:border-primary/50"
+                      />
+                      <textarea
+                        value={d.text}
+                        onChange={(e) => {
+                          const next = [...editDialogues];
+                          next[i] = { ...next[i], text: e.target.value };
+                          setEditDialogues(next);
+                        }}
+                        rows={2}
+                        placeholder="台词内容"
+                        className="flex-1 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] text-[--text-secondary] outline-none focus:border-primary/50 resize-none"
+                      />
+                      <button
+                        onClick={() => setEditDialogues(editDialogues.filter((_, j) => j !== i))}
+                        className="mt-1 text-red-400 hover:text-red-600"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    onClick={() => setEditDialogues([...editDialogues, { characterName: "", text: "" }])}
+                    className="flex items-center gap-1 text-[11px] text-[--text-muted] hover:text-primary"
+                  >
+                    <Plus className="h-3 w-3" />
+                    添加台词
+                  </button>
+                </div>
+              )}
+            </div>
+
             <div className="flex gap-2">
               <Button
                 size="xs"
@@ -989,19 +1109,24 @@ export function ShotCard({
               {t("shot.externalFrameHelper")}
             </Button>
           )}
-          {generationMode !== "reference" && prevSeedanceLastFrame && (
+          {generationMode !== "reference" && prevChainFrame && (
             <Button
               size="xs"
               variant="ghost"
-              onClick={handleAdoptPrevSeedanceFrame}
+              onClick={handleAdoptPrevChainFrame}
               disabled={adoptingPrevFrame || generatingFrames || generatingVideo || batchGeneratingFrames}
-              title="将上一镜视频的真实尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
+              title={
+                prevChainFrameSource === "video"
+                  ? "将上一镜视频的真实尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
+                  : "将上一镜 AI 生成的尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
+              }
             >
               {adoptingPrevFrame
                 ? <Loader2 className="h-3 w-3 animate-spin" />
                 : <span className="text-[10px]">↑</span>
               }
               承接上一镜尾帧
+              {prevChainFrameSource === "video" ? "（视频尾帧）" : "（AI 尾帧）"}
             </Button>
           )}
         </StepRow>

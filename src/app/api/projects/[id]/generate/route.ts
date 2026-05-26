@@ -44,6 +44,40 @@ import { resolveFrameMode } from "@/lib/storyboard/frame-generation-strategy";
 
 export const maxDuration = 300;
 
+/** Download Seedance return_last_frame and return shot DB field updates. */
+async function buildVideoLastFrameUpdate(params: {
+  lastFrameUrl: string;
+  shotId: string;
+  uploadDir: string;
+  /** Reference-mode: replace AI lastFrame too. Keyframe-mode: only persist seedanceLastFrame. */
+  replaceAiLastFrame: boolean;
+  existingLastFrame?: string | null;
+  existingSeedanceLastFrame?: string | null;
+}): Promise<Record<string, string>> {
+  const fs = await import("node:fs");
+  const nodePath = await import("node:path");
+  const frameRes = await fetch(params.lastFrameUrl);
+  if (!frameRes.ok) return {};
+
+  const buffer = Buffer.from(await frameRes.arrayBuffer());
+  const framesDir = nodePath.join(params.uploadDir, "frames");
+  fs.mkdirSync(framesDir, { recursive: true });
+  const suffix = params.replaceAiLastFrame ? "lastframe" : "seedance_lastframe";
+  const framePath = nodePath.join(framesDir, `${params.shotId}_${suffix}_${Date.now()}.png`);
+  fs.writeFileSync(framePath, buffer);
+
+  if (params.replaceAiLastFrame && params.existingLastFrame && params.existingLastFrame !== framePath) {
+    try { fs.unlinkSync(params.existingLastFrame); } catch { /* ignore */ }
+  }
+  if (!params.replaceAiLastFrame && params.existingSeedanceLastFrame && params.existingSeedanceLastFrame !== framePath) {
+    try { fs.unlinkSync(params.existingSeedanceLastFrame); } catch { /* ignore */ }
+  }
+
+  return params.replaceAiLastFrame
+    ? { lastFrame: framePath, seedanceLastFrame: framePath }
+    : { seedanceLastFrame: framePath };
+}
+
 /** Map user-facing ratio string to ImageOptions fields */
 function ratioToImageOpts(ratio?: string): { aspectRatio?: string; size?: string } {
   switch (ratio) {
@@ -64,14 +98,26 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
 /**
  * Check if a character is visible on-screen by looking for their name
  * in the videoScript or startFrameDesc fields.
+ *
+ * Matching strategy (tolerant of age/descriptor suffixes):
+ *   1. Full name match — "龙渊（10岁）" in text
+ *   2. Base name match — strip （…） suffix → "龙渊" in text
+ *   3. Fallback: assume on-screen if the text is non-empty (better than
+ *      wrongly marking a named character as off-screen)
  */
 function isCharacterOnScreen(
   characterName: string,
   videoScript: string,
   startFrameDesc: string | null | undefined
 ): boolean {
+  if (!characterName) return false;
   const text = `${videoScript} ${startFrameDesc ?? ""}`;
-  return text.includes(characterName);
+  if (!text.trim()) return false;
+  if (text.includes(characterName)) return true;
+  // Strip trailing parenthetical descriptor, e.g. "龙渊（10岁）" → "龙渊"
+  const baseName = characterName.replace(/[（(].*/, "").trim();
+  if (baseName.length >= 2 && text.includes(baseName)) return true;
+  return false;
 }
 
 /**
@@ -149,10 +195,12 @@ function ensureDialoguesInPrompt(
 ): string {
   if (!dialogueList.length) return prompt;
   // 剥离已有对白区块（NOTE 行 + 对白行）
+  // 同时清理 LLM 嵌入正文末尾的行中标签（不带前导 \n 的情况）
   let base = prompt
     .replace(/\nNOTE: The following are the ONLY lines[^\n]*/g, "")
-    .replace(/\n【对白口型】[^\n]*/g, "")
-    .replace(/\n【画外音】[^\n]*/g, "")
+    .replace(/【对白口型】[^\n]*/g, "")   // 行中 + 行首均清理
+    .replace(/【画外音】[^\n]*/g, "")     // 行中 + 行首均清理
+    .replace(/\n{3,}/g, "\n\n")           // 清理后可能出现连续空行，合并
     .trimEnd();
   // 重新附加最新对白
   base +=
@@ -1555,6 +1603,7 @@ async function handleBatchFrameGenerate(
   }
 
   const continueFromPrev = payload?.continueFromPrev === true;
+  const disableChaining = payload?.disableChaining === true;
   let copiedFirstFrame: string | undefined;
 
   const versionedUploadDir = batchVersionId
@@ -1669,7 +1718,7 @@ async function handleBatchFrameGenerate(
   const frameCharacterContext = allShots.map(buildShotCharacterText).join("\n");
 
   const loopCtx = {
-    allShots, copiedFirstFrame, overwrite, frameCharacters, characterDescriptions,
+    allShots, copiedFirstFrame, overwrite, disableChaining, frameCharacters, characterDescriptions,
     frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
     userId, projectId, skipCount, batchVisualStyleTag, frameCharacterContext,
     enhancePrompts, batchTextProvider, batchImageProtocol,
@@ -1678,7 +1727,7 @@ async function handleBatchFrameGenerate(
   // SSE streaming via ReadableStream start() — Next.js App Router idiomatic pattern
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const { allShots, copiedFirstFrame, overwrite, frameCharacters,
+      const { allShots, copiedFirstFrame, overwrite, disableChaining, frameCharacters,
               frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
               frameCharacterContext, enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
 
@@ -1695,7 +1744,9 @@ async function handleBatchFrameGenerate(
 
         if (!overwrite && shot.firstFrame && shot.lastFrame) {
           // Prefer seedanceLastFrame (actual video last frame) for chain continuity
-          previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
+          if (!disableChaining) {
+            previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
+          }
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
           continue;
         }
@@ -1723,9 +1774,11 @@ async function handleBatchFrameGenerate(
 
           if (copiedFirstFrame && i === 0) {
             firstFramePath = copiedFirstFrame;
-          } else if (i === 0 || !previousLastFrame || isCrowdToCharCutBatch) {
+          } else if (i === 0 || !previousLastFrame || isCrowdToCharCutBatch || disableChaining) {
             if (isCrowdToCharCutBatch) {
               console.log(`[BatchFrameGenerate] Shot ${shot.sequence}: crowd→character cut — generating fresh firstFrame (breaking chain)`);
+            } else if (disableChaining) {
+              console.log(`[BatchFrameGenerate] Shot ${shot.sequence}: independent first frame — generating fresh firstFrame`);
             }
             // Use pre-computed batchCurrentShotChars (already filtered for this shot)
             const resolvedChars = await resolveCharacterImages(shot.prompt || "", batchCurrentShotChars, modelConfig?.text, userId, projectId);
@@ -1817,7 +1870,9 @@ async function handleBatchFrameGenerate(
 
           await db.update(shots).set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" }).where(eq(shots.id, shot.id));
           // Use AI-generated lastFrame for chain (no seedanceLastFrame yet at this stage)
-          previousLastFrame = lastFramePath;
+          if (!disableChaining) {
+            previousLastFrame = lastFramePath;
+          }
           okCount++;
 
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -2312,7 +2367,7 @@ async function handleSingleVideoGenerate(
               videoScript,
               cameraDirection: shot.cameraDirection || "static",
               duration: effectiveDuration,
-              characters: shotCharacters,
+              characters: singleVideoShotChars,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: videoSlots,
               visualStyleTag: singleVideoStyleTag,
@@ -2324,7 +2379,7 @@ async function handleSingleVideoGenerate(
               startFrameDesc: shot.startFrameDesc ?? undefined,
               endFrameDesc: shot.endFrameDesc ?? undefined,
               duration: effectiveDuration,
-              characters: shotCharacters,
+              characters: singleVideoShotChars,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: videoSlots,
               visualStyleTag: singleVideoStyleTag,
@@ -2362,31 +2417,26 @@ async function handleSingleVideoGenerate(
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
     await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "重新生成前");
 
-    // For reference-mode shots: save the actual video last frame (from Seedance return_last_frame) as lastFrame.
+  // Save Seedance video last frame: reference-mode replaces lastFrame; keyframe-mode only seedanceLastFrame.
     let singleLastFrameUpdate: Record<string, unknown> = {};
-    if (useSingleVideoReferenceMode && result.lastFrameUrl) {
+    if (result.lastFrameUrl) {
       try {
-        const fs = await import("node:fs");
-        const nodePath = await import("node:path");
-        const frameRes = await fetch(result.lastFrameUrl);
-        if (frameRes.ok) {
-          const buffer = Buffer.from(await frameRes.arrayBuffer());
-          const framesDir = nodePath.join(versionedUploadDir, "frames");
-          fs.mkdirSync(framesDir, { recursive: true });
-          // Use a timestamp suffix so each regeneration produces a distinct path.
-          // This ensures the DB value changes → React detects the new prop value →
-          // the browser fetches the fresh image instead of serving a stale cached one.
-          const framePath = nodePath.join(framesDir, `${shotId}_lastframe_${Date.now()}.png`);
-          fs.writeFileSync(framePath, buffer);
-          // Clean up any previous lastframe file for this shot to avoid accumulating stale frames.
-          if (shot.lastFrame && shot.lastFrame !== framePath) {
-            try { fs.unlinkSync(shot.lastFrame); } catch { /* ignore — file may already be gone */ }
-          }
-          singleLastFrameUpdate = { lastFrame: framePath, seedanceLastFrame: framePath };
-          console.log(`[SingleVideoGenerate] Reference-mode shot ${shotId}: saved video last frame → ${framePath}`);
+        singleLastFrameUpdate = await buildVideoLastFrameUpdate({
+          lastFrameUrl: result.lastFrameUrl,
+          shotId,
+          uploadDir: versionedUploadDir,
+          replaceAiLastFrame: useSingleVideoReferenceMode,
+          existingLastFrame: shot.lastFrame,
+          existingSeedanceLastFrame: shot.seedanceLastFrame,
+        });
+        if (Object.keys(singleLastFrameUpdate).length > 0) {
+          console.log(
+            `[SingleVideoGenerate] Shot ${shotId}: saved video last frame → ${singleLastFrameUpdate.seedanceLastFrame}` +
+              (useSingleVideoReferenceMode ? " [reference mode]" : " [keyframe mode, seedanceLastFrame only]")
+          );
         }
       } catch (frameErr) {
-        console.warn(`[SingleVideoGenerate] Reference-mode shot ${shotId}: failed to save last frame:`, frameErr);
+        console.warn(`[SingleVideoGenerate] Shot ${shotId}: failed to save last frame:`, frameErr);
       }
     }
 
@@ -2528,6 +2578,8 @@ async function handleBatchVideoGenerate(
         const isBatchCrowdShot = isCrowdShotMap.get(shot.id) ?? false;
         const useBatchReferenceMode = isBatchCrowdShot || !shot.lastFrame;
         const batchHasPreGenPrompt = !!shot.videoPrompt;
+        // 只传本镜头实际出现的角色
+        const batchShotChars = filterShotCharacters(videoScript, batchCharacters, { contextText: batchVideoCharacterContext });
         // Reference-mode shots: no tail-frame anchor; frame-pair shots: keyframe prompt with anchors.
         // Also strip BGM from pre-generated videoPrompt (may contain stale BGM language from motionScript).
         const videoPromptBase = stripBgmContent(
@@ -2537,7 +2589,7 @@ async function handleBatchVideoGenerate(
                   videoScript,
                   cameraDirection: shot.cameraDirection || "static",
                   duration: effectiveDuration,
-                  characters: batchCharacters,
+                  characters: batchShotChars,
                   dialogues: dialogueList.length > 0 ? dialogueList : undefined,
                   slotContents: videoSlots,
                   visualStyleTag: batchVideoStyleTag,
@@ -2549,7 +2601,7 @@ async function handleBatchVideoGenerate(
                   startFrameDesc: shot.startFrameDesc ?? undefined,
                   endFrameDesc: shot.endFrameDesc ?? undefined,
                   duration: effectiveDuration,
-                  characters: batchCharacters,
+                  characters: batchShotChars,
                   dialogues: dialogueList.length > 0 ? dialogueList : undefined,
                   slotContents: videoSlots,
                   visualStyleTag: batchVideoStyleTag,
@@ -2598,27 +2650,25 @@ async function handleBatchVideoGenerate(
               }
         );
 
-        // Reference-mode shots: save actual video last frame (from Seedance return_last_frame) as lastFrame
         let batchLastFrameUpdate: Record<string, unknown> = {};
-        if (useBatchReferenceMode && result.lastFrameUrl) {
+        if (result.lastFrameUrl) {
           try {
-            const batchFs = await import("node:fs");
-            const batchNodePath = await import("node:path");
-            const frameRes = await fetch(result.lastFrameUrl);
-            if (frameRes.ok) {
-              const buffer = Buffer.from(await frameRes.arrayBuffer());
-              const framesDir = batchNodePath.join(versionedUploadDir, "frames");
-              batchFs.mkdirSync(framesDir, { recursive: true });
-              const framePath = batchNodePath.join(framesDir, `${shot.id}_lastframe_${Date.now()}.png`);
-              batchFs.writeFileSync(framePath, buffer);
-              if (shot.lastFrame && shot.lastFrame !== framePath) {
-                try { batchFs.unlinkSync(shot.lastFrame); } catch { /* ignore */ }
-              }
-              batchLastFrameUpdate = { lastFrame: framePath, seedanceLastFrame: framePath };
-              console.log(`[BatchVideoGenerate] Reference-mode shot ${shot.sequence}: saved video last frame → ${framePath}`);
+            batchLastFrameUpdate = await buildVideoLastFrameUpdate({
+              lastFrameUrl: result.lastFrameUrl,
+              shotId: shot.id,
+              uploadDir: versionedUploadDir,
+              replaceAiLastFrame: useBatchReferenceMode,
+              existingLastFrame: shot.lastFrame,
+              existingSeedanceLastFrame: shot.seedanceLastFrame,
+            });
+            if (Object.keys(batchLastFrameUpdate).length > 0) {
+              console.log(
+                `[BatchVideoGenerate] Shot ${shot.sequence}: saved video last frame → ${batchLastFrameUpdate.seedanceLastFrame}` +
+                  (useBatchReferenceMode ? " [reference mode]" : " [keyframe mode, seedanceLastFrame only]")
+              );
             }
           } catch (frameErr) {
-            console.warn(`[BatchVideoGenerate] Reference-mode shot ${shot.sequence}: failed to save last frame:`, frameErr);
+            console.warn(`[BatchVideoGenerate] Shot ${shot.sequence}: failed to save last frame:`, frameErr);
           }
         }
 
@@ -3422,27 +3472,32 @@ async function handleSingleReferenceVideo(
         // Prefer videoScript (already optimized for video models) over raw motionScript.
         // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
         const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+        const refShotChars = filterShotCharacters(motionContext, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
         const promptRequest = buildRefVideoPromptRequest({
           motionScript: motionContext,
           cameraDirection: shot.cameraDirection || "static",
           duration: effectiveDuration,
-          characters: projectCharacters,
+          characters: refShotChars,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
         });
-        console.log(`[SingleReferenceVideo] Shot ${shot.sequence} promptRequest length=${promptRequest.length}`);
+        console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
         const rawPrompt = await textProvider.generateText(promptRequest, {
           systemPrompt: refVideoSystem,
           images: [sceneFramePath],
           temperature: 0.7,
         });
-        videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
+        const cleanRawPrompt = stripThinkingBlocks(rawPrompt);
+        videoPrompt = `Duration: ${effectiveDuration}s.\n\n${cleanRawPrompt}`;
+        console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
       } catch (err) {
         console.warn("[SingleReferenceVideo] Vision prompt generation failed, falling back:", err);
+        const motionContextFallback = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+        const refShotCharsFallback = filterShotCharacters(motionContextFallback, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
         videoPrompt = buildReferenceVideoPrompt({
-          videoScript: stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote),
+          videoScript: motionContextFallback,
           cameraDirection: shot.cameraDirection || "static",
           duration: effectiveDuration,
-          characters: projectCharacters,
+          characters: refShotCharsFallback,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
           slotContents: refVideoSlots,
           visualStyleTag: singleRefVideoStyleTag,
@@ -3456,7 +3511,7 @@ async function handleSingleReferenceVideo(
       ? await enhanceVideoPrompt(videoPrompt, modelConfig?.video?.protocol ?? "", resolveAIProvider(modelConfig))
       : videoPrompt;
 
-    console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
+    console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model)\n${"=".repeat(80)}\n${finalVideoPrompt}\n${"=".repeat(80)}\n`);
 
     const result = await videoProvider.generateVideo({
       initialImage: sceneFramePath,
@@ -3655,26 +3710,31 @@ async function handleBatchReferenceVideo(
             // Prefer videoScript (already optimized for video models) over raw motionScript.
             // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
             const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+            const batchRefShotChars = filterShotCharacters(motionContext, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
             const promptRequest = buildRefVideoPromptRequest({
               motionScript: motionContext,
               cameraDirection: shot.cameraDirection || "static",
               duration: effectiveDuration,
-              characters: projectCharacters,
+              characters: batchRefShotChars,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
             });
+            console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
             const rawPrompt = await textProvider.generateText(promptRequest, {
               systemPrompt: refVideoSystem,
               images: [sceneFramePath],
               temperature: 0.7,
             });
+            console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
             videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
           } catch (err) {
             console.warn("[BatchReferenceVideo] Vision prompt generation failed, falling back:", err);
+            const motionContextFallback = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+            const batchRefShotCharsFallback = filterShotCharacters(motionContextFallback, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
             videoPromptRaw = buildReferenceVideoPrompt({
-              videoScript: stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote),
+              videoScript: motionContextFallback,
               cameraDirection: shot.cameraDirection || "static",
               duration: effectiveDuration,
-              characters: projectCharacters,
+              characters: batchRefShotCharsFallback,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: refVideoSlots,
               visualStyleTag: batchRefVideoStyleTag,
@@ -3686,7 +3746,7 @@ async function handleBatchReferenceVideo(
           ? await enhanceVideoPrompt(videoPromptRaw, batchRefVideoProtocol, batchRefTextProvider)
           : videoPromptRaw;
 
-        console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating video from scene frame`);
+        console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
 
         const result = await videoProvider.generateVideo({
           initialImage: sceneFramePath,
@@ -3871,7 +3931,8 @@ async function handleSingleVideoPrompt(
     return NextResponse.json({ error: "No frame available. Generate frames first." }, { status: 400 });
   }
 
-  const shotCharacters = await db.select().from(characters).where(eq(characters.projectId, shot.projectId));
+  // 使用集绑定角色（而非全量项目角色），确保幼年集只选幼年变体
+  const shotCharacters = await getEpisodeCharacters(shot.projectId, shot.episodeId);
   const shotDialogues = await db
     .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
     .from(dialogues)
@@ -3881,7 +3942,7 @@ async function handleSingleVideoPrompt(
   const onScreenDialogueChars = shotDialogues
     .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
     .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-  
+
   const dialogueList = shotDialogues.map((d) => {
     const char = shotCharacters.find((c) => c.id === d.characterId);
     const characterName = char?.name ?? "Unknown";
@@ -3904,21 +3965,33 @@ async function handleSingleVideoPrompt(
     // Prefer videoScript (already optimized for video models) over raw motionScript.
     // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
     const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+    // 合并所有文本字段做角色匹配——确保场景描述里的「10岁龙渊」能触发精确年龄匹配，
+    // 即使 videoScript/motionScript 里只写了「龙渊」也不丢失年龄信息
+    const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+      .filter(Boolean)
+      .join(" ");
+    // 只传本镜头实际出现的角色（filterShotCharacters 无匹配时返回 []，不 fallback 到全量）
+    const filteredCharsForPrompt = filterShotCharacters(allShotText, shotCharacters, {
+      contextText: shot.startFrameDesc ?? undefined,
+    });
     const promptRequest = buildRefVideoPromptRequest({
       motionScript: motionContext,
       cameraDirection: shot.cameraDirection || "static",
       duration: effectiveDuration,
       frameCount: visionFrames.length,
-      characters: shotCharacters,
+      characters: filteredCharsForPrompt,
       dialogues: dialogueList.length > 0 ? dialogueList : undefined,
     });
-    console.log(`[SingleVideoPrompt] Shot ${shot.sequence} promptRequest length=${promptRequest.length}`);
+    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
     const rawPrompt = await textProvider.generateText(promptRequest, {
       systemPrompt: refVideoSystem,
       images: visionFrames,
     });
-    const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
-    console.log(`[SingleVideoPrompt] Shot ${shot.sequence} videoPrompt length=${videoPrompt.length}`);
+    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
+    // 生成后立即用 DB 对白覆盖——保证 UI 显示的就是最终发给视频模型的完整 prompt
+    const videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
+    const videoPrompt = ensureDialoguesInPrompt(videoPromptRaw, dialogueList);
+    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
     await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shotId));
     return NextResponse.json({ shotId, videoPrompt, status: "ok" });
   } catch (err) {
@@ -3999,21 +4072,34 @@ async function handleBatchVideoPrompt(
           };
         });
 
-        const motionContext = shot.videoScript || shot.motionScript || shot.prompt || "";
+        const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+        // 合并所有文本字段做角色匹配——确保场景描述里的「10岁龙渊」能触发精确年龄匹配
+        const allBatchShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+          .filter(Boolean)
+          .join(" ");
+        // 只传本镜头实际出现的角色（filterShotCharacters 无匹配时返回 []，不 fallback 到全量）
+        const filteredCharsForBatchPrompt = filterShotCharacters(allBatchShotText, batchCharacters, {
+          contextText: shot.startFrameDesc ?? undefined,
+        });
         const promptRequest = buildRefVideoPromptRequest({
           motionScript: motionContext,
           cameraDirection: shot.cameraDirection || "static",
           duration: effectiveDuration,
           frameCount: visionFrames.length,
-          characters: batchCharacters,
+          characters: filteredCharsForBatchPrompt,
           dialogues: dialogueList.length > 0 ? dialogueList : undefined,
         });
+        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
         const rawPrompt = await textProvider.generateText(promptRequest, {
           systemPrompt: refVideoSystem,
           images: visionFrames,
         });
-        const videoPrompt = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
+        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
+        // 生成后立即用 DB 对白覆盖——保证 UI 显示的就是最终发给视频模型的完整 prompt
+        const videoPromptRaw2 = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
+        const videoPrompt = ensureDialoguesInPrompt(videoPromptRaw2, dialogueList);
         await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shot.id));
+        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
         console.log(`[BatchVideoPrompt] Shot ${shot.sequence} done (${((Date.now() - shotStart) / 1000).toFixed(1)}s, ${visionFrames.length} frames)`);
         return { shotId: shot.id, status: "ok" };
       } catch (err) {

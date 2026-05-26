@@ -15,6 +15,8 @@ interface EpisodeData {
   keywords: string;
   idea: string;
   script?: string;
+  /** 仅本集正文（不含卷首 preamble），用于角色匹配 */
+  episodeScript?: string;
   characters?: string[];
 }
 
@@ -179,7 +181,9 @@ export async function POST(
     if (!episodeId) continue;
 
     const explicitChars = epData.characters ?? [];
-    const scriptText = (epData.script || epData.idea || "").toLowerCase();
+    // 优先使用 episodeScript（仅本集正文，不含卷首 preamble），
+    // 避免第一集因 preamble 里的全角色档案而误链接所有角色
+    const scriptText = (epData.episodeScript || epData.script || epData.idea || "").toLowerCase();
 
     // Collect names to link: explicit list union text-match fallback
     const namesToLink = new Set<string>();

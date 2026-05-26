@@ -20,6 +20,8 @@ import {
   RefreshCw,
   Clock,
   Scissors,
+  Plus,
+  Trash2,
 } from "lucide-react";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 
@@ -100,6 +102,12 @@ export function ShotDrawer({
 
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
 
+  // 台词编辑状态
+  type EditDialogue = { id?: string; characterName: string; text: string };
+  const [editingDialogues, setEditingDialogues] = useState(false);
+  const [editDialogues, setEditDialogues] = useState<EditDialogue[]>([]);
+  const [savingDialogues, setSavingDialogues] = useState(false);
+
   // Sync local state when shot changes
   useEffect(() => {
     if (!shot) return;
@@ -115,6 +123,8 @@ export function ShotDrawer({
     setGeneratingVideo(false);
     setGeneratingPrompt(false);
     setRewritingText(false);
+    setEditingDialogues(false);
+    setEditDialogues(shot.dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
   }, [shot?.id]);
 
   // Escape key to close
@@ -146,6 +156,25 @@ export function ShotDrawer({
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+    }
+  }
+
+  async function handleSaveDialogues() {
+    if (!shot) return;
+    setSavingDialogues(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/shots/${shot.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dialogues: editDialogues }),
+      });
+      setEditingDialogues(false);
+      onUpdate();
+      toast.success("台词已保存");
+    } catch (err) {
+      toast.error("保存台词失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSavingDialogues(false);
     }
   }
 
@@ -405,18 +434,85 @@ export function ShotDrawer({
                   </button>
                 )}
               </div>
-              {shot.dialogues.length > 0 && (
-                <div className="space-y-1 rounded-xl bg-[--surface] p-3">
+              {/* 台词区域：只读 / 编辑切换 */}
+              <div className="rounded-xl bg-[--surface] p-3 space-y-2">
+                <div className="flex items-center justify-between">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.dialogue")}</p>
-                  {shot.dialogues.map((d) => (
-                    <p key={d.id} className="text-sm">
-                      <span className="font-semibold text-primary">{d.characterName}</span>
-                      <span className="mx-1.5 text-[--text-muted]">&mdash;</span>
-                      <span className="text-[--text-secondary]">{d.text}</span>
-                    </p>
-                  ))}
+                  {!editingDialogues ? (
+                    <button
+                      onClick={() => {
+                        setEditDialogues(shot.dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
+                        setEditingDialogues(true);
+                      }}
+                      className="text-[10px] text-primary hover:underline"
+                    >
+                      编辑
+                    </button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditingDialogues(false)} className="text-[10px] text-[--text-muted] hover:underline">取消</button>
+                      <button onClick={handleSaveDialogues} disabled={savingDialogues} className="text-[10px] text-primary font-semibold hover:underline disabled:opacity-50">
+                        {savingDialogues ? "保存中…" : "保存"}
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
+
+                {!editingDialogues ? (
+                  shot.dialogues.length > 0 ? (
+                    shot.dialogues.map((d) => (
+                      <p key={d.id} className="text-sm">
+                        <span className="font-semibold text-primary">{d.characterName}</span>
+                        <span className="mx-1.5 text-[--text-muted]">&mdash;</span>
+                        <span className="text-[--text-secondary]">{d.text}</span>
+                      </p>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-[--text-muted]">无台词</p>
+                  )
+                ) : (
+                  <div className="space-y-2">
+                    {editDialogues.map((d, i) => (
+                      <div key={i} className="flex items-start gap-2">
+                        <input
+                          value={d.characterName}
+                          onChange={(e) => {
+                            const next = [...editDialogues];
+                            next[i] = { ...next[i], characterName: e.target.value };
+                            setEditDialogues(next);
+                          }}
+                          placeholder="角色名"
+                          className="w-20 shrink-0 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] font-semibold text-primary outline-none focus:border-primary/50"
+                        />
+                        <textarea
+                          value={d.text}
+                          onChange={(e) => {
+                            const next = [...editDialogues];
+                            next[i] = { ...next[i], text: e.target.value };
+                            setEditDialogues(next);
+                          }}
+                          rows={2}
+                          placeholder="台词内容"
+                          className="flex-1 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[12px] text-[--text-secondary] outline-none focus:border-primary/50 resize-none"
+                        />
+                        <button
+                          onClick={() => setEditDialogues(editDialogues.filter((_, j) => j !== i))}
+                          className="mt-1 text-red-400 hover:text-red-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setEditDialogues([...editDialogues, { characterName: "", text: "" }])}
+                      className="flex items-center gap-1 text-[11px] text-[--text-muted] hover:text-primary"
+                    >
+                      <Plus className="h-3 w-3" />
+                      添加台词
+                    </button>
+                  </div>
+                )}
+              </div>
               <Button size="xs" variant="outline" onClick={handleRewriteText} disabled={rewritingText || anyGenerating}>
                 {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {rewritingText ? t("common.generating") : t("shot.rewriteText")}

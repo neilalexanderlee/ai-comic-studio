@@ -308,7 +308,7 @@ export default function EpisodeStoryboardPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "batch_frame_generate",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, continueFromPrev },
+          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, continueFromPrev, disableChaining: independentFirstFrame },
           modelConfig: getModelConfig(),
           episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
           enhancePrompts,
@@ -1190,6 +1190,7 @@ export default function EpisodeStoryboardPage() {
               batchGeneratingVideoPrompts={generatingVideoPrompts}
               batchGeneratingVideos={generatingVideos}
               prevSeedanceLastFrame={index > 0 ? project.shots[index - 1]?.seedanceLastFrame : null}
+              prevLastFrame={index > 0 ? project.shots[index - 1]?.lastFrame : null}
               enhancePrompts={enhancePrompts}
               independentFirstFrame={independentFirstFrame}
             />
