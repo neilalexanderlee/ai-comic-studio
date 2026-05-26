@@ -190,15 +190,28 @@ export class SeedanceProvider implements VideoProvider {
     return 5;                                 // fallback
   }
 
+  /**
+   * 在 prompt 末尾追加"禁止背景音乐"指令（若尚未包含）。
+   * Seedance API 无法单独关闭 BGM（generate_audio 是全开/全关），
+   * 只能通过 prompt 指令让模型只生成人声对白和环境音效、不生成 BGM。
+   */
+  private suppressBgmInPrompt(prompt: string): string {
+    if (prompt.includes("禁止背景音乐") || prompt.includes("无背景音乐")) return prompt;
+    return `${prompt}\n禁止背景音乐。`;
+  }
+
   /** 首尾帧模式：提供第一帧和最后一帧图片 */
   private buildKeyframeBody(
     params: VideoGenerateParams & { firstFrame: string; lastFrame: string; firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string }
   ): Record<string, unknown> {
     const dur = this.resolveDuration(params.duration);
+    // generate_audio: true 保留对白+音效；prompt 层禁止 BGM
+    const generateAudio = params.generateAudio ?? true;
+    const promptText = generateAudio ? this.suppressBgmInPrompt(params.prompt) : params.prompt;
     const body: Record<string, unknown> = {
       model: this.model,
       content: [
-        { type: "text", text: params.prompt },
+        { type: "text", text: promptText },
         {
           type: "image_url",
           // 优先使用图片生成 API 返回的公网 URL，省去本地读文件+base64 编码
@@ -212,6 +225,7 @@ export class SeedanceProvider implements VideoProvider {
         },
       ],
       ratio: params.ratio || "16:9",
+      generate_audio: generateAudio,
       return_last_frame: true,
       watermark: false,
     };
@@ -224,13 +238,16 @@ export class SeedanceProvider implements VideoProvider {
     params: VideoGenerateParams & { initialImage: string }
   ): Record<string, unknown> {
     const dur = this.resolveDuration(params.duration);
+    const generateAudio = params.generateAudio ?? true;
+    const promptText = generateAudio ? this.suppressBgmInPrompt(params.prompt) : params.prompt;
     const body: Record<string, unknown> = {
       model: this.model,
       content: [
-        { type: "text", text: params.prompt },
+        { type: "text", text: promptText },
         { type: "image_url", image_url: { url: toImageUrl(params.initialImage) } },
       ],
       ratio: params.ratio || "16:9",
+      generate_audio: generateAudio,
       return_last_frame: true,
       watermark: false,
     };

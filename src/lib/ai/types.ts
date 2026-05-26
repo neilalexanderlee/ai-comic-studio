@@ -78,6 +78,13 @@ export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams) &
    * - 'flex'：弹性模式，成本降低约50%，生成时间较长
    */
   serviceTier?: 'auto' | 'flex';
+  /**
+   * 是否生成同步音频（仅 Seedance 2.0 / 1.5 Pro 支持）。
+   * - true：自动生成与画面匹配的人声、音效及背景音乐
+   * - false（默认）：输出无声视频，适合后期制作工作流
+   * 官方文档：generate_audio 参数，默认 true；我们默认 false 以避免未经控制的 BGM。
+   */
+  generateAudio?: boolean;
   /** Called as soon as a provider has a reusable remote result URL, before local download. */
   onRemoteResult?: (result: { videoUrl: string; taskId?: string }) => Promise<void> | void;
 };

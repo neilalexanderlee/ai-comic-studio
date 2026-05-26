@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets } from "@/lib/db/schema";
 import { eq, asc, and, lt, gt, desc, inArray } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import fs from "node:fs";
 import path from "path";
 import { ulid } from "ulid";
 import { enqueueTask } from "@/lib/task-queue";
@@ -44,12 +45,43 @@ import { resolveFrameMode } from "@/lib/storyboard/frame-generation-strategy";
 
 export const maxDuration = 300;
 
+function shotFrameFileOnDisk(framePath: string | null | undefined): boolean {
+  if (!framePath) return false;
+  try {
+    return fs.existsSync(path.resolve(framePath));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 首帧参考图视频模式：仅用 firstFrame 驱动 Seedance，不把 seedance_last_frame 当尾帧输入。
+ * 仅当磁盘上存在可用的 AI 生成尾帧时，才走首尾帧插值模式。
+ */
+function shouldUseFirstFrameVideoMode(
+  shot: { lastFrame?: string | null },
+  isCrowdShot: boolean
+): boolean {
+  if (isCrowdShot) return true;
+  return !shotFrameFileOnDisk(shot.lastFrame);
+}
+
+/** 链式继承：优先用上一镜视频真实尾帧，其次 AI 尾帧。 */
+function resolveChainFramePath(shot: {
+  seedanceLastFrame?: string | null;
+  lastFrame?: string | null;
+}): string | undefined {
+  if (shotFrameFileOnDisk(shot.seedanceLastFrame)) return shot.seedanceLastFrame!;
+  if (shotFrameFileOnDisk(shot.lastFrame)) return shot.lastFrame!;
+  return undefined;
+}
+
 /** Download Seedance return_last_frame and return shot DB field updates. */
 async function buildVideoLastFrameUpdate(params: {
   lastFrameUrl: string;
   shotId: string;
   uploadDir: string;
-  /** Reference-mode: replace AI lastFrame too. Keyframe-mode: only persist seedanceLastFrame. */
+  /** @deprecated 视频尾帧只写入 seedance_last_frame；链式继承读 seedanceLastFrame，不覆盖 AI last_frame */
   replaceAiLastFrame: boolean;
   existingLastFrame?: string | null;
   existingSeedanceLastFrame?: string | null;
@@ -1745,7 +1777,7 @@ async function handleBatchFrameGenerate(
         if (!overwrite && shot.firstFrame && shot.lastFrame) {
           // Prefer seedanceLastFrame (actual video last frame) for chain continuity
           if (!disableChaining) {
-            previousLastFrame = shot.seedanceLastFrame || shot.lastFrame;
+            previousLastFrame = resolveChainFramePath(shot);
           }
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
           continue;
@@ -2124,11 +2156,12 @@ async function handleSingleFrameGenerate(
       ? filterShotCharacters(prevShotTextSingle, projectCharacters, { contextText: singleFrameCharacterContext })
       : [];
     const isCrowdToCharCutSingle = prevShotCharsSingle.length === 0 && charsForFrame.length > 0;
-    const shouldChainSingle = !disableChaining && !!previousShot?.lastFrame && !isCrowdToCharCutSingle;
+    const previousChainFrame = previousShot ? resolveChainFramePath(previousShot) : undefined;
+    const shouldChainSingle = !disableChaining && !!previousChainFrame && !isCrowdToCharCutSingle;
 
     if (shouldChainSingle) {
-      // Same-scene continuation: inherit previous shot's last frame as this shot's first frame
-      firstFramePath = previousShot!.lastFrame!;
+      // Same-scene continuation: prefer previous shot's video last frame (seedanceLastFrame)
+      firstFramePath = previousChainFrame!;
     } else {
       // Generate fresh first frame from this shot's own startFrameDesc + character sheets.
       // This handles: first shot, crowd→character cuts, and shots with no prior frame.
@@ -2253,8 +2286,8 @@ async function handleSingleVideoGenerate(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
-  if (!shot.firstFrame) {
-    return NextResponse.json({ error: "Shot first frame not generated yet" }, { status: 400 });
+  if (!shot.firstFrame || !shotFrameFileOnDisk(shot.firstFrame)) {
+    return NextResponse.json({ error: "首帧文件不存在，请重新生成首帧" }, { status: 400 });
   }
 
   const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
@@ -2286,11 +2319,7 @@ async function handleSingleVideoGenerate(
   const singleVideoShotText = buildShotCharacterText(shot);
   const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters, { contextText: singleVideoCharacterContext });
   const isSingleVideoCrowdShot = singleVideoShotChars.length === 0;
-  const useSingleVideoReferenceMode = isSingleVideoCrowdShot || !shot.lastFrame;
-
-  if (!useSingleVideoReferenceMode && !shot.lastFrame) {
-    return NextResponse.json({ error: "Shot last frame not generated yet" }, { status: 400 });
-  }
+  const useSingleVideoReferenceMode = shouldUseFirstFrameVideoMode(shot, isSingleVideoCrowdShot);
 
   const shotDialogues = await db
     .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
@@ -2358,8 +2387,7 @@ async function handleSingleVideoGenerate(
     //   1. Strip any BGM language the LLM may have included (was based on old motionScript w/ BGM)
     //   2. Inject fresh dialogues from DB (pre-generated prompt may be stale or LLM may have omitted them)
     const hasPreGeneratedPrompt = !!shot.videoPrompt;
-    // Reference-mode shots use only the first frame as the initial image. This covers
-    // crowd shots and any shot that intentionally has no generated lastFrame.
+    // 首帧参考图模式：仅用 firstFrame；群演镜头或无有效 AI 尾帧文件时走此路径（不因 DB 残留 last_frame 误入首尾帧模式）。
     const videoPromptBase = stripBgmContent(
       shot.videoPrompt || (
         useSingleVideoReferenceMode
@@ -2395,10 +2423,13 @@ async function handleSingleVideoGenerate(
     // 始终用 DB 最新对白覆盖 prompt 中的对白区块（处理预生成 prompt 过期的情况）
     const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
 
+    console.log(
+      `\n${"=".repeat(80)}\n[SingleVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${useSingleVideoReferenceMode ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+    );
+
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
-    // Shots without lastFrame use reference mode (initialImage = firstFrame only).
-    // Full frame-pair shots use keyframe mode (firstFrame + lastFrame).
+    // 首帧模式：initialImage = firstFrame；首尾帧模式：firstFrame + 磁盘上存在的 AI lastFrame。
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
         remoteVideoUrl: videoUrl,
@@ -2417,7 +2448,7 @@ async function handleSingleVideoGenerate(
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
     await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "重新生成前");
 
-  // Save Seedance video last frame: reference-mode replaces lastFrame; keyframe-mode only seedanceLastFrame.
+  // 视频真实尾帧只写入 seedance_last_frame（供下一镜链式继承），不覆盖 AI 尾帧 last_frame。
     let singleLastFrameUpdate: Record<string, unknown> = {};
     if (result.lastFrameUrl) {
       try {
@@ -2425,14 +2456,14 @@ async function handleSingleVideoGenerate(
           lastFrameUrl: result.lastFrameUrl,
           shotId,
           uploadDir: versionedUploadDir,
-          replaceAiLastFrame: useSingleVideoReferenceMode,
+          replaceAiLastFrame: false,
           existingLastFrame: shot.lastFrame,
           existingSeedanceLastFrame: shot.seedanceLastFrame,
         });
         if (Object.keys(singleLastFrameUpdate).length > 0) {
           console.log(
             `[SingleVideoGenerate] Shot ${shotId}: saved video last frame → ${singleLastFrameUpdate.seedanceLastFrame}` +
-              (useSingleVideoReferenceMode ? " [reference mode]" : " [keyframe mode, seedanceLastFrame only]")
+              (useSingleVideoReferenceMode ? " [first-frame mode]" : " [keyframe mode]")
           );
         }
       } catch (frameErr) {
@@ -2536,6 +2567,15 @@ async function handleBatchVideoGenerate(
   const results = await Promise.all(
     eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; videoUrl?: string; error?: string }> => {
       try {
+        if (!shot.firstFrame || !shotFrameFileOnDisk(shot.firstFrame)) {
+          return {
+            shotId: shot.id,
+            sequence: shot.sequence,
+            status: "error",
+            error: "首帧文件不存在，请重新生成首帧",
+          };
+        }
+
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
         if (!shot.videoUrl && shot.remoteVideoUrl) {
           const resumedPath = await resumeRemoteVideoIfAvailable({
@@ -2576,7 +2616,7 @@ async function handleBatchVideoGenerate(
         });
 
         const isBatchCrowdShot = isCrowdShotMap.get(shot.id) ?? false;
-        const useBatchReferenceMode = isBatchCrowdShot || !shot.lastFrame;
+        const useBatchReferenceMode = shouldUseFirstFrameVideoMode(shot, isBatchCrowdShot);
         const batchHasPreGenPrompt = !!shot.videoPrompt;
         // 只传本镜头实际出现的角色
         const batchShotChars = filterShotCharacters(videoScript, batchCharacters, { contextText: batchVideoCharacterContext });
@@ -2616,6 +2656,10 @@ async function handleBatchVideoGenerate(
         // 始终用 DB 最新对白覆盖 prompt 中的对白区块
         const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
 
+        console.log(
+          `\n${"=".repeat(80)}\n[BatchVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${useBatchReferenceMode ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+        );
+
         const batchOnRemoteResult = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string }) => {
           await db
             .update(shots)
@@ -2632,7 +2676,7 @@ async function handleBatchVideoGenerate(
         const result = await videoProvider.generateVideo(
           useBatchReferenceMode
             ? {
-                initialImage: shot.firstFrame!,
+                initialImage: shot.firstFrame,
                 prompt: videoPrompt,
                 duration: effectiveDuration,
                 ratio,
@@ -2640,7 +2684,7 @@ async function handleBatchVideoGenerate(
                 onRemoteResult: batchOnRemoteResult,
               }
             : {
-                firstFrame: shot.firstFrame!,
+                firstFrame: shot.firstFrame,
                 lastFrame: shot.lastFrame!,
                 prompt: videoPrompt,
                 duration: effectiveDuration,
@@ -2657,14 +2701,14 @@ async function handleBatchVideoGenerate(
               lastFrameUrl: result.lastFrameUrl,
               shotId: shot.id,
               uploadDir: versionedUploadDir,
-              replaceAiLastFrame: useBatchReferenceMode,
+              replaceAiLastFrame: false,
               existingLastFrame: shot.lastFrame,
               existingSeedanceLastFrame: shot.seedanceLastFrame,
             });
             if (Object.keys(batchLastFrameUpdate).length > 0) {
               console.log(
                 `[BatchVideoGenerate] Shot ${shot.sequence}: saved video last frame → ${batchLastFrameUpdate.seedanceLastFrame}` +
-                  (useBatchReferenceMode ? " [reference mode]" : " [keyframe mode, seedanceLastFrame only]")
+                  (useBatchReferenceMode ? " [first-frame mode]" : " [keyframe mode]")
               );
             }
           } catch (frameErr) {
@@ -2802,7 +2846,7 @@ async function handleBatchChainGenerate(
         // Skip if fully generated and overwrite not requested
         if (!overwrite && shot.firstFrame && shot.lastFrame && shot.videoUrl) {
           // Still advance the chain using best available last frame
-          chainPreviousFrame = shot.seedanceLastFrame || shot.lastFrame || undefined;
+          chainPreviousFrame = resolveChainFramePath(shot);
           emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
           continue;
         }
@@ -2992,6 +3036,10 @@ async function handleBatchChainGenerate(
             : videoPromptBase;
           // 始终用 DB 最新对白覆盖 prompt 中的对白区块
           const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
+
+          console.log(
+            `\n${"=".repeat(80)}\n[BatchChainGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${isCrowdShot ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+          );
 
           // Crowd shots use reference mode (initialImage only); character shots use keyframe mode.
           const videoResult = await videoProvider.generateVideo(
