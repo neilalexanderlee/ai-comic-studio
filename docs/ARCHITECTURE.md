@@ -59,10 +59,11 @@ Project (1)
   │     │           ├── motionScript            # 运动描述
   │     │           ├── cameraDirection         # 运镜
   │     │           ├── duration: int           # 秒
-  │     │           ├── firstFrame: path        # 本地文件路径
-  │     │           ├── lastFrame: path
+  │     │           ├── anchorFirst: path       # Seedream 首帧（Plan B）
+  │     │           ├── anchorLastAi: path       # Seedream AI 尾帧（可选）
+  │     │           ├── cutPoint: path           # 视频真实尾帧（Seedance return_last_frame）
   │     │           ├── videoUrl: path
-  │     │           ├── seedanceLastFrame: path # Seedance 实际尾帧
+  │     │           ├── chainSourceShotId / chainSourceType  # 首帧参考追溯
   │     │           ├── remoteVideoUrl          # 远程视频 URL（有效期 48h）
   │     │           └──< Dialogue (N)
   │     │
@@ -118,23 +119,23 @@ Shot prompt
             └── → videoUrl (本地路径)
 ```
 
-### 3.2 Reference 模式（单帧驱动）
+### 3.2 Reference 模式（已废弃）
 
-```
-Shot prompt
-    │
-    ├── buildSceneFramePrompt → [enhance] → generateImage → sceneRefFrame
-    │
-    └── buildReferenceVideoPrompt → [enhance] → generateVideo({ initialImage: sceneRefFrame })
-```
+Reference 双轨（`sceneRefFrame` → `referenceVideoUrl`）已从分镜生成入口移除；相关 `generate` action 返回 **410**。历史数据仍可在预览页查看，新镜头请走 keyframe 流程（§3.1）。
 
-### 3.3 Chain 模式（连续帧接力）
+### 3.3 镜头衔接
 
-```
-Shot[0]: firstFrame = 用户上传或独立生成
-Shot[i]: firstFrame = Shot[i-1].seedanceLastFrame（Seedance 实际尾帧）
-         ← 实现视频间的视觉连续性
-```
+> **帧/视频字段语义详见 [ARCHITECTURE-FRAMES.md](./ARCHITECTURE-FRAMES.md)。**
+
+**当前（2026-05）：**
+
+- 无批量链式、无生成画面前自动衔接。
+- 视频结束后写入本镜 `cut_point`。
+- 项目开关 **`link_shots_via_cut_point`**（UI「镜头衔接（视频尾帧）」，默认关）：开启时，同集同版本自动 `cut_point[i]` → `anchor_first[i+1]`（路径直拷）。
+- 手动：参考图选择器（AI 重绘）、「承接上一镜尾帧」（本集）、「承接上一集尾帧」（跨集）。
+- Worker `frame_generate` / `video_generate` 已废弃（enqueue **410**）。
+
+**已移除：** `batch_chain_generate`、续上集、一键续跑、镜间批量直拷、Reference 生成 API。
 
 ### 3.4 Prompt 增强流
 
@@ -170,15 +171,16 @@ Protocol 字符串 → prompt-enhancer.ts
 
 | action | 说明 |
 |---|---|
-| `batch_frame_generate` | 批量生成所有 shot 的首尾帧（Chain 模式） |
+| `batch_frame_generate` | 已废弃（410） |
 | `single_frame_generate` | 单个 shot 的首尾帧 |
-| `batch_video_generate` | 批量生成视频 |
+| `batch_video_generate` | 已废弃（410） |
 | `single_video_generate` | 单个视频 |
-| `batch_chain_generate` | 帧+视频链式批量生成 |
 | `single_scene_frame` | Reference 模式：生成单个场景帧 |
 | `batch_scene_frame` | Reference 模式：批量场景帧 |
 | `single_reference_video` | Reference 模式：单个参考视频 |
 | `batch_reference_video` | Reference 模式：批量参考视频 |
+
+> Reference 相关 action 在分镜页当前写死 `generationMode: "keyframe"`，UI 默认不可达，见 [ARCHITECTURE-FRAMES.md §6](./ARCHITECTURE-FRAMES.md#6-已知问题代码--产品)。
 
 SSE 事件格式：
 ```json

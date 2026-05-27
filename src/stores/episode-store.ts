@@ -11,7 +11,6 @@ export interface Episode {
   description: string | null;
   keywords: string | null;
   status: string;
-  generationMode: "keyframe" | "reference";
   finalVideoUrl: string | null;
   targetDurationSeconds: number | null;
   previewImages?: string[];
@@ -28,7 +27,7 @@ interface EpisodeStore {
   updateEpisode: (
     projectId: string,
     episodeId: string,
-    patch: Partial<Pick<Episode, "title" | "idea" | "script" | "status" | "generationMode">>
+    patch: Partial<Pick<Episode, "title" | "idea" | "script" | "status">>
   ) => Promise<void>;
   reorderEpisodes: (projectId: string, orderedIds: string[]) => Promise<void>;
 }

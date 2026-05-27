@@ -42,6 +42,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
+
+function buildShotCharacterText(shot: {
+  prompt?: string | null;
+  startFrameDesc?: string | null;
+  endFrameDesc?: string | null;
+  videoScript?: string | null;
+  motionScript?: string | null;
+}): string {
+  return [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+    .filter(Boolean)
+    .join(" ");
+}
 
 type ShotExtractPreview = {
   sequence: number;
@@ -70,17 +83,7 @@ export default function EpisodeStoryboardPage() {
   const { project, fetchProject } = useProjectStore();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const [generating, setGenerating] = useState(false);
-  const [generatingFrames, setGeneratingFrames] = useState(false);
-  const [generatingVideos, setGeneratingVideos] = useState(false);
-  const [generatingChain, setGeneratingChain] = useState(false);
-  const [generatingChainOverwrite, setGeneratingChainOverwrite] = useState(false);
-  // 独立生成首帧：关闭时每个分镜的首帧独立生成（不继承上一镜尾帧），适合场景多变、角色切换频繁的集数
-  const [independentFirstFrame, setIndependentFirstFrame] = useState(true);
-  const [generatingSceneFrames, setGeneratingSceneFrames] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
-  const [sceneFramesOverwrite, setSceneFramesOverwrite] = useState(false);
-  const [generatingFramesOverwrite, setGeneratingFramesOverwrite] = useState(false);
-  const [generatingVideosOverwrite, setGeneratingVideosOverwrite] = useState(false);
   const [videoRatio, setVideoRatio] = useState("16:9");
   const [videoGenerationResolution, setVideoGenerationResolution] = useState<"480p" | "720p">("480p");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
@@ -92,8 +95,8 @@ export default function EpisodeStoryboardPage() {
   const [newVersionDialogOpen, setNewVersionDialogOpen] = useState(false);
   const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
-  const [continueFromPrev, setContinueFromPrev] = useState(false);
   const [enhancePrompts, setEnhancePrompts] = useState(true); // AI prompt 增强，默认开
+  const [linkShotsViaCutPoint, setLinkShotsViaCutPoint] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
@@ -121,8 +124,9 @@ export default function EpisodeStoryboardPage() {
     }
   }, [project?.id, episodeStoreEpisodes.length, fetchEpisodes]);
 
-  const currentEpisodeSequence = episodeStoreEpisodes.find((e) => e.id === currentEpisodeId)?.sequence ?? 1;
-  const canContinueFromPrev = currentEpisodeSequence > 1;
+  const currentEpisodeSequence =
+    episodeStoreEpisodes.find((e) => e.id === (urlEpisodeId || currentEpisodeId))?.sequence ?? 1;
+  const canAdoptPrevEpisode = currentEpisodeSequence > 1;
 
   function switchView(mode: "list" | "kanban") {
     setViewMode(mode);
@@ -155,8 +159,6 @@ export default function EpisodeStoryboardPage() {
   }
 
   const textGuard = useModelGuard("text");
-  const imageGuard = useModelGuard("image");
-  const videoGuard = useModelGuard("video");
 
   useEffect(() => {
     if (!project?.id) return;
@@ -166,7 +168,10 @@ export default function EpisodeStoryboardPage() {
     if (project.enhancePrompts !== undefined) {
       setEnhancePrompts(project.enhancePrompts !== 0);
     }
-  }, [project?.id]);
+    if (project.linkShotsViaCutPoint !== undefined) {
+      setLinkShotsViaCutPoint(project.linkShotsViaCutPoint !== 0);
+    }
+  }, [project?.id, project?.enhancePrompts, project?.linkShotsViaCutPoint]);
 
   useEffect(() => {
     if (!project?.versions) return;
@@ -182,25 +187,13 @@ export default function EpisodeStoryboardPage() {
   if (!project) return null;
 
   const totalShots = project.shots.length;
-  const shotsWithFrames = project.shots.filter(
-    (s) => s.firstFrame && s.lastFrame
-  ).length;
-  // Storyboard generation now uses one smart keyframe workflow. Shots with only a
-  // first frame fall back to video reference mode automatically on the backend.
-  const generationMode = "keyframe" as "keyframe" | "reference";
-  const shotsWithVideo = project.shots.filter((s) =>
-    generationMode === "reference" ? s.referenceVideoUrl : s.videoUrl
-  ).length;
+  const shotsWithVideo = project.shots.filter((s) => s.videoUrl).length;
   const shotsWithVideoPrompts = project.shots.filter((s) => s.videoPrompt).length;
-  const shotsWithSceneFrames = project.shots.filter((s) => s.sceneRefFrame).length;
   const shotsWithFrameAny = project.shots.filter(
-    (s) => s.sceneRefFrame || s.firstFrame || s.lastFrame
+    (s) => s.anchorFirst || s.anchorLastAi || s.cutPoint
   ).length;
-  const shotsReadyForVideo = project.shots.filter((s) => s.firstFrame).length;
-  const charactersWithRefs = project.characters.filter((c) => c.assets?.some(a => a.imagePath));
-  const hasReferenceImages = charactersWithRefs.length > 0;
 
-  const anyGenerating = generating || generatingFrames || generatingVideos || generatingChain || generatingSceneFrames || generatingVideoPrompts;
+  const anyGenerating = generating || generatingVideoPrompts;
 
   const drawerShots = project.shots.map((shot) => ({
     id: shot.id,
@@ -212,19 +205,20 @@ export default function EpisodeStoryboardPage() {
     motionScript: shot.motionScript,
     cameraDirection: shot.cameraDirection,
     duration: shot.duration,
-    firstFrame: shot.firstFrame,
-    lastFrame: shot.lastFrame,
-    sceneRefFrame: shot.sceneRefFrame,
+    anchorFirst: shot.anchorFirst,
+    anchorLastAi: shot.anchorLastAi,
+    cutPoint: shot.cutPoint,
     videoPrompt: shot.videoPrompt,
-    videoUrl: generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl,
+    videoUrl: shot.videoUrl,
     dialogues: shot.dialogues || [],
+    isCrowdShot: filterShotCharacters(buildShotCharacterText(shot), project.characters).length === 0,
   }));
 
   async function handleGenerateShots() {
     // 当前版本有已生成的帧或视频时，自动新建版本保护现有资产，不再弹确认框。
     // 只有当前版本完全没有生成资产时，才在原版本上覆盖（空版本重解析，安全）。
     const hasGeneratedAssets = project?.shots?.some(
-      (s) => s.firstFrame || s.lastFrame || s.videoUrl || s.sceneRefFrame || s.referenceVideoUrl
+      (s) => s.anchorFirst || s.anchorLastAi || s.videoUrl || s.cutPoint
     );
     return handleGenerateShotsWithMode(hasGeneratedAssets ? undefined : (selectedVersionId ?? undefined));
   }
@@ -295,135 +289,6 @@ export default function EpisodeStoryboardPage() {
     }
   }
 
-  async function handleBatchGenerateFrames(overwrite = false) {
-    if (!project) return;
-    if (!imageGuard()) return;
-    setGeneratingFramesOverwrite(overwrite);
-    setGeneratingFrames(true);
-
-    let hasError = false;
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch_frame_generate",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, continueFromPrev, disableChaining: independentFirstFrame },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
-        }),
-      });
-
-      // Stream SSE events: each completed shot is emitted immediately
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          // Parse complete SSE events (separated by \n\n)
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? ""; // keep incomplete tail
-          for (const part of parts) {
-            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
-            if (!dataLine) continue;
-            try {
-              const event = JSON.parse(dataLine.slice(6)) as {
-                type?: string;
-                shotId?: string;
-                status?: string;
-                firstFrame?: string;
-                lastFrame?: string;
-              };
-              if (event.status === "error") hasError = true;
-              // Refresh only the affected shot so the frame appears immediately
-              if (event.shotId && (event.status === "ok" || event.status === "skipped")) {
-                fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-              }
-              if (event.type === "done") break;
-            } catch { /* ignore malformed events */ }
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Batch frame generate error:", err);
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-
-    if (hasError) toast.warning(t("common.batchPartialFailed"));
-    setGeneratingFramesOverwrite(false);
-    setGeneratingFrames(false);
-    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-  }
-
-  async function handleBatchGenerateVideos(overwrite = false) {
-    if (!project) return;
-    if (!videoGuard()) return;
-    setGeneratingVideosOverwrite(overwrite);
-    setGeneratingVideos(true);
-
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch_video_generate",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId, resolution: videoGenerationResolution },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
-        }),
-      });
-      const data = await response.json() as { results: Array<{ status: string }> };
-      if (data.results?.some((r) => r.status === "error")) {
-        toast.warning(t("common.batchPartialFailed"));
-      }
-    } catch (err) {
-      console.error("Batch video generate error:", err);
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-
-    setGeneratingVideosOverwrite(false);
-    setGeneratingVideos(false);
-    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-  }
-
-  async function handleBatchGenerateSceneFrames(overwrite = false) {
-    if (!project) return;
-    if (!imageGuard()) return;
-    setSceneFramesOverwrite(overwrite);
-    setGeneratingSceneFrames(true);
-
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch_scene_frame",
-          payload: { overwrite, versionId: selectedVersionId },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
-        }),
-      });
-      const data = await response.json() as { results: Array<{ status: string }> };
-      if (data.results?.some((r) => r.status === "error")) {
-        toast.warning(t("common.batchPartialFailed"));
-      }
-    } catch (err) {
-      console.error("Batch scene frame error:", err);
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-
-    setSceneFramesOverwrite(false);
-    setGeneratingSceneFrames(false);
-    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-  }
-
   async function handleBatchGenerateVideoPrompts() {
     if (!project) return;
     setGeneratingVideoPrompts(true);
@@ -453,136 +318,6 @@ export default function EpisodeStoryboardPage() {
     fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
-  async function handleBatchGenerateReferenceVideos(overwrite = false) {
-    if (!project) return;
-    if (!videoGuard()) return;
-    setGeneratingVideosOverwrite(overwrite);
-    setGeneratingVideos(true);
-
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch_reference_video",
-          payload: { ratio: videoRatio, overwrite, versionId: selectedVersionId },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
-        }),
-      });
-      const data = await response.json() as { results: Array<{ status: string }> };
-      if (data.results?.some((r) => r.status === "error")) {
-        toast.warning(t("common.batchPartialFailed"));
-      }
-    } catch (err) {
-      console.error("Batch reference video error:", err);
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-
-    setGeneratingVideosOverwrite(false);
-    setGeneratingVideos(false);
-    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-  }
-
-  // 链式生成：每个分镜依次执行 首帧 → 尾帧 → 视频，尾帧直接链入下一镜首帧
-  async function handleBatchChainGenerate(overwrite = false) {
-    if (!project) return;
-    if (!imageGuard()) return;
-    if (!videoGuard()) return;
-    setGeneratingChainOverwrite(overwrite);
-    setGeneratingChain(true);
-
-    let hasError = false;
-    try {
-      const response = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "batch_chain_generate",
-          payload: {
-            ratio: videoRatio,
-            overwrite,
-            versionId: selectedVersionId,
-            resolution: videoGenerationResolution,
-          },
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
-        }),
-      });
-
-      // SSE 流式读取：每完成一个分镜立即刷新
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-          for (const part of parts) {
-            const dataLine = part.split("\n").find((l) => l.startsWith("data: "));
-            if (!dataLine) continue;
-            try {
-              const event = JSON.parse(dataLine.slice(6)) as {
-                type?: string;
-                shotId?: string;
-                status?: string;
-              };
-              if (event.status === "error") hasError = true;
-              // frame_ok: 帧生成完成，立即刷新页面展示首尾帧
-              // ok: 整个分镜（帧+视频）完成
-              // skipped: 已跳过
-              if (event.shotId && (event.status === "ok" || event.status === "frame_ok" || event.status === "skipped")) {
-                fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-              }
-              if (event.type === "done") break;
-            } catch { /* ignore */ }
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Batch chain generate error:", err);
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-
-    if (hasError) toast.warning(t("common.batchPartialFailed"));
-    setGeneratingChainOverwrite(false);
-    setGeneratingChain(false);
-    fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
-  }
-
-
-  async function handleAutoRun() {
-    if (!project) return;
-    if (!confirm(t("project.autoRunConfirm"))) return;
-
-    const shots = project.shots;
-    const needsText = shots.length === 0 || shots.some((s) => !s.prompt && !s.motionScript);
-    const needsFrame = shots.some((s) =>
-      generationMode === "reference" ? !s.sceneRefFrame : !s.firstFrame || !s.lastFrame
-    );
-    const needsPrompt = shots.some((s) => !s.videoPrompt);
-    const needsVideo = shots.some((s) =>
-      generationMode === "reference" ? !s.referenceVideoUrl : !s.videoUrl
-    );
-
-    if (needsText) await handleGenerateShots();
-    if (needsFrame) {
-      if (generationMode === "reference") await handleBatchGenerateSceneFrames(false);
-      else await handleBatchGenerateFrames(false);
-    }
-    if (needsPrompt) await handleBatchGenerateVideoPrompts();
-    if (needsVideo) {
-      if (generationMode === "reference") await handleBatchGenerateReferenceVideos(false);
-      else await handleBatchGenerateVideos(false);
-    }
-  }
-
   return (
     <div className="animate-page-in space-y-4">
       {/* Page header */}
@@ -601,14 +336,7 @@ export default function EpisodeStoryboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <PromptEditButton
-            promptKeys={
-              generationMode === "reference"
-                ? ["shot_split", "scene_frame_generate"]
-                : "shot_split"
-            }
-            projectId={project.id}
-          />
+          <PromptEditButton promptKeys="shot_split" projectId={project.id} />
           {totalShots > 0 && (
             <div className="inline-flex gap-1 rounded-xl border border-[--border-subtle] bg-[--surface] p-1">
               <button
@@ -806,7 +534,6 @@ export default function EpisodeStoryboardPage() {
         <CharactersInlinePanel
           characters={project.characters}
           projectId={project.id}
-          generationMode={generationMode}
           onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
         />
 
@@ -840,20 +567,48 @@ export default function EpisodeStoryboardPage() {
               />
               <span className={enhancePrompts ? "text-[--text-primary] font-medium" : ""}>AI 增强</span>
             </label>
-            {/* 独立首帧开关 */}
             <label
               className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none"
-              title="开启后，每个分镜的首帧独立生成（不继承上一镜尾帧）。场景切换频繁时推荐开启，避免PPT割裂感。同场景连续镜头可关闭以保持像素级连续。"
+              title="视频生成成功后，将本镜视频尾帧（cut_point）直拷为同集下一镜首帧；群演→主角切换时自动跳过"
             >
               <input
                 type="checkbox"
-                checked={independentFirstFrame}
-                onChange={(e) => setIndependentFirstFrame(e.target.checked)}
+                checked={linkShotsViaCutPoint}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  setLinkShotsViaCutPoint(next);
+                  apiFetch(`/api/projects/${project.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ linkShotsViaCutPoint: next ? 1 : 0 }),
+                  }).catch(() => {});
+                }}
                 className="accent-primary h-3.5 w-3.5"
                 disabled={anyGenerating}
               />
-              <span className={independentFirstFrame ? "text-[--text-primary] font-medium" : ""}>独立首帧</span>
+              <span className={linkShotsViaCutPoint ? "text-[--text-primary] font-medium" : ""}>
+                镜头衔接（视频尾帧）
+              </span>
             </label>
+            <div className="h-3.5 w-px bg-[--border-subtle] shrink-0" />
+            <InlineModelPicker capability="video" />
+            <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
+            <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
+              {(["480p", "720p"] as const).map((res) => (
+                <button
+                  key={res}
+                  type="button"
+                  onClick={() => setVideoGenerationResolution(res)}
+                  className={`px-2.5 py-1.5 font-medium transition-colors ${
+                    videoGenerationResolution === res
+                      ? "bg-primary text-white"
+                      : "text-[--text-secondary] hover:bg-[--surface]"
+                  }`}
+                >
+                  {res}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Row 1: Generate text / shots */}
@@ -884,126 +639,9 @@ export default function EpisodeStoryboardPage() {
             </Button>
           </div>
 
-          {/* Row 2: Frames */}
+          {/* Row 2: Video prompts */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">2</span>
-            <InlineModelPicker capability="image" />
-            {generationMode === "keyframe" ? (
-              <>
-                <Button
-                  onClick={() => handleBatchGenerateFrames(false)}
-                  disabled={anyGenerating || totalShots === 0}
-                  variant={shotsWithFrames === totalShots && totalShots > 0 ? "outline" : "default"}
-                  size="sm"
-                >
-                  {generatingFrames && !generatingFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ImageIcon className="h-3.5 w-3.5" />
-                  )}
-                  {generatingFrames && !generatingFramesOverwrite
-                    ? t("common.generating")
-                    : t("project.batchGenerateFrames")}
-                </Button>
-                <Button
-                  onClick={() => handleBatchGenerateFrames(true)}
-                  disabled={anyGenerating || totalShots === 0}
-                  variant="ghost"
-                  size="icon"
-                  title={t("project.batchGenerateFramesOverwrite")}
-                >
-                  {generatingFrames && generatingFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-                {canContinueFromPrev && (
-                  <label className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={continueFromPrev}
-                      onChange={(e) => setContinueFromPrev(e.target.checked)}
-                      className="accent-primary h-3.5 w-3.5"
-                      disabled={anyGenerating}
-                    />
-                    {t("project.continueFromPrev")}
-                  </label>
-                )}
-              </>
-            ) : (
-              <>
-                <Button
-                  onClick={() => handleBatchGenerateSceneFrames(false)}
-                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages}
-                  variant={shotsWithSceneFrames === totalShots && totalShots > 0 ? "outline" : "default"}
-                  size="sm"
-                >
-                  {generatingSceneFrames && !sceneFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ImageIcon className="h-3.5 w-3.5" />
-                  )}
-                  {generatingSceneFrames && !sceneFramesOverwrite
-                    ? t("common.generating")
-                    : t("project.batchGenerateSceneFrames")}
-                </Button>
-                <Button
-                  onClick={() => handleBatchGenerateSceneFrames(true)}
-                  disabled={anyGenerating || totalShots === 0 || !hasReferenceImages}
-                  variant="ghost"
-                  size="icon"
-                  title={t("project.batchGenerateSceneFramesOverwrite")}
-                >
-                  {generatingSceneFrames && sceneFramesOverwrite ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3.5 w-3.5" />
-                  )}
-                </Button>
-              </>
-            )}
-          </div>
-
-          {/* Row 2.5: Chain generate (keyframe mode only) — frames + video per shot, sequential */}
-          {generationMode === "keyframe" && (
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">⛓</span>
-              <Button
-                onClick={() => handleBatchChainGenerate(false)}
-                disabled={anyGenerating || totalShots === 0}
-                variant={generatingChain && !generatingChainOverwrite ? "default" : "outline"}
-                size="sm"
-                className="gap-1.5 border-dashed"
-                title="链式生成：逐镜依次生成首帧→尾帧→视频，视频末帧直接作为下一镜首帧（更高连贯性）"
-              >
-                {generatingChain && !generatingChainOverwrite ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <VideoIcon className="h-3.5 w-3.5" />
-                )}
-                {generatingChain && !generatingChainOverwrite ? t("common.generating") : "链式生成（帧+视频）"}
-              </Button>
-              <Button
-                onClick={() => handleBatchChainGenerate(true)}
-                disabled={anyGenerating || totalShots === 0}
-                variant="ghost"
-                size="icon"
-                title="强制重新链式生成全部分镜（覆盖）"
-              >
-                {generatingChain && generatingChainOverwrite ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-3.5 w-3.5" />
-                )}
-              </Button>
-              <span className="text-xs text-[--text-muted]">逐镜顺序生成，视频末帧直链下一镜</span>
-            </div>
-          )}
-
-          {/* Row 3: Video prompts */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">3</span>
             <Button
               onClick={handleBatchGenerateVideoPrompts}
               disabled={anyGenerating || shotsWithFrameAny === 0}
@@ -1019,89 +657,6 @@ export default function EpisodeStoryboardPage() {
             </Button>
           </div>
 
-          {/* Row 4: Videos */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">4</span>
-            <InlineModelPicker capability="video" />
-            <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
-            {/* 分辨率选择器：480p 成本低，可后续手动画质增强；720p 一步到位 */}
-            <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
-              {(["480p", "720p"] as const).map((res) => (
-                <button
-                  key={res}
-                  onClick={() => setVideoGenerationResolution(res)}
-                  className={`px-2.5 py-1.5 font-medium transition-colors ${
-                    videoGenerationResolution === res
-                      ? "bg-primary text-white"
-                      : "text-[--text-secondary] hover:bg-[--surface]"
-                  }`}
-                >
-                  {res}
-                </button>
-              ))}
-            </div>
-            <Button
-              onClick={() =>
-                generationMode === "reference"
-                  ? handleBatchGenerateReferenceVideos(false)
-                  : handleBatchGenerateVideos(false)
-              }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsReadyForVideo === 0)}
-              variant={shotsWithVideo === totalShots && totalShots > 0 ? "outline" : "default"}
-              size="sm"
-            >
-              {generatingVideos && !generatingVideosOverwrite ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <VideoIcon className="h-3.5 w-3.5" />
-              )}
-              {generatingVideos && !generatingVideosOverwrite
-                ? t("common.generating")
-                : generationMode === "reference"
-                  ? t("project.batchGenerateReferenceVideos")
-                  : t("project.batchGenerateVideos")}
-            </Button>
-            <Button
-              onClick={() =>
-                generationMode === "reference"
-                  ? handleBatchGenerateReferenceVideos(true)
-                  : handleBatchGenerateVideos(true)
-              }
-              disabled={anyGenerating || totalShots === 0 || (generationMode === "reference" ? !hasReferenceImages : shotsReadyForVideo === 0)}
-              variant="ghost"
-              size="icon"
-              title={t("project.batchGenerateVideosOverwrite")}
-            >
-              {generatingVideos && generatingVideosOverwrite ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          </div>
-
-          {/* Divider + Auto-run */}
-          {totalShots > 0 && (
-            <>
-              <div className="h-px bg-[--border-subtle]" />
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handleAutoRun}
-                  disabled={anyGenerating}
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5"
-                >
-                  {anyGenerating ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Play className="h-3.5 w-3.5" />
-                  )}
-                  {t("project.autoRun")}
-                </Button>
-              </div>
-            </>
-          )}
         </div>
         )}
       </div>
@@ -1125,28 +680,25 @@ export default function EpisodeStoryboardPage() {
             id: shot.id,
             sequence: shot.sequence,
             prompt: shot.prompt,
-            firstFrame: shot.firstFrame,
-            lastFrame: shot.lastFrame,
-            sceneRefFrame: shot.sceneRefFrame,
+            anchorFirst: shot.anchorFirst,
+            anchorLastAi: shot.anchorLastAi,
             videoPrompt: shot.videoPrompt,
-            videoUrl: generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl,
+            videoUrl: shot.videoUrl,
           }))}
-          generationMode={generationMode}
           anyGenerating={anyGenerating}
           onOpenDrawer={(id) => setOpenDrawerShotId(id)}
-          onBatchFrames={() => handleBatchGenerateFrames(false)}
-          onBatchSceneFrames={() => handleBatchGenerateSceneFrames(false)}
           onBatchVideoPrompts={handleBatchGenerateVideoPrompts}
-          onBatchVideos={() => handleBatchGenerateVideos(false)}
-          onBatchReferenceVideos={() => handleBatchGenerateReferenceVideos(false)}
-          generatingFrames={generatingFrames}
-          generatingSceneFrames={generatingSceneFrames}
           generatingVideoPrompts={generatingVideoPrompts}
-          generatingVideos={generatingVideos}
         />
       ) : (
         <div className="space-y-3">
-          {project.shots.map((shot, index) => (
+          {project.shots.map((shot, index) => {
+            const isCrowdShot =
+              filterShotCharacters(buildShotCharacterText(shot), project.characters).length === 0;
+            const chainSourceSequence = shot.chainSourceShotId
+              ? project.shots.find((s) => s.id === shot.chainSourceShotId)?.sequence
+              : null;
+            return (
             <ShotCard
               key={shot.id}
               id={shot.id}
@@ -1159,42 +711,44 @@ export default function EpisodeStoryboardPage() {
               motionScript={shot.motionScript}
               cameraDirection={shot.cameraDirection}
               duration={shot.duration}
-              firstFrame={shot.firstFrame}
-              lastFrame={shot.lastFrame}
-              sceneRefFrame={shot.sceneRefFrame}
+              anchorFirst={shot.anchorFirst}
+              anchorLastAi={shot.anchorLastAi}
+              cutPoint={shot.cutPoint}
               videoPrompt={shot.videoPrompt}
-              videoUrl={generationMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl}
-              remoteVideoUrl={generationMode === "reference" ? shot.remoteReferenceVideoUrl : shot.remoteVideoUrl}
-              remoteVideoStatus={generationMode === "reference" ? shot.remoteReferenceVideoStatus : shot.remoteVideoStatus}
-              remoteVideoExpiresAt={generationMode === "reference" ? shot.remoteReferenceVideoExpiresAt : shot.remoteVideoExpiresAt}
-              remoteVideoLastDownloadAt={generationMode === "reference" ? shot.remoteReferenceVideoLastDownloadAt : shot.remoteVideoLastDownloadAt}
-              status={
-                generationMode === "reference"
-                  ? shot.status === "generating"
-                    ? "generating"
-                    : shot.referenceVideoUrl
-                      ? "completed"
-                      : "pending"
-                  : shot.status
-              }
+              videoUrl={shot.videoUrl}
+              remoteVideoUrl={shot.remoteVideoUrl}
+              remoteVideoStatus={shot.remoteVideoStatus}
+              remoteVideoExpiresAt={shot.remoteVideoExpiresAt}
+              remoteVideoLastDownloadAt={shot.remoteVideoLastDownloadAt}
+              status={shot.status}
+              episodeId={(urlEpisodeId || currentEpisodeId)!}
+              showAdoptPrevEpisode={index === 0 && canAdoptPrevEpisode}
               warnings={shot.warnings}
               videoResolution={shot.videoResolution}
               videoGenerationResolution={videoGenerationResolution}
               dialogues={shot.dialogues || []}
               onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
-              generationMode={generationMode}
               videoRatio={videoRatio}
               isCompact={openDrawerShotId !== null}
               onOpenDrawer={(id) => setOpenDrawerShotId(id)}
-              batchGeneratingFrames={generationMode === "reference" ? generatingSceneFrames : generatingFrames}
               batchGeneratingVideoPrompts={generatingVideoPrompts}
-              batchGeneratingVideos={generatingVideos}
-              prevSeedanceLastFrame={index > 0 ? project.shots[index - 1]?.seedanceLastFrame : null}
-              prevLastFrame={index > 0 ? project.shots[index - 1]?.lastFrame : null}
+              prevCutPoint={index > 0 ? project.shots[index - 1]?.cutPoint : null}
+              prevAnchorLastAi={index > 0 ? project.shots[index - 1]?.anchorLastAi : null}
+              isCrowdShot={isCrowdShot}
+              chainSourceShotId={shot.chainSourceShotId}
+              chainSourceType={shot.chainSourceType}
+              chainSourceSequence={chainSourceSequence ?? null}
+              frameRefShots={project.shots.map((s) => ({
+                id: s.id,
+                sequence: s.sequence,
+                anchorFirst: s.anchorFirst,
+                anchorLastAi: s.anchorLastAi,
+                cutPoint: s.cutPoint,
+              }))}
               enhancePrompts={enhancePrompts}
-              independentFirstFrame={independentFirstFrame}
             />
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -1206,10 +760,10 @@ export default function EpisodeStoryboardPage() {
           onShotChange={(id) => setOpenDrawerShotId(id)}
           onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
           projectId={project.id}
-          generationMode={generationMode}
           videoRatio={videoRatio}
           selectedVersionId={selectedVersionId}
           anyGenerating={anyGenerating}
+          enhancePrompts={enhancePrompts}
         />
       )}
 

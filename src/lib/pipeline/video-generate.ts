@@ -47,7 +47,7 @@ export async function handleVideoGenerate(task: Task) {
     .where(eq(shots.id, payload.shotId));
 
   if (!shot) throw new Error("Shot not found");
-  if (!shot.firstFrame || !shot.lastFrame) {
+  if (!shot.anchorFirst || !shot.anchorLastAi) {
     throw new Error("Shot frames not generated yet");
   }
 
@@ -169,10 +169,10 @@ export async function handleVideoGenerate(task: Task) {
   });
 
   const result = await videoProvider.generateVideo({
-    firstFrame: shot.firstFrame,
-    lastFrame: shot.lastFrame,
-    firstFrameRemoteUrl: shot.firstFrameRemoteUrl ?? undefined,
-    lastFrameRemoteUrl: shot.lastFrameRemoteUrl ?? undefined,
+    anchorFirst: shot.anchorFirst,
+    anchorLastAi: shot.anchorLastAi,
+    anchorFirstRemoteUrl: shot.anchorFirstRemoteUrl ?? undefined,
+    anchorLastAiRemoteUrl: shot.anchorLastAiRemoteUrl ?? undefined,
     prompt,
     duration: effectiveDuration,
     ratio: payload.ratio ?? "16:9",
@@ -193,8 +193,8 @@ export async function handleVideoGenerate(task: Task) {
 
   // Download Seedance's true last frame (the actual last frame of the generated video).
   // This provides higher-quality continuity anchoring for the NEXT shot's frame generation
-  // compared to the AI-generated `lastFrame` image used as input.
-  let seedanceLastFramePath: string | null = null;
+  // compared to the AI-generated `anchorLastAi` image used as input.
+  let cutPointPath: string | null = null;
   if (result.lastFrameUrl) {
     try {
       const frameRes = await fetch(result.lastFrameUrl);
@@ -205,7 +205,7 @@ export async function handleVideoGenerate(task: Task) {
         fs.mkdirSync(framesDir, { recursive: true });
         const framePath = path.join(framesDir, frameFilename);
         fs.writeFileSync(framePath, buffer);
-        seedanceLastFramePath = framePath;
+        cutPointPath = framePath;
         console.log(`[VideoGenerate] Saved Seedance last frame: ${framePath}`);
       }
     } catch (err) {
@@ -220,9 +220,9 @@ export async function handleVideoGenerate(task: Task) {
       videoUrl: result.filePath,
       status: "completed",
       videoResolution: payload.resolution ?? null,
-      ...(seedanceLastFramePath && { seedanceLastFrame: seedanceLastFramePath }),
+      ...(cutPointPath && { cutPoint: cutPointPath }),
     })
     .where(eq(shots.id, payload.shotId));
 
-  return { videoPath: result.filePath, seedanceLastFrame: seedanceLastFramePath ?? undefined };
+  return { videoPath: result.filePath, cutPoint: cutPointPath ?? undefined };
 }

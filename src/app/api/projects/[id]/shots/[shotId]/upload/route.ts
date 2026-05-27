@@ -8,7 +8,7 @@ import { ulid } from "ulid";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
-const ALLOWED_FIELDS = ["firstFrame", "lastFrame", "sceneRefFrame"] as const;
+const ALLOWED_FIELDS = ["anchorFirst", "anchorLastAi"] as const;
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
 
 export async function POST(

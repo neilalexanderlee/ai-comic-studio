@@ -12,9 +12,10 @@ export const projects = sqliteTable("projects", {
     .notNull()
     .default("draft"),
   finalVideoUrl: text("final_video_url"),
-  generationMode: text('generation_mode', { enum: ['keyframe', 'reference'] }).notNull().default('keyframe'),
   useProjectPrompts: integer("use_project_prompts").notNull().default(0),
   enhancePrompts: integer("enhance_prompts").notNull().default(1),
+  /** 视频完成后将 cut_point 直拷为同集下一镜 anchor_first（0=关） */
+  linkShotsViaCutPoint: integer("link_shots_via_cut_point").notNull().default(0),
   visualStyle: text("visual_style").notNull().default("anime_2d"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -38,9 +39,6 @@ export const episodes = sqliteTable("episodes", {
   })
     .notNull()
     .default("draft"),
-  generationMode: text("generation_mode", { enum: ["keyframe", "reference"] })
-    .notNull()
-    .default("keyframe"),
   description: text("description").default(""),
   keywords: text("keywords").default(""),
   finalVideoUrl: text("final_video_url"),
@@ -130,28 +128,22 @@ export const shots = sqliteTable("shots", {
   motionScript: text("motion_script"),
   cameraDirection: text("camera_direction").default("static"),
   duration: integer("duration").notNull().default(10),
-  firstFrame: text("first_frame"),
-  /** 首帧图片的公网临时 URL（图片生成 API 直接返回），用于 Seedance 视频生成请求，避免 base64 */
-  firstFrameRemoteUrl: text("first_frame_remote_url"),
-  lastFrame: text("last_frame"),
-  /** 尾帧图片的公网临时 URL（图片生成 API 直接返回），用于 Seedance 视频生成请求，避免 base64 */
-  lastFrameRemoteUrl: text("last_frame_remote_url"),
+  /** 本镜构图/视频用的首帧（生成、上传或参考重绘） */
+  anchorFirst: text("anchor_first"),
+  /** 首帧公网 URL（图片 API 返回），供 Seedance 请求避免 base64 */
+  anchorFirstRemoteUrl: text("anchor_first_remote_url"),
+  /** AI 生成的尾帧锚点（首尾帧插值视频终点，可选） */
+  anchorLastAi: text("anchor_last_ai"),
+  /** AI 尾帧公网 URL */
+  anchorLastAiRemoteUrl: text("anchor_last_ai_remote_url"),
   videoUrl: text("video_url"),
-  referenceVideoUrl: text("reference_video_url"),
   remoteVideoUrl: text("remote_video_url"),
   remoteVideoTaskId: text("remote_video_task_id"),
   remoteVideoStatus: text("remote_video_status"),
   remoteVideoCreatedAt: integer("remote_video_created_at", { mode: "timestamp" }),
   remoteVideoExpiresAt: integer("remote_video_expires_at", { mode: "timestamp" }),
   remoteVideoLastDownloadAt: integer("remote_video_last_download_at", { mode: "timestamp" }),
-  remoteReferenceVideoUrl: text("remote_reference_video_url"),
-  remoteReferenceVideoTaskId: text("remote_reference_video_task_id"),
-  remoteReferenceVideoStatus: text("remote_reference_video_status"),
-  remoteReferenceVideoCreatedAt: integer("remote_reference_video_created_at", { mode: "timestamp" }),
-  remoteReferenceVideoExpiresAt: integer("remote_reference_video_expires_at", { mode: "timestamp" }),
-  remoteReferenceVideoLastDownloadAt: integer("remote_reference_video_last_download_at", { mode: "timestamp" }),
   lastFrameUrl: text("last_frame_url"),
-  sceneRefFrame: text("scene_ref_frame"),
   videoScript: text("video_script"),
   videoPrompt: text("video_prompt"),
   episodeId: text("episode_id").references(() => episodes.id, {
@@ -169,11 +161,14 @@ export const shots = sqliteTable("shots", {
   /** 视频生成/增强的分辨率。null = 未知（历史数据），"480p" = 已生成待增强，"720p" = 已增强或直接生成 720p */
   videoResolution: text("video_resolution"),
   /**
-   * Seedance 视频的真实尾帧（本地文件路径）。
-   * 由 video-generate pipeline 在视频生成后立即从 lastFrameUrl 下载并保存。
-   * 用途：下一镜的 frame-generate 优先用此作为 previousLastFrame，比 AI 生成的 lastFrame 更连贯。
+   * 视频真实切点（Seedance return_last_frame 下载路径）。
+   * 仅作审阅与「参考图生成首帧」来源，不自动写入下一镜 anchor_first。
    */
-  seedanceLastFrame: text("seedance_last_frame"),
+  cutPoint: text("cut_point"),
+  /** 首帧参考来源分镜 id（可选，追溯用） */
+  chainSourceShotId: text("chain_source_shot_id"),
+  /** 首帧参考类型：anchor_first | anchor_last_ai | cut_point */
+  chainSourceType: text("chain_source_type"),
   /**
    * 背景音乐注记（从剧本 【背景音】 标签提取）。
    * 仅供后期剪辑参考，绝不注入视频生成 prompt。

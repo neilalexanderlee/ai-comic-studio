@@ -54,24 +54,24 @@ export class VeoProvider implements VideoProvider {
     const durationSeconds = clampDuration(params.duration);
     const aspectRatio = toAspectRatio(params.ratio);
 
-    const isKeyframe = "firstFrame" in params && !!params.firstFrame;
+    const isKeyframe = "anchorFirst" in params && !!params.anchorFirst;
     const isReference = "initialImage" in params && !!params.initialImage;
     const hasCharRefImages = params.referenceImages && params.referenceImages.length > 0;
     const canUseReferenceImages = this.isVeo31() && hasCharRefImages;
 
-    // Reference mode + Veo 3.1: use referenceImages API (no image/firstFrame)
-    // Reference mode + non-3.1: fall back to image-to-video (initialImage as firstFrame)
-    // Keyframe mode: always use image + optional lastFrame
+    // Reference mode + Veo 3.1: use referenceImages API (no image/anchorFirst)
+    // Reference mode + non-3.1: fall back to image-to-video (initialImage as anchorFirst)
+    // Keyframe mode: always use image + optional anchorLastAi
     if (isReference && canUseReferenceImages) {
       return this.generateWithReferenceImages(params, durationSeconds, aspectRatio);
     }
 
     // image-to-video mode
     if (!isKeyframe && !isReference) {
-      throw new Error("Veo requires an image input (firstFrame or initialImage)");
+      throw new Error("Veo requires an image input (anchorFirst or initialImage)");
     }
 
-    const imageSource = isKeyframe ? params.firstFrame! : (params as { initialImage: string }).initialImage;
+    const imageSource = isKeyframe ? params.anchorFirst! : (params as { initialImage: string }).initialImage;
     const imageData = readImageData(imageSource);
 
     const config: Record<string, unknown> = {
@@ -79,10 +79,10 @@ export class VeoProvider implements VideoProvider {
       aspectRatio,
     };
 
-    // lastFrame only supported by Veo 2.x and 3.1+, NOT Veo 3.0
+    // anchorLastAi only supported by Veo 2.x and 3.1+, NOT Veo 3.0
     const isVeo30 = this.model.includes("3.0") || this.model.includes("3-0");
-    if (isKeyframe && params.lastFrame && !isVeo30) {
-      config.lastFrame = readImageData(params.lastFrame);
+    if (isKeyframe && params.anchorLastAi && !isVeo30) {
+      config.anchorLastAi = readImageData(params.anchorLastAi);
     }
 
     const modeLabel = isKeyframe ? "keyframe" : "image2video";

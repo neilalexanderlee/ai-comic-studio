@@ -26,14 +26,12 @@ interface Character {
 interface CharactersInlinePanelProps {
   characters: Character[];
   projectId: string;
-  generationMode: "keyframe" | "reference";
   onUpdate: () => void;
 }
 
 export function CharactersInlinePanel({
   characters,
   projectId,
-  generationMode,
   onUpdate,
 }: CharactersInlinePanelProps) {
   const t = useTranslations("project");
@@ -55,11 +53,6 @@ export function CharactersInlinePanel({
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    // Auto-expand rule: condition takes precedence over localStorage at mount time
-    if (generationMode === "reference" && anyMissingRef) {
-      setOpen(true);
-      return;
-    }
     const stored = localStorage.getItem(storageKey);
     setOpen(stored === "true");
   }, []); // only on mount
@@ -108,7 +101,7 @@ export function CharactersInlinePanel({
 
   if (characters.length === 0) return null;
 
-  const needsAttention = generationMode === "reference" && anyMissingRef;
+  const needsAttention = anyMissingRef;
 
   return (
     <div className={`rounded-xl border transition-colors ${

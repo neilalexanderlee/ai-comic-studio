@@ -91,12 +91,10 @@ export async function persistStoryboardVersion(params: {
     const existingShots = await db
       .select({
         id: shots.id,
-        firstFrame: shots.firstFrame,
-        lastFrame: shots.lastFrame,
+        anchorFirst: shots.anchorFirst,
+        anchorLastAi: shots.anchorLastAi,
         videoUrl: shots.videoUrl,
-        seedanceLastFrame: shots.seedanceLastFrame,
-        sceneRefFrame: shots.sceneRefFrame,
-        referenceVideoUrl: shots.referenceVideoUrl,
+        cutPoint: shots.cutPoint,
       })
       .from(shots)
       .where(eq(shots.versionId, versionId));
@@ -109,12 +107,10 @@ export async function persistStoryboardVersion(params: {
     // 删磁盘文件（用 Set 避免相邻镜头共享文件被重复删除）
     const filesToDelete = new Set<string>();
     for (const s of existingShots) {
-      if (s.firstFrame) filesToDelete.add(s.firstFrame);
-      if (s.lastFrame) filesToDelete.add(s.lastFrame);
+      if (s.anchorFirst) filesToDelete.add(s.anchorFirst);
+      if (s.anchorLastAi) filesToDelete.add(s.anchorLastAi);
       if (s.videoUrl) filesToDelete.add(s.videoUrl);
-      if (s.seedanceLastFrame) filesToDelete.add(s.seedanceLastFrame);
-      if (s.sceneRefFrame) filesToDelete.add(s.sceneRefFrame);
-      if (s.referenceVideoUrl) filesToDelete.add(s.referenceVideoUrl);
+      if (s.cutPoint) filesToDelete.add(s.cutPoint);
     }
     for (const filePath of filesToDelete) tryDeleteFile(filePath);
 

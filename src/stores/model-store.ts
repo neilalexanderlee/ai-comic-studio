@@ -37,6 +37,14 @@ export interface ModelRef {
   modelId: string;
 }
 
+/** 与 model-store zustand partialize / user_client_prefs 表 JSON 一致（密钥仍在 provider_secrets） */
+export type ModelStorePersistPayload = {
+  providers: Array<Omit<Provider, "apiKey" | "secretKey"> & { apiKey?: string; secretKey?: undefined }>;
+  defaultTextModel: ModelRef | null;
+  defaultImageModel: ModelRef | null;
+  defaultVideoModel: ModelRef | null;
+};
+
 export interface ModelConfig {
   text: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; secretKey?: string; modelId: string } | null;
   image: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; secretKey?: string; modelId: string } | null;

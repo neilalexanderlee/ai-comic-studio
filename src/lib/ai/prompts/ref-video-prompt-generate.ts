@@ -172,7 +172,7 @@ export function getRefVideoPromptSystem(videoProtocol?: string): string {
       return JIMENG_VIDEO_SYSTEM;
     case "gemini":
       return VEO_SYSTEM;
-    case "seedance":
+    case "cut_point":
     default:
       return SEEDANCE_SYSTEM;
   }

@@ -82,12 +82,10 @@ export async function DELETE(
   const versionShots = await db
     .select({
       id: shots.id,
-      firstFrame: shots.firstFrame,
-      lastFrame: shots.lastFrame,
+      anchorFirst: shots.anchorFirst,
+      anchorLastAi: shots.anchorLastAi,
       videoUrl: shots.videoUrl,
-      seedanceLastFrame: shots.seedanceLastFrame,
-      sceneRefFrame: shots.sceneRefFrame,
-      referenceVideoUrl: shots.referenceVideoUrl,
+      cutPoint: shots.cutPoint,
     })
     .from(shots)
     .where(eq(shots.versionId, versionId));
@@ -100,15 +98,13 @@ export async function DELETE(
   await db.delete(storyboardVersions).where(eq(storyboardVersions.id, versionId));
 
   // Clean up files on disk — use a Set to avoid double-deleting shared paths
-  // (adjacent shots can share a file when lastFrame is reused as the next firstFrame)
+  // (adjacent shots can share a file when anchorLastAi is reused as the next anchorFirst)
   const filesToDelete = new Set<string>();
   for (const shot of versionShots) {
-    if (shot.firstFrame) filesToDelete.add(shot.firstFrame);
-    if (shot.lastFrame) filesToDelete.add(shot.lastFrame);
+    if (shot.anchorFirst) filesToDelete.add(shot.anchorFirst);
+    if (shot.anchorLastAi) filesToDelete.add(shot.anchorLastAi);
     if (shot.videoUrl) filesToDelete.add(shot.videoUrl);
-    if (shot.seedanceLastFrame) filesToDelete.add(shot.seedanceLastFrame);
-    if (shot.sceneRefFrame) filesToDelete.add(shot.sceneRefFrame);
-    if (shot.referenceVideoUrl) filesToDelete.add(shot.referenceVideoUrl);
+    if (shot.cutPoint) filesToDelete.add(shot.cutPoint);
   }
   for (const filePath of filesToDelete) {
     tryDeleteFile(filePath);

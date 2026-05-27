@@ -38,19 +38,6 @@ export default function EpisodePreviewPage() {
   const checkedUrl = useRef<string | null>(null);
 
   const finalVideoUrl = project?.finalVideoUrl ?? null;
-  const generationMode = project?.generationMode ?? "keyframe";
-
-  // Which mode's videos to preview — default to the project's generationMode
-  const hasKeyframeVideos = project?.shots.some((s) => s.videoUrl) ?? false;
-  const hasReferenceVideos = project?.shots.some((s) => s.referenceVideoUrl) ?? false;
-  const hasBothModes = hasKeyframeVideos && hasReferenceVideos;
-
-  const [previewMode, setPreviewMode] = useState<"keyframe" | "reference">(generationMode);
-
-  // Sync previewMode when project loads
-  useEffect(() => {
-    if (project) setPreviewMode(project.generationMode ?? "keyframe");
-  }, [project?.generationMode]);
 
   // Check if final video file actually exists
   useEffect(() => {
@@ -64,11 +51,9 @@ export default function EpisodePreviewPage() {
 
   if (!project) return null;
 
-  const getVideoUrl = (shot: typeof project.shots[0]) =>
-    previewMode === "reference" ? shot.referenceVideoUrl : shot.videoUrl;
+  const getVideoUrl = (shot: typeof project.shots[0]) => shot.videoUrl;
 
-  const getThumbnail = (shot: typeof project.shots[0]) =>
-    previewMode === "reference" ? shot.sceneRefFrame : shot.firstFrame;
+  const getThumbnail = (shot: typeof project.shots[0]) => shot.anchorFirst;
 
   const shotsWithVideo = project.shots.filter((s) => getVideoUrl(s));
   const allShotsHaveVideo = project.shots.length > 0 && project.shots.every((s) => getVideoUrl(s));
@@ -101,11 +86,6 @@ export default function EpisodePreviewPage() {
     a.href = uploadUrl(finalVideoUrl!);
     a.download = `${project!.title || "video"}-final.mp4`;
     a.click();
-  }
-
-  function handleModeSwitch(mode: "keyframe" | "reference") {
-    setPreviewMode(mode);
-    setSelectedShot(0);
   }
 
   return (
@@ -150,34 +130,6 @@ export default function EpisodePreviewPage() {
         </div>
       </div>
 
-      {/* Mode switcher — only shown when both modes have videos */}
-      {hasBothModes && (
-        <div className="flex items-center gap-1 rounded-xl border border-[--border-subtle] bg-[--surface] p-1 w-fit">
-          <button
-            onClick={() => handleModeSwitch("keyframe")}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150",
-              previewMode === "keyframe"
-                ? "bg-white text-primary shadow ring-1 ring-primary/20"
-                : "text-[--text-muted] hover:bg-white/60 hover:text-[--text-secondary]"
-            )}
-          >
-            {t("project.generationModeKeyframe")}
-          </button>
-          <button
-            onClick={() => handleModeSwitch("reference")}
-            className={cn(
-              "rounded-lg px-3 py-1.5 text-xs font-semibold transition-all duration-150",
-              previewMode === "reference"
-                ? "bg-white text-primary shadow ring-1 ring-primary/20"
-                : "text-[--text-muted] hover:bg-white/60 hover:text-[--text-secondary]"
-            )}
-          >
-            {t("project.generationModeReference")}
-          </button>
-        </div>
-      )}
-
       {/* Final video player */}
       {hasValidVideo && (
         <div className="space-y-3">
@@ -202,7 +154,7 @@ export default function EpisodePreviewPage() {
         <div className="space-y-4">
           <div className="overflow-hidden rounded-2xl border border-[--border-subtle] bg-black shadow-2xl shadow-black/40">
             <video
-              key={currentShot.id + previewMode}
+              key={currentShot.id}
               controls
               autoPlay={!hasValidVideo}
               className="aspect-video w-full"

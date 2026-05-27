@@ -38,15 +38,15 @@ export async function GET(
   for (const shot of allShots) {
     const prefix = `shot-${String(shot.sequence).padStart(2, "0")}`;
 
-    if (shot.firstFrame) {
-      const abs = path.resolve(shot.firstFrame);
+    if (shot.anchorFirst) {
+      const abs = path.resolve(shot.anchorFirst);
       if (fs.existsSync(abs)) {
         const ext = path.extname(abs) || ".png";
         archive.file(abs, { name: `${prefix}/first-frame${ext}` });
       }
     }
-    if (shot.lastFrame) {
-      const abs = path.resolve(shot.lastFrame);
+    if (shot.anchorLastAi) {
+      const abs = path.resolve(shot.anchorLastAi);
       if (fs.existsSync(abs)) {
         const ext = path.extname(abs) || ".png";
         archive.file(abs, { name: `${prefix}/last-frame${ext}` });

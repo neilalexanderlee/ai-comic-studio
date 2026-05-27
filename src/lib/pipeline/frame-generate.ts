@@ -105,12 +105,12 @@ export async function handleFrameGenerate(task: Task) {
   // 清理运镜字段的 ** 前缀
   const cameraDirection = cleanCameraDirection(shot.cameraDirection);
 
-  // Prefer Seedance's true last frame over the AI-generated lastFrame for better continuity.
-  // seedanceLastFrame is the actual final frame of the previous shot's video,
+  // Prefer Seedance's true last frame over the AI-generated anchorLastAi for better continuity.
+  // cutPoint is the actual final frame of the previous shot's video,
   // so it reflects the real visual state at the cut point rather than the AI-predicted end state.
   const previousLastFrame =
-    previousShot?.seedanceLastFrame ||
-    previousShot?.lastFrame ||
+    previousShot?.cutPoint ||
+    previousShot?.anchorLastAi ||
     undefined;
 
   // Generate first frame using startFrameDesc
@@ -123,12 +123,12 @@ export async function handleFrameGenerate(task: Task) {
     cameraDirection,
     slotContents: frameFirstSlots,
   });
-  let firstFrameRemoteUrl: string | undefined;
+  let anchorFirstRemoteUrl: string | undefined;
   const firstFramePath = await ai.generateImage(firstFramePrompt, {
     quality: "hd",
     aspectRatio: "16:9",
     referenceImages: charRefImages,
-    onRemoteUrl: (url) => { firstFrameRemoteUrl = url; },
+    onRemoteUrl: (url) => { anchorFirstRemoteUrl = url; },
   });
 
   // Generate last frame using endFrameDesc
@@ -141,24 +141,24 @@ export async function handleFrameGenerate(task: Task) {
     cameraDirection,
     slotContents: frameLastSlots,
   });
-  let lastFrameRemoteUrl: string | undefined;
+  let anchorLastAiRemoteUrl: string | undefined;
   const lastFramePath = await ai.generateImage(lastFramePrompt, {
     quality: "hd",
     aspectRatio: "16:9",
     referenceImages: [firstFramePath, ...charRefImages],
-    onRemoteUrl: (url) => { lastFrameRemoteUrl = url; },
+    onRemoteUrl: (url) => { anchorLastAiRemoteUrl = url; },
   });
 
   await db
     .update(shots)
     .set({
-      firstFrame: firstFramePath,
-      firstFrameRemoteUrl: firstFrameRemoteUrl ?? null,
-      lastFrame: lastFramePath,
-      lastFrameRemoteUrl: lastFrameRemoteUrl ?? null,
+      anchorFirst: firstFramePath,
+      anchorFirstRemoteUrl: anchorFirstRemoteUrl ?? null,
+      anchorLastAi: lastFramePath,
+      anchorLastAiRemoteUrl: anchorLastAiRemoteUrl ?? null,
       status: "completed",
     })
     .where(eq(shots.id, payload.shotId));
 
-  return { firstFrame: firstFramePath, lastFrame: lastFramePath };
+  return { anchorFirst: firstFramePath, anchorLastAi: lastFramePath };
 }

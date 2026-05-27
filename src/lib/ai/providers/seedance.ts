@@ -15,7 +15,7 @@
  *   - resolution：视频分辨率，支持 "480p" | "720p" | "1080p"（Seedance 2.0 fast 不支持 1080p）
  *
  * 支持的生成模式：
- *   - 首尾帧模式（firstFrame + lastFrame）
+ *   - 首尾帧模式（anchorFirst + anchorLastAi）
  *   - 参考图模式（initialImage）
  */
 import { ensureArkApiV3BaseUrl } from "../ark-base-url";
@@ -87,13 +87,13 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   async generateVideo(params: VideoGenerateParams): Promise<VideoGenerateResult> {
-    const isKeyframe = "firstFrame" in params;
+    const isKeyframe = "anchorFirst" in params;
     const buildBody = (useRemoteUrls: boolean) => {
       const body = isKeyframe
         ? this.buildKeyframeBody(
             useRemoteUrls
-              ? (params as VideoGenerateParams & { firstFrame: string; lastFrame: string; firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string })
-              : { ...(params as VideoGenerateParams & { firstFrame: string; lastFrame: string }), firstFrameRemoteUrl: undefined, lastFrameRemoteUrl: undefined }
+              ? (params as VideoGenerateParams & { anchorFirst: string; anchorLastAi: string; anchorFirstRemoteUrl?: string; anchorLastAiRemoteUrl?: string })
+              : { ...(params as VideoGenerateParams & { anchorFirst: string; anchorLastAi: string }), anchorFirstRemoteUrl: undefined, anchorLastAiRemoteUrl: undefined }
           )
         : this.buildReferenceBody(
             params as VideoGenerateParams & { initialImage: string }
@@ -104,8 +104,8 @@ export class SeedanceProvider implements VideoProvider {
       return body;
     };
 
-    const kfParams = params as VideoGenerateParams & { firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string };
-    const hasRemoteUrls = isKeyframe && !!(kfParams.firstFrameRemoteUrl || kfParams.lastFrameRemoteUrl);
+    const kfParams = params as VideoGenerateParams & { anchorFirstRemoteUrl?: string; anchorLastAiRemoteUrl?: string };
+    const hasRemoteUrls = isKeyframe && !!(kfParams.anchorFirstRemoteUrl || kfParams.anchorLastAiRemoteUrl);
 
     const body = buildBody(true /* useRemoteUrls */);
     console.log(
@@ -202,7 +202,7 @@ export class SeedanceProvider implements VideoProvider {
 
   /** 首尾帧模式：提供第一帧和最后一帧图片 */
   private buildKeyframeBody(
-    params: VideoGenerateParams & { firstFrame: string; lastFrame: string; firstFrameRemoteUrl?: string; lastFrameRemoteUrl?: string }
+    params: VideoGenerateParams & { anchorFirst: string; anchorLastAi: string; anchorFirstRemoteUrl?: string; anchorLastAiRemoteUrl?: string }
   ): Record<string, unknown> {
     const dur = this.resolveDuration(params.duration);
     // generate_audio: true 保留对白+音效；prompt 层禁止 BGM
@@ -215,12 +215,12 @@ export class SeedanceProvider implements VideoProvider {
         {
           type: "image_url",
           // 优先使用图片生成 API 返回的公网 URL，省去本地读文件+base64 编码
-          image_url: { url: params.firstFrameRemoteUrl ?? toDataUrl(params.firstFrame) },
+          image_url: { url: params.anchorFirstRemoteUrl ?? toDataUrl(params.anchorFirst) },
           role: "first_frame",
         },
         {
           type: "image_url",
-          image_url: { url: params.lastFrameRemoteUrl ?? toDataUrl(params.lastFrame) },
+          image_url: { url: params.anchorLastAiRemoteUrl ?? toDataUrl(params.anchorLastAi) },
           role: "last_frame",
         },
       ],

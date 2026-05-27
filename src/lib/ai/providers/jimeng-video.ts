@@ -18,7 +18,7 @@
  * 若需直连官方字符串，仍可把 model 配成如 `jimeng_i2v_first_v30_1080` 等。
  *
  * 支持的生成模式（对应 VideoGenerateParams）：
- *   - KeyframeVideoParams (firstFrame + lastFrame)：首尾帧模式
+ *   - KeyframeVideoParams (anchorFirst + anchorLastAi)：首尾帧模式
  *   - ReferenceVideoParams (initialImage)：首帧/参考图模式
  */
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
@@ -123,10 +123,10 @@ export class JimengVideoProvider implements VideoProvider {
   async generateVideo(params: VideoGenerateParams): Promise<VideoGenerateResult> {
     const imageUrls: string[] = [];
 
-    if ("firstFrame" in params && params.firstFrame) {
-      imageUrls.push(toImageInput(params.firstFrame));
-      if (params.lastFrame) {
-        imageUrls.push(toImageInput(params.lastFrame));
+    if ("anchorFirst" in params && params.anchorFirst) {
+      imageUrls.push(toImageInput(params.anchorFirst));
+      if (params.anchorLastAi) {
+        imageUrls.push(toImageInput(params.anchorLastAi));
       }
     } else if ("initialImage" in params && params.initialImage) {
       imageUrls.push(toImageInput(params.initialImage));

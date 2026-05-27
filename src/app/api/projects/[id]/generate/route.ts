@@ -22,7 +22,6 @@ import {
   buildFirstFramePrompt,
   buildLastFramePrompt,
 } from "@/lib/ai/prompts/frame-generate";
-import { buildSceneFramePrompt } from "@/lib/ai/prompts/scene-frame-generate";
 import { resolveImageProvider, resolveVideoProvider, resolveAIProvider } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
 import { buildRefVideoPromptRequest, getRefVideoPromptSystem } from "@/lib/ai/prompts/ref-video-prompt-generate";
@@ -42,38 +41,49 @@ import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
 import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
 import { enhanceImagePrompt, enhanceVideoPrompt } from "@/lib/ai/prompt-enhancer";
 import { resolveFrameMode } from "@/lib/storyboard/frame-generation-strategy";
+import {
+  frameReferenceContinuityLabel,
+  resolveFrameReferenceForProject,
+  shotFrameFileOnDisk,
+} from "@/lib/storyboard/frame-reference.server";
+import type { FrameReferencePayload, FrameReferenceType } from "@/lib/storyboard/frame-reference";
+import { linkNextShotAnchorFromCutPoint } from "@/lib/storyboard/shot-frame-link";
+import type { ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
+import {
+  collectVisionFramePaths,
+  shouldUseFirstFrameVideoMode,
+} from "@/lib/storyboard/shot-video-readiness.server";
+
+const DEPRECATED_PIPELINE_ACTION_MSG =
+  "frame_generate / video_generate 任务队列已废弃，请使用 single_* 接口";
 
 export const maxDuration = 300;
 
-function shotFrameFileOnDisk(framePath: string | null | undefined): boolean {
-  if (!framePath) return false;
-  try {
-    return fs.existsSync(path.resolve(framePath));
-  } catch {
-    return false;
+async function maybeAutoLinkNextShotAfterVideo(
+  projectId: string,
+  sourceShot: typeof shots.$inferSelect,
+  characters: { id: string; name: string; description?: string | null; visualHint?: string | null }[],
+  characterContextText: string
+): Promise<ShotAutoLinkResult> {
+  const [proj] = await db
+    .select({ linkShotsViaCutPoint: projects.linkShotsViaCutPoint })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  if (!proj?.linkShotsViaCutPoint) return { status: "disabled" };
+
+  const link = await linkNextShotAnchorFromCutPoint({
+    sourceShot,
+    characters,
+    characterContextText,
+  });
+  if (link.linked && link.nextShotId) {
+    return {
+      status: "linked",
+      nextShotId: link.nextShotId,
+      nextSequence: link.nextSequence,
+    };
   }
-}
-
-/**
- * 首帧参考图视频模式：仅用 firstFrame 驱动 Seedance，不把 seedance_last_frame 当尾帧输入。
- * 仅当磁盘上存在可用的 AI 生成尾帧时，才走首尾帧插值模式。
- */
-function shouldUseFirstFrameVideoMode(
-  shot: { lastFrame?: string | null },
-  isCrowdShot: boolean
-): boolean {
-  if (isCrowdShot) return true;
-  return !shotFrameFileOnDisk(shot.lastFrame);
-}
-
-/** 链式继承：优先用上一镜视频真实尾帧，其次 AI 尾帧。 */
-function resolveChainFramePath(shot: {
-  seedanceLastFrame?: string | null;
-  lastFrame?: string | null;
-}): string | undefined {
-  if (shotFrameFileOnDisk(shot.seedanceLastFrame)) return shot.seedanceLastFrame!;
-  if (shotFrameFileOnDisk(shot.lastFrame)) return shot.lastFrame!;
-  return undefined;
+  return { status: "skipped", reason: link.reason ?? "unknown" };
 }
 
 /** Download Seedance return_last_frame and return shot DB field updates. */
@@ -81,7 +91,7 @@ async function buildVideoLastFrameUpdate(params: {
   lastFrameUrl: string;
   shotId: string;
   uploadDir: string;
-  /** @deprecated 视频尾帧只写入 seedance_last_frame；链式继承读 seedanceLastFrame，不覆盖 AI last_frame */
+  /** @deprecated 视频尾帧只写入 seedance_last_frame；链式继承读 cutPoint，不覆盖 AI last_frame */
   replaceAiLastFrame: boolean;
   existingLastFrame?: string | null;
   existingSeedanceLastFrame?: string | null;
@@ -105,9 +115,7 @@ async function buildVideoLastFrameUpdate(params: {
     try { fs.unlinkSync(params.existingSeedanceLastFrame); } catch { /* ignore */ }
   }
 
-  return params.replaceAiLastFrame
-    ? { lastFrame: framePath, seedanceLastFrame: framePath }
-    : { seedanceLastFrame: framePath };
+  return { cutPoint: framePath };
 }
 
 /** Map user-facing ratio string to ImageOptions fields */
@@ -291,7 +299,6 @@ async function resumeRemoteVideoIfAvailable(params: {
   remoteStatus: string | null | undefined;
   remoteExpiresAt: Date | null | undefined;
   uploadDir: string;
-  mode: "keyframe" | "reference";
 }): Promise<string | null> {
   if (!isRemoteVideoReusable({
     url: params.remoteUrl,
@@ -301,26 +308,23 @@ async function resumeRemoteVideoIfAvailable(params: {
     if (params.remoteUrl && params.remoteExpiresAt && params.remoteExpiresAt <= new Date()) {
       await db
         .update(shots)
-        .set(
-          params.mode === "keyframe"
-            ? { remoteVideoStatus: "expired" }
-            : { remoteReferenceVideoStatus: "expired" }
-        )
+        .set({ remoteVideoStatus: "expired" })
         .where(eq(shots.id, params.shotId));
     }
     return null;
   }
   try {
     const filePath = await downloadVideoWithRetry(params.remoteUrl!, params.uploadDir, {
-      logPrefix: params.mode === "keyframe" ? "RemoteVideoDownload" : "RemoteReferenceVideoDownload",
+      logPrefix: "RemoteVideoDownload",
     });
     await db
       .update(shots)
-      .set(
-        params.mode === "keyframe"
-          ? { videoUrl: filePath, status: "completed", remoteVideoStatus: "downloaded", remoteVideoLastDownloadAt: new Date() }
-          : { referenceVideoUrl: filePath, status: "completed", remoteReferenceVideoStatus: "downloaded", remoteReferenceVideoLastDownloadAt: new Date() }
-      )
+      .set({
+        videoUrl: filePath,
+        status: "completed",
+        remoteVideoStatus: "downloaded",
+        remoteVideoLastDownloadAt: new Date(),
+      })
       .where(eq(shots.id, params.shotId));
     return filePath;
   } catch (error) {
@@ -328,18 +332,48 @@ async function resumeRemoteVideoIfAvailable(params: {
     console.warn(`[RemoteVideoResume] Re-download failed, generating a new video instead: ${message}`);
     await db
       .update(shots)
-      .set(
-        params.mode === "keyframe"
-          ? { remoteVideoStatus: "download_failed", remoteVideoLastDownloadAt: new Date() }
-          : { remoteReferenceVideoStatus: "download_failed", remoteReferenceVideoLastDownloadAt: new Date() }
-      )
+      .set({
+        remoteVideoStatus: "download_failed",
+        remoteVideoLastDownloadAt: new Date(),
+      })
       .where(eq(shots.id, params.shotId));
     return null;
   }
 }
 
+function upstreamHttpStatus(err: unknown): number | undefined {
+  if (typeof err !== "object" || err === null) return undefined;
+  const status = (err as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function mapUpstreamErrorHttpStatus(err: unknown): number {
+  const status = upstreamHttpStatus(err);
+  if (status !== undefined && status >= 500 && status < 600) return 502;
+  return 500;
+}
+
 function extractErrorMessage(err: unknown): string {
   if (!(err instanceof Error)) return String(err);
+
+  const status = upstreamHttpStatus(err);
+  const code =
+    typeof err === "object" && err !== null && "code" in err
+      ? String((err as { code?: unknown }).code ?? "")
+      : "";
+  const requestId =
+    typeof err === "object" && err !== null && "requestID" in err
+      ? String((err as { requestID?: unknown }).requestID ?? "")
+      : "";
+  const requestIdHint = requestId ? `（请求 ID: ${requestId}）` : "";
+
+  if (status !== undefined && status >= 500) {
+    if (code === "InternalServiceError" || status === 500) {
+      return `图像服务暂时不可用（上游 ${status}），请稍后重试或更换图像模型。${requestIdHint}`;
+    }
+    return `上游服务错误 ${status}：${err.message}${requestIdHint}`;
+  }
+
   // Try to parse JSON error bodies (e.g. Google GenAI ApiError)
   try {
     const parsed = JSON.parse(err.message) as { error?: { message?: string } };
@@ -440,7 +474,10 @@ export async function POST(
   }
 
   if (action === "batch_frame_generate") {
-    return handleBatchFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
+    return NextResponse.json(
+      { error: "批量生成首尾帧已移除，请逐镜使用「生成画面」或手动衔接上一镜尾帧" },
+      { status: 410 }
+    );
   }
 
   if (action === "single_frame_generate") {
@@ -452,27 +489,23 @@ export async function POST(
   }
 
   if (action === "batch_video_generate") {
-    return handleBatchVideoGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
+    return NextResponse.json(
+      { error: "批量生成视频已移除，请逐镜生成视频；连续镜头可开启「镜头衔接（视频尾帧）」" },
+      { status: 410 }
+    );
   }
 
-  if (action === "batch_chain_generate") {
-    return handleBatchChainGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
-  }
-
-  if (action === "single_scene_frame") {
-    return handleSingleSceneFrame(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
-  }
-
-  if (action === "batch_scene_frame") {
-    return handleBatchSceneFrame(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
-  }
-
-  if (action === "single_reference_video") {
-    return handleSingleReferenceVideo(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
-  }
-
-  if (action === "batch_reference_video") {
-    return handleBatchReferenceVideo(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
+  if (
+    action === "batch_chain_generate" ||
+    action === "single_scene_frame" ||
+    action === "batch_scene_frame" ||
+    action === "single_reference_video" ||
+    action === "batch_reference_video"
+  ) {
+    return NextResponse.json(
+      { error: "Reference/链式批量能力已移除，请使用单镜 keyframe 流程" },
+      { status: 410 }
+    );
   }
 
   if (action === "single_video_prompt") {
@@ -491,6 +524,10 @@ export async function POST(
 
   if (action === "video_assemble") {
     return handleVideoAssembleSync(projectId, payload, episodeId);
+  }
+
+  if (action === "frame_generate" || action === "video_generate") {
+    return NextResponse.json({ error: DEPRECATED_PIPELINE_ACTION_MSG }, { status: 410 });
   }
 
   // Image/video generation - keep in task queue
@@ -1344,7 +1381,7 @@ async function handleSingleShotRestoreFromScript(
     );
   }
 
-  // Update ONLY text fields — never touch firstFrame, lastFrame, videoUrl, etc.
+  // Update ONLY text fields — never touch anchorFirst, anchorLastAi, videoUrl, etc.
   // bgmNote/soundEffectNote 同步还原：确保 DB 与最新 parser 解析结果一致，
   // 便于后续 stripBgmContent 进行精确剔除而非依赖正则
   await db.update(shots).set({
@@ -1576,7 +1613,7 @@ async function handleFramePromptPreview(
     sceneDescription: shot.prompt || "",
     startFrameDesc: shot.startFrameDesc || shot.prompt || "",
     characterDescriptions,
-    previousLastFrame: previousShot?.lastFrame || undefined,
+    previousLastFrame: previousShot?.anchorLastAi || undefined,
     visualStyleTag: previewVisualStyleTag,
     cameraDirection: previewCleanedCamera,
     slotContents: frameFirstSlots,
@@ -1586,7 +1623,7 @@ async function handleFramePromptPreview(
     sceneDescription: shot.prompt || "",
     endFrameDesc: shot.endFrameDesc || shot.prompt || "",
     characterDescriptions,
-    firstFramePath: shot.firstFrame || previousShot?.lastFrame || "first-frame-reference",
+    firstFramePath: shot.anchorFirst || previousShot?.anchorLastAi || "first-frame-reference",
     visualStyleTag: previewVisualStyleTag,
     cameraDirection: previewCleanedCamera,
     slotContents: frameLastSlots,
@@ -1594,345 +1631,11 @@ async function handleFramePromptPreview(
 
   return NextResponse.json({
     shotId,
-    reusePreviousLastFrame: Boolean(previousShot?.lastFrame),
+    reusePreviousLastFrame: Boolean(previousShot?.anchorLastAi),
     firstPrompt,
     lastPrompt,
     startFrameDesc: shot.startFrameDesc || shot.prompt || "",
     endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-  });
-}
-
-// --- batch_frame_generate: sequential frame generation with continuity chain ---
-
-async function handleBatchFrameGenerate(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string,
-  enhancePrompts?: boolean
-) {
-  if (!modelConfig?.image) {
-    return NextResponse.json(
-      { error: "No image model configured" },
-      { status: 400 }
-    );
-  }
-
-  const batchVersionId = payload?.versionId as string | undefined;
-  const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
-  const shotWhereConditions = [eq(shots.projectId, projectId)];
-  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
-  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...shotWhereConditions))
-    .orderBy(asc(shots.sequence));
-
-  if (allShots.length === 0) {
-    return NextResponse.json({ results: [], message: "No shots found" });
-  }
-
-  const continueFromPrev = payload?.continueFromPrev === true;
-  const disableChaining = payload?.disableChaining === true;
-  let copiedFirstFrame: string | undefined;
-
-  const versionedUploadDir = batchVersionId
-    ? await getVersionedUploadDir(batchVersionId)
-    : process.env.UPLOAD_DIR || "./uploads";
-
-  if (continueFromPrev && episodeId) {
-    // 1. Get current episode's sequence
-    const [currentEp] = await db
-      .select({ sequence: episodes.sequence })
-      .from(episodes)
-      .where(eq(episodes.id, episodeId));
-
-    if (currentEp && currentEp.sequence > 1) {
-      // 2. Find previous episode
-      const [prevEp] = await db
-        .select({ id: episodes.id })
-        .from(episodes)
-        .where(
-          and(
-            eq(episodes.projectId, projectId),
-            eq(episodes.sequence, currentEp.sequence - 1)
-          )
-        );
-
-      if (prevEp) {
-        // 3. Get last shot of previous episode
-        const [lastShot] = await db
-          .select({ lastFrame: shots.lastFrame })
-          .from(shots)
-          .where(eq(shots.episodeId, prevEp.id))
-          .orderBy(desc(shots.sequence))
-          .limit(1);
-
-        if (!lastShot?.lastFrame) {
-          return NextResponse.json(
-            { error: "上一集尚未生成帧，无法续接" },
-            { status: 400 }
-          );
-        }
-
-        // 4. Copy the file
-        const fs = await import("node:fs");
-        const path = await import("node:path");
-        const { ulid: genId } = await import("ulid");
-        const ext = path.extname(lastShot.lastFrame);
-        const destDir = path.resolve(versionedUploadDir, "frames");
-        fs.mkdirSync(destDir, { recursive: true });
-        const destPath = path.join(destDir, `${genId()}${ext}`);
-        fs.copyFileSync(path.resolve(lastShot.lastFrame), destPath);
-        const relativeDest = path.relative(process.cwd(), destPath);
-
-        // 5. Update first shot's firstFrame
-        if (allShots.length > 0) {
-          await db
-            .update(shots)
-            .set({ firstFrame: relativeDest })
-            .where(eq(shots.id, allShots[0].id));
-          allShots[0] = { ...allShots[0], firstFrame: relativeDest };
-          copiedFirstFrame = relativeDest;
-        }
-      }
-    }
-  }
-
-  // Fetch only characters linked to this episode
-  let frameCharacters: typeof characters.$inferSelect[];
-  if (episodeId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, episodeId));
-    frameCharacters = linkedIds.length > 0
-      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
-      : [];
-  } else {
-    frameCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
-  }
-
-  // Build character descriptions with visualHint for better frame anchoring
-  const characterDescriptions = frameCharacters
-    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
-    .join("\n");
-
-  // Fetch project visualStyle for style lock injection
-  const [batchProject] = await db
-    .select({ visualStyle: projects.visualStyle })
-    .from(projects)
-    .where(eq(projects.id, projectId));
-  const batchVisualStyleTag = (() => {
-    const style = batchProject?.visualStyle;
-    if (!style) return undefined;
-    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
-  })();
-
-  const ai = resolveImageProvider(modelConfig, versionedUploadDir);
-
-  const overwrite = payload?.overwrite === true;
-  const needProcess = allShots.filter((s) => overwrite || !s.firstFrame || !s.lastFrame);
-  const skipCount = allShots.length - needProcess.length;
-
-  console.log(`[BatchFrameGenerate] Total: ${allShots.length} shots, need: ${needProcess.length}, skip: ${skipCount}, characters: ${frameCharacters.length}, style: ${batchVisualStyleTag || "auto"}`);
-
-  const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
-  const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
-
-  const encoder = new TextEncoder();
-  const batchTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-  const batchImageProtocol = modelConfig?.image?.protocol ?? "";
-
-  // Capture all loop variables needed inside the stream start callback
-  const frameCharacterContext = allShots.map(buildShotCharacterText).join("\n");
-
-  const loopCtx = {
-    allShots, copiedFirstFrame, overwrite, disableChaining, frameCharacters, characterDescriptions,
-    frameFirstSlots, frameLastSlots, imageOpts, ai, db, shots, modelConfig,
-    userId, projectId, skipCount, batchVisualStyleTag, frameCharacterContext,
-    enhancePrompts, batchTextProvider, batchImageProtocol,
-  };
-
-  // SSE streaming via ReadableStream start() — Next.js App Router idiomatic pattern
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      const { allShots, copiedFirstFrame, overwrite, disableChaining, frameCharacters,
-              frameFirstSlots, frameLastSlots, imageOpts, ai, skipCount, batchVisualStyleTag,
-              frameCharacterContext, enhancePrompts, batchTextProvider, batchImageProtocol } = loopCtx;
-
-      function emit(data: object) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      }
-
-      let previousLastFrame: string | undefined;
-      let okCount = 0;
-      let errCount = 0;
-
-      for (let i = 0; i < allShots.length; i++) {
-        const shot = allShots[i];
-
-        if (!overwrite && shot.firstFrame && shot.lastFrame) {
-          // Prefer seedanceLastFrame (actual video last frame) for chain continuity
-          if (!disableChaining) {
-            previousLastFrame = resolveChainFramePath(shot);
-          }
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
-          continue;
-        }
-
-        // Clean camera direction (strip ** prefix, same as frame-generate pipeline)
-        const cleanedCamera = (shot.cameraDirection || "static").replace(/^\s*\*{1,2}\s*/, "").trim();
-
-        const startTime = Date.now();
-        try {
-          await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id));
-
-          let firstFramePath: string;
-
-          // 群演→主角切换检测：上一分镜无命名角色、当前分镜有命名角色时打断继承链，独立生成首帧
-          const batchCurrentShotText = buildShotCharacterText(shot);
-          const batchCurrentShotChars = filterShotCharacters(batchCurrentShotText, frameCharacters, { contextText: frameCharacterContext });
-          const batchPrevShot = i > 0 ? allShots[i - 1] : null;
-          const batchPrevShotText = batchPrevShot
-            ? buildShotCharacterText(batchPrevShot)
-            : "";
-          const batchPrevShotChars = batchPrevShot
-            ? filterShotCharacters(batchPrevShotText, frameCharacters, { contextText: frameCharacterContext })
-            : [];
-          const isCrowdToCharCutBatch = batchPrevShotChars.length === 0 && batchCurrentShotChars.length > 0;
-
-          if (copiedFirstFrame && i === 0) {
-            firstFramePath = copiedFirstFrame;
-          } else if (i === 0 || !previousLastFrame || isCrowdToCharCutBatch || disableChaining) {
-            if (isCrowdToCharCutBatch) {
-              console.log(`[BatchFrameGenerate] Shot ${shot.sequence}: crowd→character cut — generating fresh firstFrame (breaking chain)`);
-            } else if (disableChaining) {
-              console.log(`[BatchFrameGenerate] Shot ${shot.sequence}: independent first frame — generating fresh firstFrame`);
-            }
-            // Use pre-computed batchCurrentShotChars (already filtered for this shot)
-            const resolvedChars = await resolveCharacterImages(shot.prompt || "", batchCurrentShotChars, modelConfig?.text, userId, projectId);
-            await saveShotWarnings(shot.id, resolvedChars);
-            // Build character descriptions with visualHint for characters in THIS shot
-            const shotCharDesc = batchCurrentShotChars
-              .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
-              .join("\n");
-            const firstPromptRaw = buildFirstFramePrompt({
-              sceneDescription: shot.prompt || "",
-              startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-              characterDescriptions: shotCharDesc,
-              visualStyleTag: batchVisualStyleTag,
-              cameraDirection: cleanedCamera,
-              slotContents: frameFirstSlots,
-            });
-            const batchFirstCharRefs = resolvedChars.map((c) => c.imagePath);
-            const firstPrompt = enhancePrompts && batchTextProvider
-              ? await enhanceImagePrompt(firstPromptRaw, batchImageProtocol, batchTextProvider)
-              : firstPromptRaw;
-            firstFramePath = await ai.generateImage(firstPrompt, {
-              ...imageOpts,
-              quality: "hd",
-              referenceImages: batchFirstCharRefs,
-              referenceLabels: resolvedChars.map((c) => c.name),
-            });
-          } else {
-            firstFramePath = previousLastFrame;
-          }
-
-          // Resolve frame generation mode via intelligent strategy:
-          //   - deterministic: crowd shots, short duration, missing endFrameDesc, near-identical descs
-          //   - LLM semantic: ambiguous cases (camera intent, scene-jump risk, etc.)
-          // batchCurrentShotChars already computed above — pass hasChars flag.
-          const batchFrameDecision = await resolveFrameMode(
-            {
-              duration: shot.duration,
-              cameraDirection: cleanedCamera,
-              startFrameDesc: shot.startFrameDesc,
-              endFrameDesc: shot.endFrameDesc,
-              prompt: shot.prompt,
-            },
-            batchCurrentShotChars.length > 0,
-            enhancePrompts ? modelConfig?.text ?? null : null
-          );
-
-          if (batchFrameDecision.mode === "first_only") {
-            await db.update(shots).set({ firstFrame: firstFramePath, status: "completed" }).where(eq(shots.id, shot.id));
-            // Don't inherit a crowd/skip frame into the next shot's continuity chain
-            if (batchCurrentShotChars.length === 0) previousLastFrame = undefined;
-            okCount++;
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(
-              `[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} — first_only` +
-              ` (${batchFrameDecision.source}: ${batchFrameDecision.reason}) (${elapsed}s)`
-            );
-            emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath });
-            continue;
-          }
-
-          // Both frames: generate lastFrame
-          const shotText2 = buildShotCharacterText(shot);
-          const shotChars2 = filterShotCharacters(shotText2, frameCharacters, { contextText: frameCharacterContext });
-          const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars2, modelConfig?.text, userId, projectId);
-          await saveShotWarnings(shot.id, resolvedChars2);
-          // Build character descriptions with visualHint for characters in THIS shot
-          const shotCharDesc2 = shotChars2
-            .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
-            .join("\n");
-          const lastPromptRaw = buildLastFramePrompt({
-            sceneDescription: shot.prompt || "",
-            endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-            characterDescriptions: shotCharDesc2,
-            firstFramePath,
-            visualStyleTag: batchVisualStyleTag,
-            cameraDirection: cleanedCamera,
-            slotContents: frameLastSlots,
-          });
-          const batchLastCharRefs = resolvedChars2.map((c) => c.imagePath);
-          const lastPrompt = enhancePrompts && batchTextProvider
-            ? await enhanceImagePrompt(lastPromptRaw, batchImageProtocol, batchTextProvider)
-            : lastPromptRaw;
-          const lastFramePath = await ai.generateImage(lastPrompt, {
-            ...imageOpts,
-            quality: "hd",
-            referenceImages: [firstFramePath, ...batchLastCharRefs],
-            referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
-          });
-
-          await db.update(shots).set({ firstFrame: firstFramePath, lastFrame: lastFramePath, status: "completed" }).where(eq(shots.id, shot.id));
-          // Use AI-generated lastFrame for chain (no seedanceLastFrame yet at this stage)
-          if (!disableChaining) {
-            previousLastFrame = lastFramePath;
-          }
-          okCount++;
-
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.log(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} completed (${elapsed}s)`);
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "ok", firstFrame: firstFramePath, lastFrame: lastFramePath });
-
-        } catch (err) {
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.error(`[BatchFrameGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
-          await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
-          previousLastFrame = undefined;
-          errCount++;
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) });
-        }
-      }
-
-      console.log(`[BatchFrameGenerate] Done: ${okCount} ok, ${errCount} errors, ${skipCount} skipped`);
-      emit({ type: "done", okCount, errCount, skipCount });
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    },
   });
 }
 
@@ -2004,49 +1707,6 @@ async function handleSingleFrameGenerate(
   await saveShotWarnings(shotId, resolvedChars);
   const charRefImages = resolvedChars.map((c) => c.imagePath);
 
-  // Find previous shot's last frame for continuity — same version only (if shot has a version)
-  const [previousShot] = shot.versionId
-    ? await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          eq(shots.versionId, shot.versionId),
-          lt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(desc(shots.sequence))
-        .limit(1)
-    : await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          lt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(desc(shots.sequence))
-        .limit(1);
-
-  const [nextShot] = shot.versionId
-    ? await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          eq(shots.versionId, shot.versionId),
-          gt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(asc(shots.sequence))
-        .limit(1)
-    : await db
-        .select()
-        .from(shots)
-        .where(and(
-          eq(shots.projectId, projectId),
-          gt(shots.sequence, shot.sequence)
-        ))
-        .orderBy(asc(shots.sequence))
-        .limit(1);
-
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
   const singleTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
@@ -2074,16 +1734,42 @@ async function handleSingleFrameGenerate(
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
 
-  // frameTarget: "first" = only regenerate firstFrame; "last" = only lastFrame; "both" = default
+  // frameTarget: "first" = only regenerate anchorFirst; "last" = only anchorLastAi; "both" = default
   const frameTarget = (payload?.frameTarget as "first" | "last" | "both") ?? "both";
-  // disableChaining: when true, never auto-write this shot's lastFrame into the next shot's firstFrame
-  const disableChaining = payload?.disableChaining === true;
+
+  const rawFrameRef = payload?.frameReference as Partial<FrameReferencePayload> | undefined;
+  let continuityRef:
+    | { path: string; shotId: string; frameType: FrameReferenceType; sourceSequence: number }
+    | undefined;
+  if (rawFrameRef?.shotId && rawFrameRef?.frameType) {
+    const frameType = rawFrameRef.frameType;
+    if (
+      frameType !== "anchor_first" &&
+      frameType !== "anchor_last_ai" &&
+      frameType !== "cut_point"
+    ) {
+      return NextResponse.json({ error: "无效的 frameReference.frameType" }, { status: 400 });
+    }
+    const resolved = await resolveFrameReferenceForProject(projectId, {
+      shotId: rawFrameRef.shotId,
+      frameType,
+    });
+    if (!resolved) {
+      return NextResponse.json(
+        { error: "参考帧不存在或文件已缺失，请重新生成该镜画面或换一张参考图" },
+        { status: 400 }
+      );
+    }
+    continuityRef = resolved;
+  }
 
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
-    if (frameTarget === "first") {
-      // Regenerate first frame only (ignore previous shot continuity — user explicitly asked for fresh)
+    const generateAnchorFirst = async (): Promise<string> => {
+      const refImages = continuityRef
+        ? [continuityRef.path, ...charRefImages]
+        : charRefImages;
       const firstPromptRaw = buildFirstFramePrompt({
         sceneDescription: shot.prompt || "",
         startFrameDesc: shot.startFrameDesc || shot.prompt || "",
@@ -2095,23 +1781,46 @@ async function handleSingleFrameGenerate(
       const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
-      console.log(`[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${charRefImages.length}`);
+      if (continuityRef) {
+        console.log(
+          `[SingleFrameGenerate] Shot ${shot.sequence}: frameReference ${frameReferenceContinuityLabel(
+            continuityRef.sourceSequence,
+            continuityRef.frameType
+          )} → Seedream regen anchor_first`
+        );
+      }
+      console.log(
+        `[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${refImages.length}`
+      );
       console.log(`[SingleFrameGenerate][PROMPT DEBUG] finalPrompt:\n${firstPrompt}`);
-      const firstFramePath = await ai.generateImage(firstPrompt, {
+      return ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: charRefImages,
+        referenceImages: refImages,
       });
+    };
+
+    const persistAnchorFirst = async (anchorFirstPath: string) => {
       await db
         .update(shots)
-        .set({ firstFrame: firstFramePath, status: "completed" })
+        .set({
+          anchorFirst: anchorFirstPath,
+          status: "completed",
+          chainSourceShotId: continuityRef?.shotId ?? null,
+          chainSourceType: continuityRef?.frameType ?? null,
+        })
         .where(eq(shots.id, shotId));
-      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
+    };
+
+    if (frameTarget === "first") {
+      const firstFramePath = await generateAnchorFirst();
+      await persistAnchorFirst(firstFramePath);
+      return NextResponse.json({ shotId, anchorFirst: firstFramePath, status: "ok" });
     }
 
     if (frameTarget === "last") {
-      // Regenerate last frame only, using existing firstFrame as reference
-      const existingFirstFrame = shot.firstFrame;
+      // Regenerate last frame only, using existing anchorFirst as reference
+      const existingFirstFrame = shot.anchorFirst;
       if (!existingFirstFrame) {
         await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
         return NextResponse.json({ error: "首帧不存在，请先生成首帧" }, { status: 400 });
@@ -2135,67 +1844,24 @@ async function handleSingleFrameGenerate(
       });
       await db
         .update(shots)
-        .set({ lastFrame: lastFramePath, status: "completed" })
+        .set({ anchorLastAi: lastFramePath, status: "completed" })
         .where(eq(shots.id, shotId));
-      // Sync next shot's firstFrame only when chaining is enabled
-      if (nextShot && !disableChaining) {
-        await db.update(shots).set({ firstFrame: lastFramePath }).where(eq(shots.id, nextShot.id));
-      }
-      return NextResponse.json({ shotId, lastFrame: lastFramePath, status: "ok" });
+      return NextResponse.json({ shotId, anchorLastAi: lastFramePath, status: "ok" });
     }
 
-    // frameTarget === "both" (default)
-    // Smart chain-break: only reuse the previous shot's last frame if it contains
-    // overlapping named characters. crowd→character cuts always generate a fresh first frame.
-    let firstFramePath: string;
-    // disableChaining is read from payload above (hoisted before frameTarget checks)
-    const prevShotTextSingle = previousShot
-      ? buildShotCharacterText(previousShot)
-      : "";
-    const prevShotCharsSingle = previousShot
-      ? filterShotCharacters(prevShotTextSingle, projectCharacters, { contextText: singleFrameCharacterContext })
-      : [];
-    const isCrowdToCharCutSingle = prevShotCharsSingle.length === 0 && charsForFrame.length > 0;
-    const previousChainFrame = previousShot ? resolveChainFramePath(previousShot) : undefined;
-    const shouldChainSingle = !disableChaining && !!previousChainFrame && !isCrowdToCharCutSingle;
-
-    if (shouldChainSingle) {
-      // Same-scene continuation: prefer previous shot's video last frame (seedanceLastFrame)
-      firstFramePath = previousChainFrame!;
-    } else {
-      // Generate fresh first frame from this shot's own startFrameDesc + character sheets.
-      // This handles: first shot, crowd→character cuts, and shots with no prior frame.
-      if (isCrowdToCharCutSingle) {
-        console.log(`[SingleFrameGenerate] Shot ${shot.sequence}: crowd→character cut — generating fresh firstFrame`);
-      }
-      const firstPromptRaw = buildFirstFramePrompt({
-        sceneDescription: shot.prompt || "",
-        startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-        characterDescriptions: characterDescriptionsWithHints,
-        visualStyleTag: singleVisualStyleTag,
-        cameraDirection: singleCleanedCamera,
-        slotContents: frameFirstSlots,
-      });
-      const firstPrompt = enhancePrompts && singleTextProvider
-        ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
-        : firstPromptRaw;
-      firstFramePath = await ai.generateImage(firstPrompt, {
-        ...imageOpts,
-        quality: "hd",
-        referenceImages: charRefImages,
-      });
-    }
+    // frameTarget === "both" (default) — 首帧仅 Seedream 生成；参考图仅来自 payload.frameReference
+    const firstFramePath = await generateAnchorFirst();
 
     // Intelligent frame strategy: decide whether to generate the last frame.
     // When frameTarget is "both" (user clicked "重新生成帧"), base the decision on
     // how many frames the shot already has:
-    //   - both firstFrame + lastFrame exist → regenerate both
-    //   - only firstFrame exists (lastFrame was never generated) → regenerate first only
+    //   - both anchorFirst + anchorLastAi exist → regenerate both
+    //   - only anchorFirst exists (anchorLastAi was never generated) → regenerate first only
     //   - neither exists yet → fall back to resolveFrameMode heuristic
     const singleFrameDecision: { mode: "both" | "first_only"; source: string; reason: string } =
-      shot.lastFrame
+      shot.anchorLastAi
         ? { mode: "both", source: "existing_frames", reason: "both frames existed — regenerate both" }
-        : shot.firstFrame
+        : shot.anchorFirst
           ? { mode: "first_only", source: "existing_frames", reason: "only first frame existed — skip last frame" }
           : await resolveFrameMode(
               {
@@ -2214,14 +1880,11 @@ async function handleSingleFrameGenerate(
         `[SingleFrameGenerate] Shot ${shot.sequence}: first_only` +
         ` (${singleFrameDecision.source}: ${singleFrameDecision.reason})`
       );
-      await db
-        .update(shots)
-        .set({ firstFrame: firstFramePath, status: "completed" })
-        .where(eq(shots.id, shotId));
-      return NextResponse.json({ shotId, firstFrame: firstFramePath, status: "ok" });
+      await persistAnchorFirst(firstFramePath);
+      return NextResponse.json({ shotId, anchorFirst: firstFramePath, status: "ok" });
     }
 
-    // Both frames: generate lastFrame
+    // Both frames: generate anchorLastAi
     const lastPromptRaw = buildLastFramePrompt({
       sceneDescription: shot.prompt || "",
       endFrameDesc: shot.endFrameDesc || shot.prompt || "",
@@ -2243,25 +1906,22 @@ async function handleSingleFrameGenerate(
     await db
       .update(shots)
       .set({
-        firstFrame: firstFramePath,
-        lastFrame: lastFramePath,
+        anchorFirst: firstFramePath,
+        anchorLastAi: lastFramePath,
         status: "completed",
+        chainSourceShotId: continuityRef?.shotId ?? null,
+        chainSourceType: continuityRef?.frameType ?? null,
       })
       .where(eq(shots.id, shotId));
 
-    // Sync next shot's firstFrame to maintain continuity chain — only when chaining is enabled
-    if (nextShot && !disableChaining) {
-      await db
-        .update(shots)
-        .set({ firstFrame: lastFramePath })
-        .where(eq(shots.id, nextShot.id));
-    }
-
-    return NextResponse.json({ shotId, firstFrame: firstFramePath, lastFrame: lastFramePath, status: "ok" });
+    return NextResponse.json({ shotId, anchorFirst: firstFramePath, anchorLastAi: lastFramePath, status: "ok" });
   } catch (err) {
     console.error(`[SingleFrameGenerate] Error for shot ${shotId}:`, err);
     await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
-    return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
+    return NextResponse.json(
+      { shotId, status: "error", error: extractErrorMessage(err) },
+      { status: mapUpstreamErrorHttpStatus(err) }
+    );
   }
 }
 
@@ -2286,7 +1946,7 @@ async function handleSingleVideoGenerate(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
-  if (!shot.firstFrame || !shotFrameFileOnDisk(shot.firstFrame)) {
+  if (!shot.anchorFirst || !shotFrameFileOnDisk(shot.anchorFirst)) {
     return NextResponse.json({ error: "首帧文件不存在，请重新生成首帧" }, { status: 400 });
   }
 
@@ -2351,7 +2011,6 @@ async function handleSingleVideoGenerate(
         remoteStatus: shot.remoteVideoStatus,
         remoteExpiresAt: shot.remoteVideoExpiresAt,
         uploadDir: versionedUploadDir,
-        mode: "keyframe",
       });
       if (resumedPath) {
         return NextResponse.json({ shotId, videoUrl: resumedPath, status: "ok", resumedFromRemoteUrl: true });
@@ -2387,7 +2046,7 @@ async function handleSingleVideoGenerate(
     //   1. Strip any BGM language the LLM may have included (was based on old motionScript w/ BGM)
     //   2. Inject fresh dialogues from DB (pre-generated prompt may be stale or LLM may have omitted them)
     const hasPreGeneratedPrompt = !!shot.videoPrompt;
-    // 首帧参考图模式：仅用 firstFrame；群演镜头或无有效 AI 尾帧文件时走此路径（不因 DB 残留 last_frame 误入首尾帧模式）。
+    // 首帧参考图模式：仅用 anchorFirst；群演镜头或无有效 AI 尾帧文件时走此路径（不因 DB 残留 last_frame 误入首尾帧模式）。
     const videoPromptBase = stripBgmContent(
       shot.videoPrompt || (
         useSingleVideoReferenceMode
@@ -2429,7 +2088,7 @@ async function handleSingleVideoGenerate(
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
-    // 首帧模式：initialImage = firstFrame；首尾帧模式：firstFrame + 磁盘上存在的 AI lastFrame。
+    // 首帧模式：initialImage = anchorFirst；首尾帧模式：anchorFirst + 磁盘上存在的 AI anchorLastAi。
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
         remoteVideoUrl: videoUrl,
@@ -2441,8 +2100,8 @@ async function handleSingleVideoGenerate(
     };
     const result = await videoProvider.generateVideo(
       useSingleVideoReferenceMode
-        ? { initialImage: shot.firstFrame, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
-        : { firstFrame: shot.firstFrame, lastFrame: shot.lastFrame!, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
+        ? { initialImage: shot.anchorFirst, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
+        : { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi!, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
     );
 
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
@@ -2457,12 +2116,12 @@ async function handleSingleVideoGenerate(
           shotId,
           uploadDir: versionedUploadDir,
           replaceAiLastFrame: false,
-          existingLastFrame: shot.lastFrame,
-          existingSeedanceLastFrame: shot.seedanceLastFrame,
+          existingLastFrame: shot.anchorLastAi,
+          existingSeedanceLastFrame: shot.cutPoint,
         });
         if (Object.keys(singleLastFrameUpdate).length > 0) {
           console.log(
-            `[SingleVideoGenerate] Shot ${shotId}: saved video last frame → ${singleLastFrameUpdate.seedanceLastFrame}` +
+            `[SingleVideoGenerate] Shot ${shotId}: saved video last frame → ${singleLastFrameUpdate.cutPoint}` +
               (useSingleVideoReferenceMode ? " [first-frame mode]" : " [keyframe mode]")
           );
         }
@@ -2475,7 +2134,17 @@ async function handleSingleVideoGenerate(
       .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...singleLastFrameUpdate })
       .where(eq(shots.id, shotId));
 
-    return NextResponse.json({ shotId, videoUrl: result.filePath, status: "ok" });
+    const [freshShot] = await db.select().from(shots).where(eq(shots.id, shotId));
+    const shotLink = freshShot
+      ? await maybeAutoLinkNextShotAfterVideo(
+          projectId,
+          freshShot,
+          shotCharacters,
+          singleVideoCharacterContext
+        )
+      : ({ status: "not_attempted" } satisfies ShotAutoLinkResult);
+
+    return NextResponse.json({ shotId, videoUrl: result.filePath, status: "ok", shotLink });
   } catch (err) {
     console.error(`[SingleVideoGenerate] Error for shot ${shotId}:`, err);
     await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
@@ -2483,1379 +2152,9 @@ async function handleSingleVideoGenerate(
   }
 }
 
-// --- batch_video_generate: sequential video generation for all eligible shots ---
-
-async function handleBatchVideoGenerate(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string,
-  enhancePrompts?: boolean
-) {
-  if (!modelConfig?.video) {
-    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
-  }
-
-  const batchVersionId = payload?.versionId as string | undefined;
-  const shotWhereConditions = [eq(shots.projectId, projectId)];
-  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
-  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...shotWhereConditions))
-    .orderBy(asc(shots.sequence));
-
-  const versionedUploadDir = batchVersionId
-    ? await getVersionedUploadDir(batchVersionId)
-    : process.env.UPLOAD_DIR || "./uploads";
-
-  const overwrite = payload?.overwrite === true;
-  const batchCharacters = await getEpisodeCharacters(projectId, episodeId);
-  const batchVideoCharacterContext = allShots.map(buildShotCharacterText).join("\n");
-
-  // Pre-detect crowd shots so we can include them in eligible list even without lastFrame
-  const isCrowdShotMap = new Map<string, boolean>();
-  for (const s of allShots) {
-    const shotText = buildShotCharacterText(s);
-    const shotNamedChars = filterShotCharacters(shotText, batchCharacters, { contextText: batchVideoCharacterContext });
-    isCrowdShotMap.set(s.id, shotNamedChars.length === 0);
-  }
-
-  const eligible = allShots.filter((s) => {
-    if (!s.firstFrame) return false;
-    if (overwrite || !s.videoUrl) {
-      // Shots with only firstFrame are generated in reference mode; full pairs use keyframe mode.
-      return true;
-    }
-    return false;
-  });
-  if (eligible.length === 0) {
-    return NextResponse.json({ results: [], message: "No eligible shots" });
-  }
-  const characterDescriptions = batchCharacters
-    .map((c) => `${c.name}: ${c.description}`)
-    .join("\n");
-
-  // Project visualStyle → style lock tag for video prompts
-  const [batchVideoProject] = await db
-    .select({ visualStyle: projects.visualStyle })
-    .from(projects)
-    .where(eq(projects.id, projectId));
-  const batchVideoStyleTag = (() => {
-    const style = batchVideoProject?.visualStyle;
-    if (!style) return undefined;
-    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
-  })();
-
-  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
-  const ratio = (payload?.ratio as string) || "16:9";
-  const resolution = payload?.resolution as "480p" | "720p" | undefined;
-  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
-  const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
-  const batchVideoTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-  const batchVideoProtocol = modelConfig?.video?.protocol ?? "";
-
-  // Mark all as generating
-  await Promise.all(
-    eligible.map((shot) =>
-      db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id))
-    )
-  );
-
-  const results = await Promise.all(
-    eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; videoUrl?: string; error?: string }> => {
-      try {
-        if (!shot.firstFrame || !shotFrameFileOnDisk(shot.firstFrame)) {
-          return {
-            shotId: shot.id,
-            sequence: shot.sequence,
-            status: "error",
-            error: "首帧文件不存在，请重新生成首帧",
-          };
-        }
-
-        const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-        if (!shot.videoUrl && shot.remoteVideoUrl) {
-          const resumedPath = await resumeRemoteVideoIfAvailable({
-            shotId: shot.id,
-            remoteUrl: shot.remoteVideoUrl,
-            remoteStatus: shot.remoteVideoStatus,
-            remoteExpiresAt: shot.remoteVideoExpiresAt,
-            uploadDir: versionedUploadDir,
-            mode: "keyframe",
-          });
-          if (resumedPath) {
-            return { shotId: shot.id, sequence: shot.sequence, status: "ok", videoUrl: resumedPath };
-          }
-        }
-        const shotDialogues = await db
-          .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
-          .from(dialogues)
-          .where(eq(dialogues.shotId, shot.id))
-          .orderBy(asc(dialogues.sequence));
-
-        const videoScript = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-        const videoContextForDialogue = videoScript;
-        const onScreenDialogueChars = shotDialogues
-          .map((d) => batchCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-
-        const dialogueList = shotDialogues.map((d) => {
-          const char = batchCharacters.find((c) => c.id === d.characterId);
-          const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
-          const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-          return {
-            characterName,
-            text: d.text,
-            offscreen: !onScreen,
-            visualHint,
-          };
-        });
-
-        const isBatchCrowdShot = isCrowdShotMap.get(shot.id) ?? false;
-        const useBatchReferenceMode = shouldUseFirstFrameVideoMode(shot, isBatchCrowdShot);
-        const batchHasPreGenPrompt = !!shot.videoPrompt;
-        // 只传本镜头实际出现的角色
-        const batchShotChars = filterShotCharacters(videoScript, batchCharacters, { contextText: batchVideoCharacterContext });
-        // Reference-mode shots: no tail-frame anchor; frame-pair shots: keyframe prompt with anchors.
-        // Also strip BGM from pre-generated videoPrompt (may contain stale BGM language from motionScript).
-        const videoPromptBase = stripBgmContent(
-          shot.videoPrompt || (
-            useBatchReferenceMode
-              ? buildReferenceVideoPrompt({
-                  videoScript,
-                  cameraDirection: shot.cameraDirection || "static",
-                  duration: effectiveDuration,
-                  characters: batchShotChars,
-                  dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-                  slotContents: videoSlots,
-                  visualStyleTag: batchVideoStyleTag,
-                  soundEffectNote: shot.soundEffectNote,
-                })
-              : buildVideoPrompt({
-                  videoScript,
-                  cameraDirection: shot.cameraDirection || "static",
-                  startFrameDesc: shot.startFrameDesc ?? undefined,
-                  endFrameDesc: shot.endFrameDesc ?? undefined,
-                  duration: effectiveDuration,
-                  characters: batchShotChars,
-                  dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-                  slotContents: videoSlots,
-                  visualStyleTag: batchVideoStyleTag,
-                  soundEffectNote: shot.soundEffectNote,
-                })
-          ),
-          shot.bgmNote
-        );
-        const videoPromptEnhanced = (enhancePrompts && !batchHasPreGenPrompt && batchVideoTextProvider)
-          ? await enhanceVideoPrompt(videoPromptBase, batchVideoProtocol, batchVideoTextProvider)
-          : videoPromptBase;
-        // 始终用 DB 最新对白覆盖 prompt 中的对白区块
-        const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
-
-        console.log(
-          `\n${"=".repeat(80)}\n[BatchVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${useBatchReferenceMode ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
-        );
-
-        const batchOnRemoteResult = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string }) => {
-          await db
-            .update(shots)
-            .set({
-              remoteVideoUrl: videoUrl,
-              remoteVideoTaskId: taskId ?? null,
-              remoteVideoStatus: "available",
-              remoteVideoCreatedAt: new Date(),
-              remoteVideoExpiresAt: getRemoteVideoExpiry(),
-            })
-            .where(eq(shots.id, shot.id));
-        };
-
-        const result = await videoProvider.generateVideo(
-          useBatchReferenceMode
-            ? {
-                initialImage: shot.firstFrame,
-                prompt: videoPrompt,
-                duration: effectiveDuration,
-                ratio,
-                ...(resolution && { resolution }),
-                onRemoteResult: batchOnRemoteResult,
-              }
-            : {
-                firstFrame: shot.firstFrame,
-                lastFrame: shot.lastFrame!,
-                prompt: videoPrompt,
-                duration: effectiveDuration,
-                ratio,
-                ...(resolution && { resolution }),
-                onRemoteResult: batchOnRemoteResult,
-              }
-        );
-
-        let batchLastFrameUpdate: Record<string, unknown> = {};
-        if (result.lastFrameUrl) {
-          try {
-            batchLastFrameUpdate = await buildVideoLastFrameUpdate({
-              lastFrameUrl: result.lastFrameUrl,
-              shotId: shot.id,
-              uploadDir: versionedUploadDir,
-              replaceAiLastFrame: false,
-              existingLastFrame: shot.lastFrame,
-              existingSeedanceLastFrame: shot.seedanceLastFrame,
-            });
-            if (Object.keys(batchLastFrameUpdate).length > 0) {
-              console.log(
-                `[BatchVideoGenerate] Shot ${shot.sequence}: saved video last frame → ${batchLastFrameUpdate.seedanceLastFrame}` +
-                  (useBatchReferenceMode ? " [first-frame mode]" : " [keyframe mode]")
-              );
-            }
-          } catch (frameErr) {
-            console.warn(`[BatchVideoGenerate] Shot ${shot.sequence}: failed to save last frame:`, frameErr);
-          }
-        }
-
-        // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
-        await saveVideoToHistory(shot.id, shot.videoUrl, shot.videoResolution, "批量重新生成前");
-
-        await db
-          .update(shots)
-          .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...batchLastFrameUpdate })
-          .where(eq(shots.id, shot.id));
-
-        console.log(`[BatchVideoGenerate] Shot ${shot.sequence} completed${useBatchReferenceMode ? " [reference mode]" : ""}`);
-        return { shotId: shot.id, sequence: shot.sequence, status: "ok", videoUrl: result.filePath };
-      } catch (err) {
-        console.error(`[BatchVideoGenerate] Error for shot ${shot.sequence}:`, err);
-        await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
-        return { shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) };
-      }
-    })
-  );
-
-  return NextResponse.json({ results });
-}
-
-// --- batch_chain_generate: per-shot sequential frame→video pipeline (full chain mode) ---
-// Each shot: generate firstFrame (or use seedanceLastFrame from prev) → lastFrame → video
-// → download actual seedanceLastFrame → pass directly as next shot's firstFrame (no Seedream re-gen)
-
-async function handleBatchChainGenerate(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string,
-  enhancePrompts?: boolean
-) {
-  if (!modelConfig?.image) {
-    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
-  }
-  if (!modelConfig?.video) {
-    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
-  }
-
-  const batchVersionId = payload?.versionId as string | undefined;
-  const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
-  const ratio = (payload?.ratio as string) || "16:9";
-  const resolution = payload?.resolution as "480p" | "720p" | undefined;
-
-  const shotWhereConditions = [eq(shots.projectId, projectId)];
-  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
-  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
-
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...shotWhereConditions))
-    .orderBy(asc(shots.sequence));
-
-  if (allShots.length === 0) {
-    return NextResponse.json({ results: [], message: "No shots found" });
-  }
-
-  const versionedUploadDir = batchVersionId
-    ? await getVersionedUploadDir(batchVersionId)
-    : process.env.UPLOAD_DIR || "./uploads";
-
-  // Fetch characters
-  let chainCharacters: typeof characters.$inferSelect[];
-  if (episodeId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, episodeId));
-    chainCharacters = linkedIds.length > 0
-      ? await db.select().from(characters).where(inArray(characters.id, linkedIds.map((r) => r.characterId)))
-      : [];
-  } else {
-    chainCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
-  }
-
-  // Project visualStyle → style lock tag
-  const [chainProject] = await db
-    .select({ visualStyle: projects.visualStyle })
-    .from(projects)
-    .where(eq(projects.id, projectId));
-  const chainVisualStyleTag = (() => {
-    const style = chainProject?.visualStyle;
-    if (!style) return undefined;
-    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
-  })();
-
-  // Providers
-  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
-  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
-  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
-  const chainTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-  const chainImageProtocol = modelConfig?.image?.protocol ?? "";
-  const chainVideoProtocol = modelConfig?.video?.protocol ?? "";
-  const chainCharacterContext = allShots.map(buildShotCharacterText).join("\n");
-
-  // Slot contents
-  const frameFirstSlots = await resolveSlotContents("frame_generate_first", { userId, projectId });
-  const frameLastSlots = await resolveSlotContents("frame_generate_last", { userId, projectId });
-  const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
-
-  const overwrite = payload?.overwrite === true;
-  const skipCount = allShots.filter((s) =>
-    !overwrite && s.firstFrame && s.lastFrame && s.videoUrl
-  ).length;
-
-  console.log(
-    `[BatchChainGenerate] Total: ${allShots.length} shots, style: ${chainVisualStyleTag || "auto"}, resolution: ${resolution || "default"}`
-  );
-
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      function emit(data: object) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-      }
-
-      // seedanceLastFrame from prev shot feeds directly into next shot's firstFrame
-      let chainPreviousFrame: string | undefined;
-      let okCount = 0;
-      let errCount = 0;
-
-      for (let i = 0; i < allShots.length; i++) {
-        const shot = allShots[i];
-
-        // Skip if fully generated and overwrite not requested
-        if (!overwrite && shot.firstFrame && shot.lastFrame && shot.videoUrl) {
-          // Still advance the chain using best available last frame
-          chainPreviousFrame = resolveChainFramePath(shot);
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "skipped" });
-          continue;
-        }
-
-        const startTime = Date.now();
-        const cleanedCamera = (shot.cameraDirection || "static").replace(/^\s*\*{1,2}\s*/, "").trim();
-
-        try {
-          await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id));
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "frame_start" });
-
-          // ── STEP 1: firstFrame ────────────────────────────────────────────────
-          let firstFramePath: string;
-
-          // Compute current shot's named characters for smart chain-break decision
-          const shotText = buildShotCharacterText(shot);
-          const shotChars = filterShotCharacters(shotText, chainCharacters, { contextText: chainCharacterContext });
-
-          // Smart chain-break: if the previous shot was a crowd/establishing scene (no named
-          // characters) and the current shot introduces named characters, generating the first
-          // frame fresh from the shot's own startFrameDesc produces far better results than
-          // inheriting a crowd image and asking the model to morph it into a character shot.
-          const prevShot = i > 0 ? allShots[i - 1] : null;
-          const prevShotText = prevShot
-            ? buildShotCharacterText(prevShot)
-            : "";
-          const prevShotChars = prevShot ? filterShotCharacters(prevShotText, chainCharacters, { contextText: chainCharacterContext }) : [];
-          const isCrowdToCharacterCut = prevShotChars.length === 0 && shotChars.length > 0;
-
-          const shouldChain = !isCrowdToCharacterCut && i > 0 && !!chainPreviousFrame;
-
-          if (!shouldChain) {
-            // Generate firstFrame fresh from this shot's own startFrameDesc + character sheets.
-            // Covers: first shot, crowd→character cuts, and any shot with no previous frame.
-            const resolvedChars = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
-            await saveShotWarnings(shot.id, resolvedChars);
-            const shotCharDesc = shotChars
-              .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
-              .join("\n");
-            const firstPromptRaw = buildFirstFramePrompt({
-              sceneDescription: shot.prompt || "",
-              startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-              characterDescriptions: shotCharDesc,
-              visualStyleTag: chainVisualStyleTag,
-              cameraDirection: cleanedCamera,
-              slotContents: frameFirstSlots,
-            });
-            const firstPrompt = enhancePrompts && chainTextProvider
-              ? await enhanceImagePrompt(firstPromptRaw, chainImageProtocol, chainTextProvider)
-              : firstPromptRaw;
-            firstFramePath = await imageProvider.generateImage(firstPrompt, {
-              ...imageOpts,
-              quality: "hd",
-              referenceImages: resolvedChars.map((c) => c.imagePath),
-              referenceLabels: resolvedChars.map((c) => c.name),
-            });
-            if (isCrowdToCharacterCut) {
-              console.log(`[BatchChainGenerate] Shot ${shot.sequence}: crowd→character cut detected — generated fresh firstFrame`);
-            }
-          } else {
-            // Same-scene continuation: reuse the actual last frame from the previous video.
-            // This preserves pixel-level continuity for consecutive shots in the same scene
-            // with overlapping characters.
-            firstFramePath = chainPreviousFrame!;
-          }
-
-          // ── STEP 2: lastFrame ────────────────────────────────────────────────
-          // CROWD SHOT AUTO-DETECTION: if this shot has no named characters (crowd/establishing),
-          // skip lastFrame pre-generation. The video will be generated in reference mode (initialImage
-          // = firstFrame only), and Seedance's return_last_frame provides the actual video end frame,
-          // which becomes both this shot's lastFrame and the next shot's firstFrame — real pixel continuity.
-          const isCrowdShot = shotChars.length === 0;
-          let lastFramePath: string | undefined;
-
-          if (!isCrowdShot) {
-            // Character shot: generate lastFrame as usual
-            const resolvedChars2 = await resolveCharacterImages(shot.prompt || "", shotChars, modelConfig?.text, userId, projectId);
-            if (shouldChain) await saveShotWarnings(shot.id, resolvedChars2); // only if Step 1 didn't already save
-            const shotCharDesc2 = shotChars
-              .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
-              .join("\n");
-            const lastPromptRaw = buildLastFramePrompt({
-              sceneDescription: shot.prompt || "",
-              endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-              characterDescriptions: shotCharDesc2,
-              firstFramePath,
-              visualStyleTag: chainVisualStyleTag,
-              cameraDirection: cleanedCamera,
-              slotContents: frameLastSlots,
-            });
-            const lastPrompt = enhancePrompts && chainTextProvider
-              ? await enhanceImagePrompt(lastPromptRaw, chainImageProtocol, chainTextProvider)
-              : lastPromptRaw;
-            lastFramePath = await imageProvider.generateImage(lastPrompt, {
-              ...imageOpts,
-              quality: "hd",
-              referenceImages: [firstFramePath, ...resolvedChars2.map((c) => c.imagePath)],
-              referenceLabels: ["首帧/First Frame", ...resolvedChars2.map((c) => c.name)],
-            });
-          } else {
-            console.log(`[BatchChainGenerate] Shot ${shot.sequence}: crowd shot — skipping lastFrame pre-gen, using reference mode for video`);
-          }
-
-          // Persist frames immediately (crowd shots: lastFrame will be filled by seedanceLastFrame after video)
-          await db.update(shots)
-            .set({ firstFrame: firstFramePath, ...(lastFramePath && { lastFrame: lastFramePath }) })
-            .where(eq(shots.id, shot.id));
-
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "frame_ok", firstFrame: firstFramePath, lastFrame: lastFramePath });
-
-          // ── STEP 3: video ────────────────────────────────────────────────────
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "video_start" });
-
-          const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-
-          // Fetch dialogues for voiceHint
-          const shotDialogues = await db
-            .select({
-              text: dialogues.text,
-              characterId: dialogues.characterId,
-              sequence: dialogues.sequence,
-              charVoiceHint: characters.voiceHint,
-              dialogueVoiceHint: dialogues.voiceHint,
-            })
-            .from(dialogues)
-            .innerJoin(characters, eq(dialogues.characterId, characters.id))
-            .where(eq(dialogues.shotId, shot.id))
-            .orderBy(asc(dialogues.sequence));
-
-          const videoScript = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-          const dialogueList = shotDialogues.map((d) => {
-            const char = chainCharacters.find((c) => c.id === d.characterId);
-            const characterName = char?.name ?? "Unknown";
-            const onScreen = isCharacterOnScreen(characterName, videoScript, shot.startFrameDesc);
-            return {
-              characterName,
-              text: d.text,
-              offscreen: !onScreen,
-              visualHint: onScreen ? (char?.visualHint || undefined) : undefined,
-              voiceHint: (d.dialogueVoiceHint || d.charVoiceHint) ?? undefined,
-            };
-          });
-
-          // 只传与本镜头相关的角色（过滤无关角色），并附带 description 以保留服装信息
-          // 若无匹配（群演/无名角色镜头），传空列表而非全部角色
-          const shotCharsForVideo = filterShotCharacters(videoScript, chainCharacters, { contextText: chainCharacterContext });
-          const videoCharacters = shotCharsForVideo.map((c) => ({
-            name: c.name,
-            visualHint: c.visualHint,
-            description: c.description,
-          }));
-
-          const chainHasPreGenPrompt = !!shot.videoPrompt;
-          // Crowd shots: reference prompt (no frame anchors — model freely generates ending)
-          // Character shots: keyframe prompt with startFrameDesc/endFrameDesc interpolation anchors
-          // Also strip BGM from pre-generated videoPrompt (may contain stale BGM language from motionScript).
-          const videoPromptBase = stripBgmContent(
-            shot.videoPrompt || (
-              isCrowdShot
-                ? buildReferenceVideoPrompt({
-                    videoScript,
-                    cameraDirection: cleanedCamera,
-                    duration: effectiveDuration,
-                    characters: videoCharacters,
-                    dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-                    slotContents: videoSlots,
-                    visualStyleTag: chainVisualStyleTag,
-                    soundEffectNote: shot.soundEffectNote,
-                  })
-                : buildVideoPrompt({
-                    videoScript,
-                    cameraDirection: cleanedCamera,
-                    startFrameDesc: shot.startFrameDesc ?? undefined,
-                    endFrameDesc: shot.endFrameDesc ?? undefined,
-                    duration: effectiveDuration,
-                    characters: videoCharacters,
-                    dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-                    slotContents: videoSlots,
-                    visualStyleTag: chainVisualStyleTag,
-                    soundEffectNote: shot.soundEffectNote,
-                  })
-            ),
-            shot.bgmNote
-          );
-          const videoPromptEnhanced = (enhancePrompts && !chainHasPreGenPrompt && chainTextProvider)
-            ? await enhanceVideoPrompt(videoPromptBase, chainVideoProtocol, chainTextProvider)
-            : videoPromptBase;
-          // 始终用 DB 最新对白覆盖 prompt 中的对白区块
-          const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
-
-          console.log(
-            `\n${"=".repeat(80)}\n[BatchChainGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${isCrowdShot ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
-          );
-
-          // Crowd shots use reference mode (initialImage only); character shots use keyframe mode.
-          const videoResult = await videoProvider.generateVideo(
-            isCrowdShot
-              ? {
-                  initialImage: firstFramePath,
-                  prompt: videoPrompt,
-                  duration: effectiveDuration,
-                  ratio,
-                  ...(resolution && { resolution }),
-                  onRemoteResult: async ({ videoUrl, taskId }) => {
-                    await db.update(shots)
-                      .set({
-                        remoteVideoUrl: videoUrl,
-                        remoteVideoTaskId: taskId ?? null,
-                        remoteVideoStatus: "available",
-                        remoteVideoCreatedAt: new Date(),
-                        remoteVideoExpiresAt: getRemoteVideoExpiry(),
-                      })
-                      .where(eq(shots.id, shot.id));
-                  },
-                }
-              : {
-                  firstFrame: firstFramePath,
-                  lastFrame: lastFramePath!,
-                  prompt: videoPrompt,
-                  duration: effectiveDuration,
-                  ratio,
-                  ...(resolution && { resolution }),
-                  onRemoteResult: async ({ videoUrl, taskId }) => {
-                    await db.update(shots)
-                      .set({
-                        remoteVideoUrl: videoUrl,
-                        remoteVideoTaskId: taskId ?? null,
-                        remoteVideoStatus: "available",
-                        remoteVideoCreatedAt: new Date(),
-                        remoteVideoExpiresAt: getRemoteVideoExpiry(),
-                      })
-                      .where(eq(shots.id, shot.id));
-                  },
-                }
-          );
-
-          // ── STEP 4: download seedanceLastFrame for next shot ─────────────────
-          let seedanceLastFramePath: string | null = null;
-          if (videoResult.lastFrameUrl) {
-            try {
-              const fs = await import("node:fs");
-              const nodePath = await import("node:path");
-              const frameRes = await fetch(videoResult.lastFrameUrl);
-              if (frameRes.ok) {
-                const buffer = Buffer.from(await frameRes.arrayBuffer());
-                const framesDir = nodePath.join(versionedUploadDir, "frames");
-                fs.mkdirSync(framesDir, { recursive: true });
-                const framePath = nodePath.join(framesDir, `${shot.id}_chain_lastframe_${Date.now()}.png`);
-                fs.writeFileSync(framePath, buffer);
-                // Clean up previous chain lastframe for this shot
-                if (shot.seedanceLastFrame && shot.seedanceLastFrame !== framePath) {
-                  try { fs.unlinkSync(shot.seedanceLastFrame); } catch { /* ignore */ }
-                }
-                seedanceLastFramePath = framePath;
-                console.log(`[BatchChainGenerate] Shot ${shot.sequence}: saved seedance last frame → ${framePath}`);
-              }
-            } catch (frameErr) {
-              console.warn(`[BatchChainGenerate] Shot ${shot.sequence}: failed to download last frame:`, frameErr);
-            }
-          }
-
-          // Persist video + seedanceLastFrame
-          // For crowd shots: seedanceLastFrame becomes this shot's lastFrame (real video end frame).
-          await saveVideoToHistory(shot.id, shot.videoUrl, shot.videoResolution, "链式批量重新生成前");
-          await db.update(shots)
-            .set({
-              videoUrl: videoResult.filePath,
-              status: "completed",
-              videoResolution: resolution ?? null,
-              ...(seedanceLastFramePath && { seedanceLastFrame: seedanceLastFramePath }),
-              // Crowd shots: fill lastFrame from actual video end (skipped pre-generation in STEP 2)
-              ...(isCrowdShot && seedanceLastFramePath && { lastFrame: seedanceLastFramePath }),
-            })
-            .where(eq(shots.id, shot.id));
-
-          // Next shot's firstFrame = actual video last frame (seedanceLastFrame) if available,
-          // otherwise fall back to AI-generated lastFrame
-          chainPreviousFrame = seedanceLastFramePath || lastFramePath;
-
-          okCount++;
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          const effectiveLastFrame = (isCrowdShot ? seedanceLastFramePath : lastFramePath) ?? lastFramePath;
-          console.log(`[BatchChainGenerate] Shot ${shot.sequence}/${allShots.length} done (${elapsed}s)${isCrowdShot ? " [crowd→reference mode]" : ""}`);
-          emit({
-            shotId: shot.id,
-            sequence: shot.sequence,
-            status: "ok",
-            firstFrame: firstFramePath,
-            lastFrame: effectiveLastFrame,
-            videoUrl: videoResult.filePath,
-          });
-
-        } catch (err) {
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          console.error(`[BatchChainGenerate] Shot ${shot.sequence}/${allShots.length} failed (${elapsed}s):`, err);
-          await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
-          // Break the chain — can't continue with an unknown last frame
-          chainPreviousFrame = undefined;
-          errCount++;
-          emit({ shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) });
-        }
-      }
-
-      console.log(`[BatchChainGenerate] Done: ${okCount} ok, ${errCount} errors, ${skipCount} skipped`);
-      emit({ type: "done", okCount, errCount, skipCount });
-      controller.close();
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-    },
-  });
-}
-
-// --- single_scene_frame: generate Toonflow-style scene reference frame only ---
-
-async function handleSingleSceneFrame(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  enhancePrompts?: boolean
-) {
-  const shotId = payload?.shotId as string | undefined;
-  if (!shotId) {
-    return NextResponse.json({ error: "No shotId provided" }, { status: 400 });
-  }
-  if (!modelConfig?.image) {
-    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
-  }
-
-  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
-  if (!shot) {
-    return NextResponse.json({ error: "Shot not found" }, { status: 404 });
-  }
-
-  const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
-
-  const projectCharacters = await db
-    .select()
-    .from(characters)
-    .where(eq(characters.projectId, shot.projectId));
-
-  const charRefs = await resolveCharacterImages(
-    shot.prompt || "",
-    projectCharacters,
-    modelConfig?.text,
-    userId,
-    projectId
-  );
-  await saveShotWarnings(shotId, charRefs);
-
-  if (charRefs.length === 0) {
-    return NextResponse.json(
-      { error: "No character reference images available. Please generate character reference images first." },
-      { status: 400 }
-    );
-  }
-
-  const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
-  const characterDescriptions = projectCharacters
-    .map((c) => `${c.name}: ${c.description}`)
-    .join("\n");
-
-  try {
-    await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
-
-    const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
-    const slotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-    const sceneFramePromptRaw = buildSceneFramePrompt({
-      sceneDescription: shot.prompt || "",
-      charRefMapping,
-      characterDescriptions,
-      cameraDirection: shot.cameraDirection,
-      startFrameDesc: shot.startFrameDesc,
-      motionScript: shot.motionScript,
-      slotContents,
-    });
-    const sceneFramePrompt = enhancePrompts
-      ? await enhanceImagePrompt(sceneFramePromptRaw, modelConfig?.image?.protocol ?? "", resolveAIProvider(modelConfig))
-      : sceneFramePromptRaw;
-
-    console.log(`[SingleSceneFrame] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
-
-    const sceneFramePath = await imageProvider.generateImage(sceneFramePrompt, {
-      quality: "hd",
-      referenceImages: charRefs.map((c) => c.imagePath),
-    });
-
-    await db
-      .update(shots)
-      .set({ sceneRefFrame: sceneFramePath, status: "pending" })
-      .where(eq(shots.id, shotId));
-
-    return NextResponse.json({ shotId, sceneRefFrame: sceneFramePath, status: "ok" });
-  } catch (err) {
-    console.error(`[SingleSceneFrame] Error for shot ${shot.sequence}:`, err);
-    await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
-    return NextResponse.json(
-      { shotId, status: "error", error: extractErrorMessage(err) },
-      { status: 500 }
-    );
-  }
-}
-
-// --- batch_scene_frame: generate scene reference frames for all eligible shots ---
-
-async function handleBatchSceneFrame(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string,
-  enhancePrompts?: boolean
-) {
-  if (!modelConfig?.image) {
-    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
-  }
-
-  const overwrite = payload?.overwrite === true;
-  const batchVersionId = payload?.versionId as string | undefined;
-
-  const shotWhereConditions = [eq(shots.projectId, projectId)];
-  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
-  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...shotWhereConditions))
-    .orderBy(asc(shots.sequence));
-
-  const versionedUploadDir = batchVersionId
-    ? await getVersionedUploadDir(batchVersionId)
-    : process.env.UPLOAD_DIR || "./uploads";
-
-  const eligible = allShots.filter(
-    (s) => s.status !== "generating" && (overwrite || !s.sceneRefFrame)
-  );
-  if (eligible.length === 0) {
-    return NextResponse.json({ results: [], message: "No eligible shots" });
-  }
-
-  const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
-
-  const characterDescriptions = projectCharacters
-    .map((c) => `${c.name}: ${c.description}`)
-    .join("\n");
-
-  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
-  const sceneSlotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-  const batchSceneTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-  const batchSceneImageProtocol = modelConfig?.image?.protocol ?? "";
-
-  await Promise.all(
-    eligible.map((shot) =>
-      db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id))
-    )
-  );
-
-  const results: Array<{
-    shotId: string;
-    sequence: number;
-    status: "ok" | "error";
-    sceneRefFrame?: string;
-    error?: string;
-  }> = [];
-
-  for (const shot of eligible) {
-    try {
-      const charRefs = await resolveCharacterImages(
-        shot.prompt || "",
-        projectCharacters,
-        modelConfig?.text,
-        userId,
-        projectId
-      );
-      const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
-
-      const sceneFramePromptRaw = buildSceneFramePrompt({
-        sceneDescription: shot.prompt || "",
-        charRefMapping,
-        characterDescriptions,
-        cameraDirection: shot.cameraDirection,
-        startFrameDesc: shot.startFrameDesc,
-        slotContents: sceneSlotContents,
-        motionScript: shot.motionScript,
-      });
-      const sceneFramePrompt = enhancePrompts && batchSceneTextProvider
-        ? await enhanceImagePrompt(sceneFramePromptRaw, batchSceneImageProtocol, batchSceneTextProvider)
-        : sceneFramePromptRaw;
-
-      console.log(`[BatchSceneFrame] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
-
-      const sceneFramePath = await imageProvider.generateImage(sceneFramePrompt, {
-        quality: "hd",
-        referenceImages: charRefs.map((c) => c.imagePath),
-      });
-
-      await db
-        .update(shots)
-        .set({ sceneRefFrame: sceneFramePath, status: "pending" })
-        .where(eq(shots.id, shot.id));
-
-      results.push({ shotId: shot.id, sequence: shot.sequence, status: "ok", sceneRefFrame: sceneFramePath });
-    } catch (err) {
-      console.error(`[BatchSceneFrame] Error for shot ${shot.sequence}:`, err);
-      await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
-      results.push({ shotId: shot.id, sequence: shot.sequence, status: "error", error: extractErrorMessage(err) });
-    }
-  }
-
-  return NextResponse.json({ results });
-}
-
-// --- single_reference_video: text2video with character reference images ---
-
-async function handleSingleReferenceVideo(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  enhancePrompts?: boolean
-) {
-  const shotId = payload?.shotId as string | undefined;
-  if (!shotId) {
-    return NextResponse.json({ error: "No shotId provided" }, { status: 400 });
-  }
-  if (!modelConfig?.video) {
-    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
-  }
-  if (!modelConfig?.image) {
-    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
-  }
-
-  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
-  if (!shot) {
-    return NextResponse.json({ error: "Shot not found" }, { status: 404 });
-  }
-
-  const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
-
-  const projectCharacters = await db
-    .select()
-    .from(characters)
-    .where(eq(characters.projectId, shot.projectId));
-
-  // Toonflow pattern: collect all character reference images
-  const charRefs = await resolveCharacterImages(
-    shot.prompt || "",
-    projectCharacters,
-    modelConfig?.text,
-    userId,
-    projectId
-  );
-  await saveShotWarnings(shotId, charRefs);
-
-  if (charRefs.length === 0) {
-    return NextResponse.json(
-      { error: "No character reference images available. Please generate character reference images first." },
-      { status: 400 }
-    );
-  }
-
-  // Build Toonflow name→image mapping: "角色A=图片1，角色B=图片2"
-  const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
-
-  const characterDescriptions = projectCharacters
-    .map((c) => `${c.name}: ${c.description}`)
-    .join("\n");
-
-  const shotDialogues = await db
-    .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
-    .from(dialogues)
-    .where(eq(dialogues.shotId, shotId))
-    .orderBy(asc(dialogues.sequence));
-  const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
-  const onScreenDialogueChars = shotDialogues
-    .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-
-  const dialogueList = shotDialogues.map((d) => {
-    const char = projectCharacters.find((c) => c.id === d.characterId);
-    const characterName = char?.name ?? "Unknown";
-    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
-    const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-    return {
-      characterName,
-      text: d.text,
-      offscreen: !onScreen,
-      visualHint,
-    };
-  });
-
-  const ratio = (payload?.ratio as string) || "16:9";
-  const refVideoSlots = await resolveSlotContents("ref_video_generate", { userId, projectId });
-
-  // Project visualStyle → style lock tag
-  const [singleRefVideoProject] = await db
-    .select({ visualStyle: projects.visualStyle })
-    .from(projects)
-    .where(eq(projects.id, projectId));
-  const singleRefVideoStyleTag = (() => {
-    const style = singleRefVideoProject?.visualStyle;
-    if (!style) return undefined;
-    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
-  })();
-
-  try {
-    await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
-
-    if (!shot.referenceVideoUrl && shot.remoteReferenceVideoUrl) {
-      const resumedPath = await resumeRemoteVideoIfAvailable({
-        shotId,
-        remoteUrl: shot.remoteReferenceVideoUrl,
-        remoteStatus: shot.remoteReferenceVideoStatus,
-        remoteExpiresAt: shot.remoteReferenceVideoExpiresAt,
-        uploadDir: versionedUploadDir,
-        mode: "reference",
-      });
-      if (resumedPath) {
-        return NextResponse.json({ shotId, referenceVideoUrl: resumedPath, status: "ok", resumedFromRemoteUrl: true });
-      }
-    }
-
-    // Step 1: Reuse existing scene ref frame, or generate a new one (Toonflow-style)
-    let sceneFramePath = shot.sceneRefFrame ?? null;
-    if (!sceneFramePath) {
-      const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
-      const refSlotContents = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-      const sceneFramePromptRaw = buildSceneFramePrompt({
-        sceneDescription: shot.prompt || "",
-        charRefMapping,
-        characterDescriptions,
-        cameraDirection: shot.cameraDirection,
-        startFrameDesc: shot.startFrameDesc,
-        motionScript: shot.motionScript,
-        slotContents: refSlotContents,
-      });
-      const sceneFramePrompt = enhancePrompts
-        ? await enhanceImagePrompt(sceneFramePromptRaw, modelConfig?.image?.protocol ?? "", resolveAIProvider(modelConfig))
-        : sceneFramePromptRaw;
-      console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
-      sceneFramePath = await imageProvider.generateImage(sceneFramePrompt, {
-        quality: "hd",
-        referenceImages: charRefs.map((c) => c.imagePath),
-      });
-      await db.update(shots).set({ sceneRefFrame: sceneFramePath }).where(eq(shots.id, shotId));
-    } else {
-      console.log(`[SingleReferenceVideo] Shot ${shot.sequence}: reusing existing scene frame`);
-    }
-
-    // Step 2: Generate video using scene frame as initial image
-    const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
-
-    const videoModelId = modelConfig?.video?.modelId;
-    const videoMaxDuration = getModelMaxDuration(videoModelId);
-    const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-
-    // Step 2b: Use stored videoPrompt if available; otherwise generate from scene frame via vision AI
-    let videoPrompt: string;
-    if (shot.videoPrompt) {
-      videoPrompt = stripBgmContent(shot.videoPrompt!, shot.bgmNote);
-    } else {
-      const textProvider = resolveAIProvider(modelConfig);
-      const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
-      try {
-        // Prefer videoScript (already optimized for video models) over raw motionScript.
-        // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
-        const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-        const refShotChars = filterShotCharacters(motionContext, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
-        const promptRequest = buildRefVideoPromptRequest({
-          motionScript: motionContext,
-          cameraDirection: shot.cameraDirection || "static",
-          duration: effectiveDuration,
-          characters: refShotChars,
-          dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-        });
-        console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
-        const rawPrompt = await textProvider.generateText(promptRequest, {
-          systemPrompt: refVideoSystem,
-          images: [sceneFramePath],
-          temperature: 0.7,
-        });
-        const cleanRawPrompt = stripThinkingBlocks(rawPrompt);
-        videoPrompt = `Duration: ${effectiveDuration}s.\n\n${cleanRawPrompt}`;
-        console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
-      } catch (err) {
-        console.warn("[SingleReferenceVideo] Vision prompt generation failed, falling back:", err);
-        const motionContextFallback = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-        const refShotCharsFallback = filterShotCharacters(motionContextFallback, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
-        videoPrompt = buildReferenceVideoPrompt({
-          videoScript: motionContextFallback,
-          cameraDirection: shot.cameraDirection || "static",
-          duration: effectiveDuration,
-          characters: refShotCharsFallback,
-          dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-          slotContents: refVideoSlots,
-          visualStyleTag: singleRefVideoStyleTag,
-          soundEffectNote: shot.soundEffectNote,
-        });
-      }
-    }
-
-    // Enhance video prompt if requested (skip if user pre-set videoPrompt)
-    const finalVideoPrompt = (enhancePrompts && !shot.videoPrompt)
-      ? await enhanceVideoPrompt(videoPrompt, modelConfig?.video?.protocol ?? "", resolveAIProvider(modelConfig))
-      : videoPrompt;
-
-    console.log(`\n${"=".repeat(80)}\n[SingleReferenceVideo] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model)\n${"=".repeat(80)}\n${finalVideoPrompt}\n${"=".repeat(80)}\n`);
-
-    const result = await videoProvider.generateVideo({
-      initialImage: sceneFramePath,
-      prompt: finalVideoPrompt,
-      duration: effectiveDuration,
-      ratio,
-      referenceImages: charRefs.map((c) => c.imagePath),
-      onRemoteResult: async ({ videoUrl, taskId }) => {
-        await db
-          .update(shots)
-          .set({
-            remoteReferenceVideoUrl: videoUrl,
-            remoteReferenceVideoTaskId: taskId ?? null,
-            remoteReferenceVideoStatus: "available",
-            remoteReferenceVideoCreatedAt: new Date(),
-            remoteReferenceVideoExpiresAt: getRemoteVideoExpiry(),
-          })
-          .where(eq(shots.id, shotId));
-      },
-    });
-
-    await db
-      .update(shots)
-      .set({
-        referenceVideoUrl: result.filePath,
-        lastFrameUrl: result.lastFrameUrl ?? null,
-        status: "completed",
-      })
-      .where(eq(shots.id, shotId));
-
-    return NextResponse.json({ shotId, referenceVideoUrl: result.filePath, status: "ok" });
-  } catch (err) {
-    console.error(`[SingleReferenceVideo] Error for shot ${shot.sequence}:`, err);
-    await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
-    return NextResponse.json(
-      { shotId, status: "error", error: extractErrorMessage(err) },
-      { status: 500 }
-    );
-  }
-}
-
-// --- batch_reference_video: sequential text2video for all eligible shots ---
-
-async function handleBatchReferenceVideo(
-  projectId: string,
-  userId: string,
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
-  episodeId?: string,
-  enhancePrompts?: boolean
-) {
-  if (!modelConfig?.video) {
-    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
-  }
-  if (!modelConfig?.image) {
-    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
-  }
-
-  const batchVersionId = payload?.versionId as string | undefined;
-  const shotWhereConditions = [eq(shots.projectId, projectId)];
-  if (batchVersionId) shotWhereConditions.push(eq(shots.versionId, batchVersionId));
-  if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
-  const allShots = await db
-    .select()
-    .from(shots)
-    .where(and(...shotWhereConditions))
-    .orderBy(asc(shots.sequence));
-
-  const versionedUploadDir = batchVersionId
-    ? await getVersionedUploadDir(batchVersionId)
-    : process.env.UPLOAD_DIR || "./uploads";
-
-  const overwrite = payload?.overwrite === true;
-  const eligible = allShots.filter(
-    (s) => s.status !== "generating" && (overwrite || !s.referenceVideoUrl)
-  );
-  if (eligible.length === 0) {
-    return NextResponse.json({ results: [], message: "No eligible shots" });
-  }
-
-  const projectCharacters = await getEpisodeCharacters(projectId, episodeId);
-
-  const characterDescriptions = projectCharacters
-    .map((c) => `${c.name}: ${c.description}`)
-    .join("\n");
-
-  const imageProvider = resolveImageProvider(modelConfig, versionedUploadDir);
-  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
-  const textProvider = resolveAIProvider(modelConfig);
-  const batchRefTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
-  const batchRefImageProtocol = modelConfig?.image?.protocol ?? "";
-  const batchRefVideoProtocol = modelConfig?.video?.protocol ?? "";
-  const refVideoSystem = getRefVideoPromptSystem(batchRefVideoProtocol);
-  const ratio = (payload?.ratio as string) || "16:9";
-  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
-  const refVideoSlots = await resolveSlotContents("ref_video_generate", { userId, projectId });
-
-  // Project visualStyle → style lock tag
-  const [batchRefVideoProject] = await db
-    .select({ visualStyle: projects.visualStyle })
-    .from(projects)
-    .where(eq(projects.id, projectId));
-  const batchRefVideoStyleTag = (() => {
-    const style = batchRefVideoProject?.visualStyle;
-    if (!style) return undefined;
-    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
-  })();
-
-  await Promise.all(
-    eligible.map((shot) =>
-      db.update(shots).set({ status: "generating" }).where(eq(shots.id, shot.id))
-    )
-  );
-
-  const results = await Promise.all(
-    eligible.map(async (shot): Promise<{ shotId: string; sequence: number; status: "ok" | "error"; referenceVideoUrl?: string; error?: string }> => {
-      try {
-        const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-        if (!shot.referenceVideoUrl && shot.remoteReferenceVideoUrl) {
-          const resumedPath = await resumeRemoteVideoIfAvailable({
-            shotId: shot.id,
-            remoteUrl: shot.remoteReferenceVideoUrl,
-            remoteStatus: shot.remoteReferenceVideoStatus,
-            remoteExpiresAt: shot.remoteReferenceVideoExpiresAt,
-            uploadDir: versionedUploadDir,
-            mode: "reference",
-          });
-          if (resumedPath) {
-            return { shotId: shot.id, sequence: shot.sequence, status: "ok", referenceVideoUrl: resumedPath };
-          }
-        }
-        const shotDialogues = await db
-          .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
-          .from(dialogues)
-          .where(eq(dialogues.shotId, shot.id))
-          .orderBy(asc(dialogues.sequence));
-        const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
-        const onScreenDialogueChars = shotDialogues
-          .map((d) => projectCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-          .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-
-        const dialogueList = shotDialogues.map((d) => {
-          const char = projectCharacters.find((c) => c.id === d.characterId);
-          const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
-          const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-          return {
-            characterName,
-            text: d.text,
-            offscreen: !onScreen,
-            visualHint,
-          };
-        });
-
-        // Step 1: Generate scene reference frame (Toonflow-style)
-        const charRefs = await resolveCharacterImages(
-          shot.prompt || "",
-          projectCharacters,
-          modelConfig?.text,
-          userId,
-          projectId
-        );
-        await saveShotWarnings(shot.id, charRefs);
-        const charRefMapping = charRefs.map((c, i) => `${c.name}=图片${i + 1}`).join("，");
-        
-        const batchRefSlots = await resolveSlotContents("scene_frame_generate", { userId, projectId });
-        const sceneFramePromptRaw = buildSceneFramePrompt({
-          sceneDescription: shot.prompt || "",
-          charRefMapping,
-          characterDescriptions,
-          cameraDirection: shot.cameraDirection,
-          startFrameDesc: shot.startFrameDesc,
-          motionScript: shot.motionScript,
-          slotContents: batchRefSlots,
-        });
-        const sceneFramePrompt = enhancePrompts && batchRefTextProvider
-          ? await enhanceImagePrompt(sceneFramePromptRaw, batchRefImageProtocol, batchRefTextProvider)
-          : sceneFramePromptRaw;
-
-        console.log(`[BatchReferenceVideo] Shot ${shot.sequence}: generating scene frame, mapping="${charRefMapping}"`);
-
-        const sceneFramePath = await imageProvider.generateImage(sceneFramePrompt, {
-          quality: "hd",
-          referenceImages: charRefs.map((c) => c.imagePath),
-        });
-
-        // Save scene frame for display (separate field — does not pollute firstFrame used by keyframe mode)
-        await db.update(shots).set({ sceneRefFrame: sceneFramePath }).where(eq(shots.id, shot.id));
-
-        // Step 2: Use stored videoPrompt if available; otherwise generate from scene frame via vision AI
-        let videoPromptRaw: string;
-        if (shot.videoPrompt) {
-          videoPromptRaw = stripBgmContent(shot.videoPrompt!, shot.bgmNote);
-        } else {
-          try {
-            // Prefer videoScript (already optimized for video models) over raw motionScript.
-            // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
-            const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-            const batchRefShotChars = filterShotCharacters(motionContext, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
-            const promptRequest = buildRefVideoPromptRequest({
-              motionScript: motionContext,
-              cameraDirection: shot.cameraDirection || "static",
-              duration: effectiveDuration,
-              characters: batchRefShotChars,
-              dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-            });
-            console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
-            const rawPrompt = await textProvider.generateText(promptRequest, {
-              systemPrompt: refVideoSystem,
-              images: [sceneFramePath],
-              temperature: 0.7,
-            });
-            console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
-            videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
-          } catch (err) {
-            console.warn("[BatchReferenceVideo] Vision prompt generation failed, falling back:", err);
-            const motionContextFallback = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-            const batchRefShotCharsFallback = filterShotCharacters(motionContextFallback, projectCharacters, { contextText: shot.startFrameDesc ?? undefined });
-            videoPromptRaw = buildReferenceVideoPrompt({
-              videoScript: motionContextFallback,
-              cameraDirection: shot.cameraDirection || "static",
-              duration: effectiveDuration,
-              characters: batchRefShotCharsFallback,
-              dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-              slotContents: refVideoSlots,
-              visualStyleTag: batchRefVideoStyleTag,
-              soundEffectNote: shot.soundEffectNote,
-            });
-          }
-        }
-        const videoPrompt = (enhancePrompts && batchRefTextProvider && !shot.videoPrompt)
-          ? await enhanceVideoPrompt(videoPromptRaw, batchRefVideoProtocol, batchRefTextProvider)
-          : videoPromptRaw;
-
-        console.log(`\n${"=".repeat(80)}\n[BatchReferenceVideo] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
-
-        const result = await videoProvider.generateVideo({
-          initialImage: sceneFramePath,
-          prompt: videoPrompt,
-          duration: effectiveDuration,
-          ratio,
-          referenceImages: charRefs.map((c) => c.imagePath),
-          onRemoteResult: async ({ videoUrl, taskId }) => {
-            await db
-              .update(shots)
-              .set({
-                remoteReferenceVideoUrl: videoUrl,
-                remoteReferenceVideoTaskId: taskId ?? null,
-                remoteReferenceVideoStatus: "available",
-                remoteReferenceVideoCreatedAt: new Date(),
-                remoteReferenceVideoExpiresAt: getRemoteVideoExpiry(),
-              })
-              .where(eq(shots.id, shot.id));
-          },
-        });
-
-        await db
-          .update(shots)
-          .set({
-            referenceVideoUrl: result.filePath,
-            lastFrameUrl: result.lastFrameUrl ?? null,
-            status: "completed",
-          })
-          .where(eq(shots.id, shot.id));
-
-        console.log(`[BatchReferenceVideo] Shot ${shot.sequence} completed`);
-        return { shotId: shot.id, sequence: shot.sequence, status: "ok", referenceVideoUrl: result.filePath };
-      } catch (err) {
-        console.error(`[BatchReferenceVideo] Error for shot ${shot.sequence}:`, err);
-        await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shot.id));
-        return {
-          shotId: shot.id,
-          sequence: shot.sequence,
-          status: "error",
-          error: extractErrorMessage(err),
-        };
-      }
-    })
-  );
-
-  return NextResponse.json({ results });
-}
-
-
 // --- video_assemble: synchronous ffmpeg concat + subtitle burn ---
 
 async function handleVideoAssembleSync(projectId: string, payload?: Record<string, unknown>, episodeId?: string) {
-  let generationModeValue: string = "keyframe";
-  if (episodeId) {
-    const [episode] = await db.select({ generationMode: episodes.generationMode }).from(episodes).where(eq(episodes.id, episodeId));
-    generationModeValue = episode?.generationMode ?? "keyframe";
-  } else {
-    const [project] = await db.select({ generationMode: projects.generationMode }).from(projects).where(eq(projects.id, projectId));
-    generationModeValue = project?.generationMode ?? "keyframe";
-  }
-
   let versionId = payload?.versionId as string | undefined;
 
   // If no versionId provided, fall back to the latest version for this project/episode
@@ -3881,10 +2180,7 @@ async function handleVideoAssembleSync(projectId: string, payload?: Record<strin
     .where(and(...shotWhereConditions))
     .orderBy(asc(shots.sequence));
 
-  const isReference = generationModeValue === "reference";
-  const videoPaths = projectShots
-    .map((s) => isReference ? s.referenceVideoUrl : s.videoUrl)
-    .filter(Boolean) as string[];
+  const videoPaths = projectShots.map((s) => s.videoUrl).filter(Boolean) as string[];
 
   if (videoPaths.length === 0) {
     return NextResponse.json({ error: "No video clips to assemble" }, { status: 400 });
@@ -3954,27 +2250,8 @@ async function handleSingleVideoPrompt(
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId)).limit(1);
   if (!shot) return NextResponse.json({ error: "Shot not found" }, { status: 404 });
 
-  // Determine generation mode to decide which frames to pass
-  let genMode = "keyframe";
-  if (shot.episodeId) {
-    const [ep] = await db.select({ generationMode: episodes.generationMode }).from(episodes).where(eq(episodes.id, shot.episodeId));
-    genMode = ep?.generationMode ?? "keyframe";
-  } else {
-    const [proj] = await db.select({ generationMode: projects.generationMode }).from(projects).where(eq(projects.id, projectId));
-    genMode = proj?.generationMode ?? "keyframe";
-  }
-
-  // Keyframe mode: pass first + last frames for transition description
-  // Reference mode: pass only the scene reference frame
-  const visionFrames: string[] = [];
-  if (genMode === "reference") {
-    if (shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
-  } else {
-    if (shot.firstFrame) visionFrames.push(shot.firstFrame);
-    if (shot.lastFrame) visionFrames.push(shot.lastFrame);
-    if (visionFrames.length === 0 && shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
-  }
-  console.log(`[SingleVideoPrompt] shot.sequence=${shot.sequence}, mode=${genMode}, frames=${visionFrames.length}`);
+  const visionFrames = collectVisionFramePaths(shot);
+  console.log(`[SingleVideoPrompt] shot.sequence=${shot.sequence}, frames=${visionFrames.length}`);
   if (visionFrames.length === 0) {
     return NextResponse.json({ error: "No frame available. Generate frames first." }, { status: 400 });
   }
@@ -4066,24 +2343,13 @@ async function handleBatchVideoPrompt(
 
   const batchCharacters = await getEpisodeCharacters(projectId, episodeId);
 
-  // Only process shots that have frames
-  const eligible = batchShots.filter((s) => s.firstFrame || s.lastFrame || s.sceneRefFrame);
-
-  // Determine generation mode for frame selection
-  let batchGenMode = "keyframe";
-  if (episodeId) {
-    const [ep] = await db.select({ generationMode: episodes.generationMode }).from(episodes).where(eq(episodes.id, episodeId));
-    batchGenMode = ep?.generationMode ?? "keyframe";
-  } else {
-    const [proj] = await db.select({ generationMode: projects.generationMode }).from(projects).where(eq(projects.id, projectId));
-    batchGenMode = proj?.generationMode ?? "keyframe";
-  }
+  const eligible = batchShots.filter((s) => collectVisionFramePaths(s).length > 0);
 
   const textProvider = resolveAIProvider(modelConfig);
   const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
 
-  console.log(`[BatchVideoPrompt] Processing ${eligible.length} shots (${batchShots.length} total, ${batchCharacters.length} chars, mode=${batchGenMode})`);
+  console.log(`[BatchVideoPrompt] Processing ${eligible.length} shots (${batchShots.length} total, ${batchCharacters.length} chars)`);
   const bvpStartTime = Date.now();
 
   const results = await Promise.all(
@@ -4091,14 +2357,9 @@ async function handleBatchVideoPrompt(
       try {
         const shotStart = Date.now();
         const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-        // Keyframe: pass first + last frames; Reference: pass only scene ref frame
-        const visionFrames: string[] = [];
-        if (batchGenMode === "reference") {
-          if (shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
-        } else {
-          if (shot.firstFrame) visionFrames.push(shot.firstFrame);
-          if (shot.lastFrame) visionFrames.push(shot.lastFrame);
-          if (visionFrames.length === 0 && shot.sceneRefFrame) visionFrames.push(shot.sceneRefFrame);
+        const visionFrames = collectVisionFramePaths(shot);
+        if (visionFrames.length === 0) {
+          return { shotId: shot.id, sequence: shot.sequence, status: "error" as const, error: "No frame on disk" };
         }
         const shotDialogues = await db
           .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })

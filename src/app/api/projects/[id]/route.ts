@@ -148,13 +148,13 @@ export async function PATCH(
     idea: string;
     script: string;
     status: "draft" | "processing" | "completed";
-    generationMode: "keyframe" | "reference";
     useProjectPrompts: number;
     enhancePrompts: number;
+    linkShotsViaCutPoint: number;
     visualStyle: string;
   }>;
 
-  const { title, idea, script, status, generationMode, useProjectPrompts, enhancePrompts, visualStyle } = body;
+  const { title, idea, script, status, useProjectPrompts, enhancePrompts, linkShotsViaCutPoint, visualStyle } = body;
 
   const [updated] = await db
     .update(projects)
@@ -163,9 +163,9 @@ export async function PATCH(
       ...(idea !== undefined && { idea }),
       ...(script !== undefined && { script }),
       ...(status !== undefined && { status }),
-      ...(generationMode !== undefined && { generationMode }),
       ...(useProjectPrompts !== undefined && { useProjectPrompts }),
       ...(enhancePrompts !== undefined && { enhancePrompts }),
+      ...(linkShotsViaCutPoint !== undefined && { linkShotsViaCutPoint }),
       ...(visualStyle !== undefined && { visualStyle }),
       updatedAt: new Date(),
     })
@@ -215,16 +215,15 @@ export async function DELETE(
 
   // Shot frames, videos, and history videos
   const projectShots = await db
-    .select({ id: shots.id, firstFrame: shots.firstFrame, lastFrame: shots.lastFrame, sceneRefFrame: shots.sceneRefFrame, videoUrl: shots.videoUrl, referenceVideoUrl: shots.referenceVideoUrl })
+    .select({ id: shots.id, anchorFirst: shots.anchorFirst, anchorLastAi: shots.anchorLastAi, videoUrl: shots.videoUrl, cutPoint: shots.cutPoint })
     .from(shots)
     .where(eq(shots.projectId, id));
 
   for (const shot of projectShots) {
-    tryDeleteFile(shot.firstFrame);
-    tryDeleteFile(shot.lastFrame);
-    tryDeleteFile(shot.sceneRefFrame);
+    tryDeleteFile(shot.anchorFirst);
+    tryDeleteFile(shot.anchorLastAi);
     tryDeleteFile(shot.videoUrl);
-    tryDeleteFile(shot.referenceVideoUrl);
+    tryDeleteFile(shot.cutPoint);
 
     // 清理历史视频文件（DB 记录因 CASCADE 自动删，但文件需要手动清理）
     const historyEntries = await db

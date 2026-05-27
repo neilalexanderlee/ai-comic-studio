@@ -87,10 +87,10 @@ export async function POST(
     .set({
       duration: firstDuration,
       status: "pending",
-      firstFrame: null,
-      lastFrame: null,
+      anchorFirst: null,
+      anchorLastAi: null,
       videoUrl: null,
-      referenceVideoUrl: null,
+      cutPoint: null,
       lastFrameUrl: null,
       videoPrompt: null,
     })

@@ -7,6 +7,8 @@
 
 import { vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 // ── DB mock ──────────────────────────────────────────────────────────────────
 // Unit tests must not hit the real database.
 vi.mock("@/lib/db", () => ({

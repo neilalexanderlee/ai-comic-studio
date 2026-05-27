@@ -18,9 +18,8 @@ export async function PATCH(
     endFrameDesc: string | null;
     motionScript: string | null;
     cameraDirection: string;
-    firstFrame: string | null;
-    lastFrame: string | null;
-    sceneRefFrame: string | null;
+    anchorFirst: string | null;
+    anchorLastAi: string | null;
     videoPrompt: string | null;
     /** 台词更新：传入完整列表，后端全量替换 */
     dialogues: Array<{

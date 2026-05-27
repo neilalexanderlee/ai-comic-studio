@@ -43,21 +43,21 @@ export interface AIProvider {
   generateImages?(prompts: string[], options?: ImageOptions): Promise<string[]>;
 }
 
-// Keyframe mode: both firstFrame and lastFrame must be provided
+// Keyframe mode: both anchorFirst and anchorLastAi must be provided
 type KeyframeVideoParams = {
-  firstFrame: string;
-  lastFrame: string;
+  anchorFirst: string;
+  anchorLastAi: string;
   initialImage?: never;
   /** 首帧图片的公网 URL（来自图片生成 API），优先用于视频生成请求，避免 base64 转换 */
-  firstFrameRemoteUrl?: string;
+  anchorFirstRemoteUrl?: string;
   /** 尾帧图片的公网 URL（来自图片生成 API），优先用于视频生成请求，避免 base64 转换 */
-  lastFrameRemoteUrl?: string;
+  anchorLastAiRemoteUrl?: string;
 };
 
 // Reference image mode: a single initial image (local path or http URL)
 type ReferenceVideoParams = {
-  firstFrame?: never;
-  lastFrame?: never;
+  anchorFirst?: never;
+  anchorLastAi?: never;
   initialImage: string;
 };
 

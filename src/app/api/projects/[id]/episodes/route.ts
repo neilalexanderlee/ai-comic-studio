@@ -42,22 +42,16 @@ export async function GET(
       // 1) Collect frame images from shots, deduplicated
       const epShots = await db
         .select({
-          firstFrame: shots.firstFrame,
-          lastFrame: shots.lastFrame,
-          sceneRefFrame: shots.sceneRefFrame,
+          anchorFirst: shots.anchorFirst,
+          anchorLastAi: shots.anchorLastAi,
         })
         .from(shots)
         .where(eq(shots.episodeId, ep.id));
 
       const frameSet = new Set<string>();
-      const isReference = ep.generationMode === "reference";
       for (const s of epShots) {
-        if (isReference) {
-          if (s.sceneRefFrame) frameSet.add(s.sceneRefFrame);
-        } else {
-          if (s.firstFrame) frameSet.add(s.firstFrame);
-          if (s.lastFrame) frameSet.add(s.lastFrame);
-        }
+        if (s.anchorFirst) frameSet.add(s.anchorFirst);
+        if (s.anchorLastAi) frameSet.add(s.anchorLastAi);
       }
 
       if (frameSet.size > 0) {

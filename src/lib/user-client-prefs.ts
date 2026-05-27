@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { userClientPrefs } from "@/lib/db/schema";
-import type { ModelRef, Provider } from "@/stores/model-store";
+import type { ModelStorePersistPayload } from "@/stores/model-store";
 import { eq, sql } from "drizzle-orm";
+
+export type { ModelStorePersistPayload };
 
 let tableReady = false;
 
@@ -16,14 +18,6 @@ export async function ensureUserClientPrefsTable() {
   `);
   tableReady = true;
 }
-
-/** 与 model-store zustand partialize 一致（密钥仍在 provider_secrets） */
-export type ModelStorePersistPayload = {
-  providers: Array<Omit<Provider, "apiKey" | "secretKey"> & { apiKey?: string; secretKey?: undefined }>;
-  defaultTextModel: ModelRef | null;
-  defaultImageModel: ModelRef | null;
-  defaultVideoModel: ModelRef | null;
-};
 
 export async function getModelStorePrefs(userId: string): Promise<ModelStorePersistPayload | null> {
   if (!userId) return null;

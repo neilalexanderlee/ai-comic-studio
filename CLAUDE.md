@@ -132,16 +132,16 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 27` — `0027_add_enhance_prompts`
+**当前最新迁移索引**：`idx 32` — `0032_drop_shot_reference_columns`
 
 ### 关键表
 
 | 表 | 说明 |
 |---|---|
-| `projects` | 顶层实体，含 `visualStyle`、`generationMode`、`enhancePrompts`、`useProjectPrompts` |
+| `projects` | 顶层实体，含 `visualStyle`、`generationMode`（legacy）、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
 | `episodes` | 分属 project 的剧集，含 `generationMode`（可覆盖 project 级） |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜，含所有帧/视频 URL 字段 |
+| `shots` | 单个分镜；Plan B 帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`、`chainSourceShotId`、`chainSourceType` |
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint` |
 | `character_assets` | 角色图片（morph/blueprint 类型，带 tag 状态标签） |
 | `episode_characters` | 多对多：角色参与哪些剧集 |
@@ -224,16 +224,22 @@ const charExtractSystem = await resolvePrompt("character_extract", { userId, pro
 
 **关键设计决策：**
 - LLM judge 绑定在 `enhancePrompts`（「AI 增强」开关）上——关掉 AI 功能时仅走确定性规则，不产生额外 LLM 调用
-- `first_only` 结果：只保存 firstFrame，不生成 lastFrame；视频生成时自动检测 `!shot.lastFrame` → 参考图模式
-- Seedance 在参考图模式下会返回视频实际尾帧（`return_last_frame`），此尾帧会被保存为 `seedanceLastFrame`，供下一镜继承
+- `first_only` 结果：只写 `anchor_first`，不写 `anchor_last_ai`；视频生成时若磁盘无有效 `anchor_last_ai` → Seedance 首帧参考图模式
+- Seedance 参考图模式返回视频最后一帧 → 写入本镜 `cut_point`（**不**自动写下一镜，除非开启衔接开关）
 
-**与「独立首帧」开关的区别：**
-- 「独立首帧」(`independentFirstFrame`/`disableChaining`) = 禁止把本镜尾帧传给下一镜作为首帧（控制帧链式继承）
-- 帧生成策略 = 决定当前镜头本身要不要生成尾帧（控制生成成本和视频质量）
+**帧生成策略** = 决定当前镜头要不要生成 AI 尾帧（与镜间衔接无关）。
 
-两者相互独立，可以同时开启。
+### 8. linkShotsViaCutPoint — 镜头衔接（视频尾帧）
 
-### 8. Drizzle null 比较
+`projects.link_shots_via_cut_point`（integer，默认 0）对应分镜页「镜头衔接（视频尾帧）」。
+
+- 开启：单镜/批量视频成功后调用 `maybeAutoLinkNextShotAfterVideo` → `linkNextShotAnchorFromCutPoint`（`src/lib/storyboard/shot-frame-link.ts`）
+- 机制：**路径直拷** `cut_point[i]` → `anchor_first[i+1]`（同集、同 `versionId`、同 `episodeId`）
+- 跳过：`isCrowdToCharacterCut`（上一镜群演、下一镜有命名角色）
+- 与手动衔接并存：「承接上一镜尾帧」「承接上一集尾帧」、参考图 AI 重绘
+- Reference 双轨已废弃（generate 相关 action **410**）；勿恢复生成画面前自动链式参考
+
+### 9. Drizzle null 比较
 
 ```typescript
 // ✅ 正确：用 isNull() / isNotNull()
@@ -323,6 +329,8 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 问题 | 根因 | 修复位置 |
 |---|---|---|
 | 删版本后刷新 v4 消失 | `currentEpisodeId` 水合为 null，版本建为 `episodeId=null` | storyboard page：用 `urlEpisodeId` |
+| 镜间 PPT / 群演误衔接 | 群演 `cut_point` 当下镜首帧 | 自动衔接跳过 `crowd_to_character`；手动勿点承接 |
+| DB 有帧路径文件已删 | 误走首尾帧模式 / ENOENT | UI 红框「文件缺失」（D6-B），不自动清 DB |
 | 版本 DELETE 返回 404 | `eq(episodeId, null)` 匹配不到孤儿版本 | version DELETE route：移除 episodeId 过滤 |
 | 群演场景注入全部角色图 | `filterShotCharacters` 无匹配时 fallback 到全量 | `generate/route.ts` + `filterShotCharacters`：移除 fallback |
 | `enhance_prompts` column 缺失 | schema 先于 migration 被 Drizzle 读取 | migration 0027 + Python 直接 ALTER |

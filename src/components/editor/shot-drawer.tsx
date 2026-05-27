@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
@@ -24,6 +24,20 @@ import {
   Trash2,
 } from "lucide-react";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { useFrameImageMissing } from "@/hooks/use-frame-image-missing";
+import { describeShotAutoLinkToast, type ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
+import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
+
+function WithFramePathMissing({
+  src,
+  children,
+}: {
+  src: string | null | undefined;
+  children: (pathMissing: boolean) => ReactNode;
+}) {
+  const pathMissing = useFrameImageMissing(src);
+  return <>{children(pathMissing)}</>;
+}
 
 interface Dialogue {
   id: string;
@@ -41,12 +55,13 @@ interface DrawerShot {
   motionScript: string | null;
   cameraDirection: string;
   duration: number;
-  firstFrame: string | null;
-  lastFrame: string | null;
-  sceneRefFrame?: string | null;
+  anchorFirst: string | null;
+  anchorLastAi: string | null;
+  cutPoint?: string | null;
   videoPrompt?: string | null;
   videoUrl: string | null;
   dialogues: Dialogue[];
+  isCrowdShot?: boolean;
 }
 
 interface ShotDrawerProps {
@@ -56,10 +71,10 @@ interface ShotDrawerProps {
   onShotChange: (id: string) => void;
   onUpdate: () => void;
   projectId: string;
-  generationMode: "keyframe" | "reference";
   videoRatio: string;
   selectedVersionId: string | null;
   anyGenerating: boolean;
+  enhancePrompts?: boolean;
 }
 
 export function ShotDrawer({
@@ -69,10 +84,10 @@ export function ShotDrawer({
   onShotChange,
   onUpdate,
   projectId,
-  generationMode,
   videoRatio,
   selectedVersionId,
   anyGenerating,
+  enhancePrompts = false,
 }: ShotDrawerProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -95,7 +110,6 @@ export function ShotDrawer({
 
   // Local generating state (independent of page-level anyGenerating)
   const [generatingFrames, setGeneratingFrames] = useState(false);
-  const [generatingSceneFrame, setGeneratingSceneFrame] = useState(false);
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
@@ -119,7 +133,6 @@ export function ShotDrawer({
     setEditCameraDirection(shot.cameraDirection ?? "static");
     setEditDuration(shot.duration ?? 5);
     setGeneratingFrames(false);
-    setGeneratingSceneFrame(false);
     setGeneratingVideo(false);
     setGeneratingPrompt(false);
     setRewritingText(false);
@@ -141,10 +154,15 @@ export function ShotDrawer({
   const hasPrev = currentIndex > 0;
   const hasNext = currentIndex < shots.length - 1;
 
-  const hasFrame = !!(shot.sceneRefFrame || shot.firstFrame || shot.lastFrame);
+  const hasFrame = !!(shot.anchorFirst || shot.anchorLastAi || shot.cutPoint);
+  const videoReadiness = getShotVideoReadiness(
+    { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi },
+    shot.isCrowdShot ?? false
+  );
+  const canGenerateVideo = videoReadiness.ready;
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
-  const localGenerating = generatingFrames || generatingSceneFrame || generatingVideo || generatingPrompt || rewritingText;
+  const localGenerating = generatingFrames || generatingVideo || generatingPrompt || rewritingText;
 
   async function patchShot(fields: Record<string, unknown>) {
     if (!shot) return;
@@ -219,27 +237,6 @@ export function ShotDrawer({
     }
   }
 
-  async function handleGenerateSceneFrame() {
-    if (!imageGuard()) return;
-    setGeneratingSceneFrame(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_scene_frame",
-          payload: { shotId: shot!.id, versionId: selectedVersionId },
-          modelConfig: getModelConfig(),
-        }),
-      });
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    } finally {
-      setGeneratingSceneFrame(false);
-    }
-  }
-
   async function handleGenerateVideoPrompt() {
     setGeneratingPrompt(true);
     try {
@@ -262,17 +259,29 @@ export function ShotDrawer({
 
   async function handleGenerateVideo() {
     if (!videoGuard()) return;
+    if (!canGenerateVideo) {
+      toast.error(!videoReadiness.ready ? videoReadiness.message : t("common.generationFailed"));
+      return;
+    }
     setGeneratingVideo(true);
     try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
+      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: generationMode === "reference" ? "single_reference_video" : "single_video_generate",
+          action: "single_video_generate",
           payload: { shotId: shot!.id, ratio: videoRatio, versionId: selectedVersionId },
           modelConfig: getModelConfig(),
+          enhancePrompts,
         }),
       });
+      const data = (await res.json()) as { error?: string; shotLink?: ShotAutoLinkResult };
+      if (!res.ok) throw new Error(data.error || t("common.generationFailed"));
+      const linkToast = describeShotAutoLinkToast(data.shotLink, shot?.sequence);
+      if (linkToast) {
+        if (linkToast.variant === "success") toast.success(linkToast.message);
+        else toast.info(linkToast.message);
+      }
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
@@ -301,12 +310,11 @@ export function ShotDrawer({
     }
   }
 
-  const frameAssets = generationMode === "reference"
-    ? [{ src: shot.sceneRefFrame, label: t("shot.sceneRefFrame") }]
-    : [
-        { src: shot.firstFrame, label: t("shot.firstFrame") },
-        { src: shot.lastFrame, label: t("shot.lastFrame") },
-      ];
+  const frameAssets = [
+    { src: shot.anchorFirst, label: t("shot.anchorFirst") },
+    { src: shot.anchorLastAi, label: t("shot.anchorLastAi") },
+    { src: shot.cutPoint, label: t("shot.cutPoint") },
+  ];
 
   return (
     <>
@@ -362,26 +370,22 @@ export function ShotDrawer({
                 rows={2}
                 placeholder={t("shot.prompt")}
               />
-              {generationMode !== "reference" && (
-                <>
-                  <Textarea
-                    value={editStartFrame}
-                    onChange={(e) => setEditStartFrame(e.target.value)}
-                    onBlur={() => patchShot({ startFrameDesc: editStartFrame })}
-                    rows={2}
-                    placeholder={t("shot.startFrame")}
-                    className="border-blue-200 bg-blue-50/30 text-sm"
-                  />
-                  <Textarea
-                    value={editEndFrame}
-                    onChange={(e) => setEditEndFrame(e.target.value)}
-                    onBlur={() => patchShot({ endFrameDesc: editEndFrame })}
-                    rows={2}
-                    placeholder={t("shot.endFrame")}
-                    className="border-amber-200 bg-amber-50/30 text-sm"
-                  />
-                </>
-              )}
+              <Textarea
+                value={editStartFrame}
+                onChange={(e) => setEditStartFrame(e.target.value)}
+                onBlur={() => patchShot({ startFrameDesc: editStartFrame })}
+                rows={2}
+                placeholder={t("shot.startFrame")}
+                className="border-blue-200 bg-blue-50/30 text-sm"
+              />
+              <Textarea
+                value={editEndFrame}
+                onChange={(e) => setEditEndFrame(e.target.value)}
+                onBlur={() => patchShot({ endFrameDesc: editEndFrame })}
+                rows={2}
+                placeholder={t("shot.endFrame")}
+                className="border-amber-200 bg-amber-50/30 text-sm"
+              />
               <Textarea
                 value={editMotionScript}
                 onChange={(e) => setEditMotionScript(e.target.value)}
@@ -523,32 +527,59 @@ export function ShotDrawer({
           {/* Step 2: Frames */}
           <section>
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
-              {generationMode === "reference" ? t("shot.stepSceneFrame") : t("shot.stepFrames")}
+              {t("shot.stepFrames")}
             </p>
             {hasFrame && (
               <div className="mb-2 flex gap-2">
                 {frameAssets.map((asset, i) => (
-                  <div
-                    key={i}
-                    className={`overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] cursor-pointer hover:opacity-80 transition-opacity ${generationMode === "reference" ? "w-full" : "flex-1"}`}
-                    onClick={() => asset.src && setPreviewSrc(uploadUrl(asset.src))}
-                  >
-                    {asset.src
-                      ? <img src={uploadUrl(asset.src)} className="w-full object-contain" alt={asset.label} />
-                      : <div className="flex h-16 items-center justify-center"><ImageIcon className="h-4 w-4 text-[--text-muted]" /></div>
-                    }
-                  </div>
+                  <WithFramePathMissing key={i} src={asset.src}>
+                    {(pathMissing) => (
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={`overflow-hidden rounded-lg border bg-[--surface] ${
+                          pathMissing
+                            ? "border-red-500 ring-1 ring-red-500/40"
+                            : "border-[--border-subtle]"
+                        } ${asset.src && !pathMissing ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                        onClick={() =>
+                          asset.src && !pathMissing && setPreviewSrc(uploadUrl(asset.src))
+                        }
+                      >
+                        {asset.src && !pathMissing ? (
+                          <img src={uploadUrl(asset.src)} className="w-full object-contain" alt={asset.label} />
+                        ) : pathMissing ? (
+                          <div className="flex h-16 flex-col items-center justify-center gap-0.5 px-1">
+                            <ImageIcon className="h-4 w-4 text-red-500" />
+                            <span className="text-[9px] text-red-600 text-center">文件缺失</span>
+                          </div>
+                        ) : (
+                          <div className="flex h-16 items-center justify-center">
+                            <ImageIcon className="h-4 w-4 text-[--text-muted]" />
+                          </div>
+                        )}
+                      </div>
+                      <p
+                        className={`mt-0.5 text-[10px] text-center truncate ${
+                          pathMissing ? "text-red-600 font-medium" : "text-[--text-muted]"
+                        }`}
+                      >
+                        {asset.label}
+                        {pathMissing ? " · 缺失" : ""}
+                      </p>
+                    </div>
+                    )}
+                  </WithFramePathMissing>
                 ))}
               </div>
             )}
             <Button
               size="xs"
               variant={!hasFrame ? "default" : "outline"}
-              onClick={generationMode === "reference" ? handleGenerateSceneFrame : handleGenerateFrames}
-              disabled={generatingFrames || generatingSceneFrame || anyGenerating}
+              onClick={handleGenerateFrames}
+              disabled={generatingFrames || anyGenerating}
             >
-              {(generatingFrames || generatingSceneFrame) ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
-              {(generatingFrames || generatingSceneFrame)
+              {generatingFrames ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
+              {generatingFrames
                 ? t("common.generating")
                 : hasFrame ? t("shot.regenerateFrames") : t("project.generateFrames")
               }
@@ -602,7 +633,8 @@ export function ShotDrawer({
               size="xs"
               variant={hasVideoPrompt && !hasVideo ? "default" : "outline"}
               onClick={handleGenerateVideo}
-              disabled={generatingVideo || (generationMode === "keyframe" && !shot.firstFrame) || anyGenerating}
+              disabled={generatingVideo || !canGenerateVideo || anyGenerating}
+              title={!canGenerateVideo && !videoReadiness.ready ? videoReadiness.message : undefined}
             >
               {generatingVideo ? <Loader2 className="h-3 w-3 animate-spin" /> : <VideoIcon className="h-3 w-3" />}
               {generatingVideo

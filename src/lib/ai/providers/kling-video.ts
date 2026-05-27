@@ -96,10 +96,10 @@ export class KlingVideoProvider implements VideoProvider {
 
     let taskId: string;
 
-    if ("firstFrame" in params) {
+    if ("anchorFirst" in params) {
       // ── Keyframe mode: image2video ──
-      const imageData = toBase64(params.firstFrame!);
-      const tailImageData = toBase64(params.lastFrame!);
+      const imageData = toBase64(params.anchorFirst!);
+      const tailImageData = toBase64(params.anchorLastAi!);
 
       console.log(
         `[Kling Video] image2video: model=${this.model}, duration=${duration}s, ratio=${aspectRatio}`
@@ -191,7 +191,7 @@ export class KlingVideoProvider implements VideoProvider {
       console.log(`[Kling Video] text2video task submitted: ${taskId}`);
     }
 
-    const taskType = "firstFrame" in params ? "image2video" : "text2video";
+    const taskType = "anchorFirst" in params ? "image2video" : "text2video";
     const videoUrl = await this.pollForResult(taskId, taskType);
     await params.onRemoteResult?.({ videoUrl, taskId });
 

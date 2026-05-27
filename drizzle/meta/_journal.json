@@ -204,6 +204,34 @@
       "when": 1779000004000,
       "tag": "0028_add_bgm_sound_effect_notes",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1779000005000,
+      "tag": "0029_shot_frame_semantics",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1779000006000,
+      "tag": "0030_link_shots_via_cut_point",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1779000007000,
+      "tag": "0031_drop_generation_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1779000008000,
+      "tag": "0032_drop_shot_reference_columns",
+      "breakpoints": true
     }
   ]
 }

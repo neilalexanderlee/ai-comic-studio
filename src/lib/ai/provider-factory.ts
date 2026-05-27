@@ -76,7 +76,7 @@ export function createAIProvider(config: ProviderConfig, uploadDir?: string): AI
 
 export function createVideoProvider(config: ProviderConfig, uploadDir?: string): VideoProvider {
   switch (config.protocol) {
-    case "seedance":
+    case "cut_point":
       // 火山方舟 Seedance 视频生成（Bearer Token 认证）
       // 参考：https://www.volcengine.com/docs/82379/1520757
       return new SeedanceProvider({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -39,8 +39,24 @@ import {
   Plus,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
+import { FrameReferencePicker, type FrameReferenceChoice } from "./frame-reference-picker";
+import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
+import { useFrameImageMissing } from "@/hooks/use-frame-image-missing";
+import { describeShotAutoLinkToast, type ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
+import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { Scissors } from "lucide-react";
+
+function WithFramePathMissing({
+  src,
+  children,
+}: {
+  src: string | null | undefined;
+  children: (pathMissing: boolean) => ReactNode;
+}) {
+  const pathMissing = useFrameImageMissing(src);
+  return <>{children(pathMissing)}</>;
+}
 
 interface Dialogue {
   id: string;
@@ -59,37 +75,49 @@ interface ShotCardProps {
   motionScript: string | null;
   cameraDirection: string;
   duration: number;
-  firstFrame: string | null;
-  lastFrame: string | null;
+  anchorFirst: string | null;
+  anchorLastAi: string | null;
+  /** Seedance 视频真实尾帧（生成视频后写入） */
+  cutPoint?: string | null;
   videoUrl: string | null;
   remoteVideoUrl?: string | null;
   remoteVideoStatus?: string | null;
   remoteVideoExpiresAt?: string | Date | null;
   remoteVideoLastDownloadAt?: string | Date | null;
-  sceneRefFrame?: string | null;
   videoPrompt?: string | null;
   status: string;
   dialogues: Dialogue[];
   onUpdate: () => void;
-  generationMode?: "keyframe" | "reference";
+  episodeId?: string;
+  /** 本集第一镜且存在上一集时显示「承接上一集尾帧」 */
+  showAdoptPrevEpisode?: boolean;
   videoRatio?: string;
   isCompact?: boolean;
   onOpenDrawer?: (id: string) => void;
-  batchGeneratingFrames?: boolean;
   batchGeneratingVideoPrompts?: boolean;
-  batchGeneratingVideos?: boolean;
   warnings?: string | null;
   videoResolution?: string | null;
   /** 生成视频时使用的分辨率，传递给后端 */
   videoGenerationResolution?: "480p" | "720p";
-  /** 上一镜 Seedance 视频真实尾帧（优先于 prevLastFrame） */
-  prevSeedanceLastFrame?: string | null;
-  /** 上一镜 AI 生成的尾帧图 */
-  prevLastFrame?: string | null;
+  /** 上一镜视频切点 cut_point（参考用） */
+  prevCutPoint?: string | null;
+  /** 上一镜 AI 尾帧 anchor_last_ai（参考用） */
+  prevAnchorLastAi?: string | null;
   /** 是否开启 AI Prompt 增强（透传给生成 API） */
   enhancePrompts?: boolean;
-  /** 独立生成首帧：true 时不继承上一镜尾帧，每个分镜首帧独立生成 */
-  independentFirstFrame?: boolean;
+  /** 同版本其他分镜（用于首帧参考图选择器） */
+  frameRefShots?: Array<{
+    id: string;
+    sequence: number;
+    anchorFirst?: string | null;
+    anchorLastAi?: string | null;
+    cutPoint?: string | null;
+  }>;
+  chainSourceShotId?: string | null;
+  chainSourceType?: string | null;
+  chainSourceSequence?: number | null;
+  /** 群演镜头（无命名角色）— 影响视频/尾帧校验 */
+  isCrowdShot?: boolean;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -162,37 +190,46 @@ export function ShotCard({
   motionScript,
   cameraDirection,
   duration,
-  firstFrame,
-  lastFrame,
+  anchorFirst,
+  anchorLastAi,
+  cutPoint,
   videoUrl,
   remoteVideoUrl,
   remoteVideoStatus,
   remoteVideoExpiresAt,
   remoteVideoLastDownloadAt,
-  sceneRefFrame,
   videoPrompt,
   status,
   dialogues,
   onUpdate,
-  generationMode = "keyframe",
+  episodeId,
+  showAdoptPrevEpisode = false,
   videoRatio = "16:9",
   isCompact = false,
   onOpenDrawer,
-  batchGeneratingFrames = false,
   batchGeneratingVideoPrompts = false,
-  batchGeneratingVideos = false,
   warnings,
   videoResolution,
   videoGenerationResolution,
-  prevSeedanceLastFrame,
-  prevLastFrame,
+  prevCutPoint,
+  prevAnchorLastAi,
   enhancePrompts = false,
-  independentFirstFrame = false,
+  frameRefShots = [],
+  chainSourceShotId,
+  chainSourceType,
+  chainSourceSequence,
+  isCrowdShot = false,
 }: ShotCardProps) {
   const t = useTranslations();
-  const prevChainFrame = prevSeedanceLastFrame ?? prevLastFrame ?? null;
+  const videoReadiness = getShotVideoReadiness(
+    { anchorFirst, anchorLastAi },
+    isCrowdShot
+  );
+  const canGenerateVideo = videoReadiness.ready;
+  const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);
+  const prevChainFrame = prevCutPoint ?? prevAnchorLastAi ?? null;
   const prevChainFrameSource: "video" | "ai" | null =
-    prevSeedanceLastFrame ? "video" : prevLastFrame ? "ai" : null;
+    prevCutPoint ? "video" : prevAnchorLastAi ? "ai" : null;
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
   const [splittingShot, setSplittingShot] = useState(false);
@@ -220,7 +257,6 @@ export function ShotCard({
   // Generation state
   const [generatingFrames, setGeneratingFrames] = useState(false);
   const [generatingFrameTarget, setGeneratingFrameTarget] = useState<"first" | "last" | null>(null);
-  const [generatingSceneFrame, setGeneratingSceneFrame] = useState(false);
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
@@ -290,7 +326,7 @@ export function ShotCard({
 
   // Derived state
   const hasText = !!(prompt || startFrameDesc || motionScript);
-  const hasFrame = !!(sceneRefFrame || firstFrame || lastFrame);
+  const hasFrame = !!(anchorFirst || anchorLastAi || cutPoint);
   const hasVideoPrompt = !!videoPrompt;
   const hasVideo = !!videoUrl;
   const remoteExpiresAtMs = remoteVideoExpiresAt ? new Date(remoteVideoExpiresAt).getTime() : null;
@@ -310,12 +346,12 @@ export function ShotCard({
   // Step states
   const textState: StepState = rewritingText ? "generating" : hasText ? "done" : "idle";
   const frameState: StepState =
-    generatingFrames || generatingSceneFrame || batchGeneratingFrames ? "generating"
+    generatingFrames ? "generating"
     : status === "failed" && !hasFrame ? "error"
     : hasFrame ? "done" : "idle";
   const promptState: StepState = generatingPrompt || batchGeneratingVideoPrompts ? "generating" : hasVideoPrompt ? "done" : "idle";
   const videoState: StepState =
-    generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo) ? "generating"
+    generatingVideo || (isGenerating && !hasVideo) ? "generating"
     : status === "failed" && !hasVideo ? "error"
     : hasVideo ? "done" : "idle";
 
@@ -331,11 +367,34 @@ export function ShotCard({
   }
 
   const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
+  const [adoptingPrevEpisode, setAdoptingPrevEpisode] = useState(false);
+
+  async function handleAdoptPrevEpisodeFrame() {
+    if (!episodeId) return;
+    setAdoptingPrevEpisode(true);
+    try {
+      const res = await apiFetch(
+        `/api/projects/${projectId}/episodes/${episodeId}/shots/${id}/adopt-prev-episode-frame`,
+        { method: "POST" }
+      );
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error || "承接失败");
+      }
+      toast.success("已承接上一集尾帧为本镜首帧");
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "承接上一集尾帧失败");
+    } finally {
+      setAdoptingPrevEpisode(false);
+    }
+  }
+
   async function handleAdoptPrevChainFrame() {
     if (!prevChainFrame) return;
     setAdoptingPrevFrame(true);
     try {
-      await patchShot({ firstFrame: prevChainFrame });
+      await patchShot({ anchorFirst: prevChainFrame });
       onUpdate();
     } finally {
       setAdoptingPrevFrame(false);
@@ -361,78 +420,79 @@ export function ShotCard({
     }
   }
 
-  async function handleGenerateFrames() {
-    if (!imageGuard()) return;
-    setGeneratingFrames(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_frame_generate",
-          payload: {
-            shotId: id,
-            ratio: videoRatio,
-            frameTarget: "both",
-            disableChaining: independentFirstFrame,
-          },
-          modelConfig: getModelConfig(),
-          enhancePrompts,
-        }),
-      });
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+  const [frameRefPickerOpen, setFrameRefPickerOpen] = useState(false);
+  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "both" | null>(null);
+
+  async function executeFrameGenerate(
+    frameTarget: "first" | "last" | "both",
+    choice?: FrameReferenceChoice
+  ) {
+    const payload: Record<string, unknown> = {
+      shotId: id,
+      ratio: videoRatio,
+      frameTarget,
+    };
+    if (choice?.mode === "pick") {
+      payload.frameReference = {
+        shotId: choice.shotId,
+        frameType: choice.frameType,
+      };
     }
-    setGeneratingFrames(false);
+    await apiFetch(`/api/projects/${projectId}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "single_frame_generate",
+        payload,
+        modelConfig: getModelConfig(),
+        enhancePrompts,
+      }),
+    });
+    onUpdate();
   }
 
-  async function handleGenerateOneFrame(target: "first" | "last") {
+  function openFrameReferencePicker(frameTarget: "first" | "both") {
     if (!imageGuard()) return;
+    setPendingFrameTarget(frameTarget);
+    setFrameRefPickerOpen(true);
+  }
+
+  async function handleFrameReferenceConfirm(choice: FrameReferenceChoice) {
+    const target = pendingFrameTarget;
+    if (!target) return;
     setGeneratingFrames(true);
-    setGeneratingFrameTarget(target);
+    if (target === "first") setGeneratingFrameTarget("first");
     try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_frame_generate",
-          payload: {
-            shotId: id,
-            ratio: videoRatio,
-            frameTarget: target,
-            disableChaining: independentFirstFrame,
-          },
-          modelConfig: getModelConfig(),
-          enhancePrompts,
-        }),
-      });
-      onUpdate();
+      await executeFrameGenerate(target, choice);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
     setGeneratingFrames(false);
     setGeneratingFrameTarget(null);
+    setPendingFrameTarget(null);
   }
 
-  async function handleGenerateSceneFrame() {
-    if (!imageGuard()) return;
-    setGeneratingSceneFrame(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_scene_frame",
-          payload: { shotId: id },
-          modelConfig: getModelConfig(),
-        }),
-      });
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+  function handleGenerateFrames() {
+    openFrameReferencePicker("both");
+  }
+
+  function handleGenerateOneFrame(target: "first" | "last") {
+    if (target === "last") {
+      void (async () => {
+        if (!imageGuard()) return;
+        setGeneratingFrames(true);
+        setGeneratingFrameTarget("last");
+        try {
+          await executeFrameGenerate("last");
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+        }
+        setGeneratingFrames(false);
+        setGeneratingFrameTarget(null);
+      })();
+      return;
     }
-    setGeneratingSceneFrame(false);
+    openFrameReferencePicker("first");
   }
 
   async function handleGenerateVideoPrompt() {
@@ -456,21 +516,38 @@ export function ShotCard({
 
   async function handleGenerateVideo() {
     if (!videoGuard()) return;
+    if (!canGenerateVideo) {
+      toast.error(!videoReadiness.ready ? videoReadiness.message : t("common.generationFailed"));
+      return;
+    }
     setGeneratingVideo(true);
     try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
+      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: generationMode === "reference" ? "single_reference_video" : "single_video_generate",
+          action: "single_video_generate",
           payload: {
             shotId: id,
             ratio: videoRatio,
             ...(videoGenerationResolution && { resolution: videoGenerationResolution }),
           },
           modelConfig: getModelConfig(),
+          enhancePrompts,
         }),
       });
+      const data = (await res.json()) as {
+        error?: string;
+        shotLink?: ShotAutoLinkResult;
+      };
+      if (!res.ok) {
+        throw new Error(data.error || t("common.generationFailed"));
+      }
+      const linkToast = describeShotAutoLinkToast(data.shotLink, sequence);
+      if (linkToast) {
+        if (linkToast.variant === "success") toast.success(linkToast.message);
+        else toast.info(linkToast.message);
+      }
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
@@ -569,12 +646,12 @@ export function ShotCard({
     setRestoringText(false);
   }
 
-  async function handleClearFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
+  async function handleClearFrame(field: "anchorFirst" | "anchorLastAi") {
     await patchShot({ [field]: null });
     onUpdate();
   }
 
-  function handleUploadFrame(field: "firstFrame" | "lastFrame" | "sceneRefFrame") {
+  function handleUploadFrame(field: "anchorFirst" | "anchorLastAi") {
     uploadFieldRef.current = field;
     uploadInputRef.current?.click();
   }
@@ -639,12 +716,17 @@ export function ShotCard({
     setTimeout(() => setFramePromptCopied(null), 1800);
   }
 
-  const frameAssets = generationMode === "reference"
-    ? [{ src: sceneRefFrame, label: t("shot.sceneRefFrame"), type: "image" as const }]
-    : [
-        { src: firstFrame, label: t("shot.firstFrame"), type: "image" as const },
-        { src: lastFrame, label: t("shot.lastFrame"), type: "image" as const },
-      ];
+  type FrameAssetField = "anchorFirst" | "anchorLastAi" | "cutPoint";
+  const frameAssets: Array<{
+    src: string | null | undefined;
+    label: string;
+    field: FrameAssetField;
+    readOnly?: boolean;
+  }> = [
+    { src: anchorFirst, label: t("shot.anchorFirst"), field: "anchorFirst" },
+    { src: anchorLastAi, label: t("shot.anchorLastAi"), field: "anchorLastAi" },
+    { src: cutPoint, label: t("shot.cutPoint"), field: "cutPoint", readOnly: true },
+  ];
 
   // Progress dots: how many steps done out of 4
   if (isCompact) {
@@ -659,11 +741,8 @@ export function ShotCard({
         </div>
         {/* Thumbnails */}
         <div className="flex gap-1">
-          {(generationMode === "reference"
-            ? [sceneRefFrame, videoUrl]
-            : [firstFrame, lastFrame, videoUrl]
-          ).map((src, i) => {
-            const isVid = i === (generationMode === "reference" ? 1 : 2);
+          {[anchorFirst, anchorLastAi, cutPoint, videoUrl].map((src, i) => {
+            const isVid = i === 3;
             return (
               <div key={i} className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-[--border-subtle] bg-[--surface]">
                 {src ? (
@@ -709,11 +788,8 @@ export function ShotCard({
 
         {/* Media thumbnails */}
         <div className="flex gap-1.5">
-          {(generationMode === "reference"
-            ? [sceneRefFrame, videoUrl]
-            : [firstFrame, lastFrame, videoUrl]
-          ).map((src, i) => {
-            const isVideo = i === (generationMode === "reference" ? 1 : 2);
+          {[anchorFirst, anchorLastAi, cutPoint, videoUrl].map((src, i) => {
+            const isVideo = i === 3;
             return (
               <div
                 key={i}
@@ -844,8 +920,7 @@ export function ShotCard({
                 placeholder={t("shot.prompt")}
               />
             </div>
-            {generationMode !== "reference" && (
-              <>
+            <>
                 <div>
                   <div className="mb-1 flex items-center gap-1">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-500">{t("shot.startFrame")}</p>
@@ -884,8 +959,7 @@ export function ShotCard({
                     className="border-amber-200 bg-amber-50/30 text-sm"
                   />
                 </div>
-              </>
-            )}
+            </>
             <div>
               <div className="mb-1 flex items-center gap-1">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-600">{t("shot.motionScript")}</p>
@@ -1023,34 +1097,53 @@ export function ShotCard({
 
         {/* Step 2: 帧 */}
         <StepRow
-          label={generationMode === "reference" ? t("shot.stepSceneFrame") : t("shot.stepFrames")}
+          label={t("shot.stepFrames")}
           state={frameState}
           isNext={nextStep === "frame"}
         >
-          {/* Frame thumbnails */}
-          <div className="mb-2.5 flex gap-2">
-            {frameAssets.map((asset, i) => {
-              const fieldName = generationMode === "reference"
-                ? "sceneRefFrame" as const
-                : (i === 0 ? "firstFrame" : "lastFrame") as "firstFrame" | "lastFrame";
+          {chainSourceHint && (
+            <p className="mb-2 text-[11px] font-medium text-primary/90">{chainSourceHint}</p>
+          )}
+          <div className="mb-2.5 flex gap-2 flex-wrap">
+            {frameAssets.map((asset) => {
+              const fieldName = asset.field;
               const isUploading = uploadingField === fieldName;
+              const colWidth = "calc(33.333% - 6px)";
               return (
-                <div key={i} className="flex flex-col gap-1" style={{ width: generationMode === "reference" ? "100%" : "50%" }}>
+                <WithFramePathMissing key={fieldName} src={asset.src}>
+                  {(pathMissing) => (
+                <div className="flex flex-col gap-1" style={{ width: colWidth, minWidth: 100 }}>
                   <div
-                    className={`relative overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${asset.src && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-                    onClick={() => asset.src && !isUploading && setPreviewSrc(uploadUrl(asset.src))}
+                    className={`relative overflow-hidden rounded-lg border bg-[--surface] ${
+                      pathMissing
+                        ? "border-red-400 ring-1 ring-red-200"
+                        : "border-[--border-subtle]"
+                    } ${asset.src && !isUploading && !pathMissing ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                    onClick={() =>
+                      asset.src && !isUploading && !pathMissing && setPreviewSrc(uploadUrl(asset.src))
+                    }
                   >
                     {isUploading ? (
                       <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
-                    ) : asset.src ? (
+                    ) : asset.src && !pathMissing ? (
                       <img src={uploadUrl(asset.src)} className="w-full object-contain" />
+                    ) : pathMissing ? (
+                      <div className="flex h-16 flex-col items-center justify-center gap-0.5 px-1">
+                        <XCircle className="h-4 w-4 text-red-500" />
+                        <span className="text-[9px] text-red-600 text-center">文件缺失</span>
+                      </div>
                     ) : (
                       <div className="flex h-16 items-center justify-center"><ImageIcon className="h-4 w-4 text-[--text-muted]" /></div>
                     )}
                   </div>
+                  <p className={`text-[10px] text-center truncate ${pathMissing ? "text-red-600 font-medium" : "text-[--text-muted]"}`}>
+                    {asset.label}
+                    {pathMissing ? " · 缺失" : ""}
+                  </p>
+                  {!asset.readOnly && (
                   <div className="flex gap-1">
                     <button
-                      onClick={() => handleUploadFrame(fieldName)}
+                      onClick={() => handleUploadFrame(fieldName as "anchorFirst" | "anchorLastAi")}
                       disabled={isUploading}
                       className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[--border-subtle] bg-white py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
                     >
@@ -1059,62 +1152,92 @@ export function ShotCard({
                     </button>
                     {asset.src && (
                       <button
-                        onClick={() => handleClearFrame(fieldName)}
+                        onClick={() => handleClearFrame(fieldName as "anchorFirst" | "anchorLastAi")}
                         className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-red-300 hover:text-red-500"
                       >
                         <Trash2 className="h-2.5 w-2.5" />
                       </button>
                     )}
-                    {generationMode !== "reference" && (fieldName === "firstFrame" || fieldName === "lastFrame") && (
+                    {(fieldName === "anchorFirst" || fieldName === "anchorLastAi") && (
                       <button
-                        onClick={() => handleGenerateOneFrame(fieldName === "firstFrame" ? "first" : "last")}
-                        disabled={generatingFrames || generatingVideo || batchGeneratingFrames}
-                        title={fieldName === "firstFrame" ? "单独重新生成首帧" : "单独重新生成尾帧"}
+                        onClick={() => handleGenerateOneFrame(fieldName === "anchorFirst" ? "first" : "last")}
+                        disabled={generatingFrames || generatingVideo}
+                        title={fieldName === "anchorFirst" ? "单独重新生成首帧（可选参考图）" : "单独重新生成尾帧"}
                         className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
                       >
-                        {generatingFrames && generatingFrameTarget === (fieldName === "firstFrame" ? "first" : "last")
+                        {generatingFrames && generatingFrameTarget === (fieldName === "anchorFirst" ? "first" : "last")
                           ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
                           : <RefreshCw className="h-2.5 w-2.5" />
                         }
                       </button>
                     )}
                   </div>
+                  )}
+                  {asset.readOnly && !asset.src && (
+                    <p className="text-[9px] text-center text-[--text-muted]">生成视频后出现</p>
+                  )}
                 </div>
+                  )}
+                </WithFramePathMissing>
               );
             })}
           </div>
           <Button
             size="xs"
             variant={nextStep === "frame" ? "default" : "outline"}
-            onClick={generationMode === "reference" ? handleGenerateSceneFrame : handleGenerateFrames}
-            disabled={generatingFrames || generatingSceneFrame || generatingVideo || batchGeneratingFrames}
+            onClick={handleGenerateFrames}
+            disabled={generatingFrames || generatingVideo}
           >
-            {(generatingFrames || generatingSceneFrame || batchGeneratingFrames)
+            {generatingFrames
               ? <Loader2 className="h-3 w-3 animate-spin" />
               : <ImageIcon className="h-3 w-3" />
             }
-            {(generatingFrames || generatingSceneFrame || batchGeneratingFrames)
+            {generatingFrames
               ? t("common.generating")
               : hasFrame ? t("shot.regenerateFrames") : t("project.generateFrames")
             }
           </Button>
-          {generationMode !== "reference" && (
+          <Button
+            size="xs"
+            variant="ghost"
+            onClick={handleOpenFramePromptDialog}
+            disabled={generatingFrames || generatingVideo}
+          >
+            <ClipboardCopy className="h-3 w-3" />
+            {t("shot.externalFrameHelper")}
+          </Button>
+          {frameRefShots.length > 0 && (
             <Button
               size="xs"
               variant="ghost"
-              onClick={handleOpenFramePromptDialog}
-              disabled={generatingFrames || generatingSceneFrame || generatingVideo || batchGeneratingFrames}
+              onClick={() => openFrameReferencePicker("first")}
+              disabled={generatingFrames || generatingVideo}
             >
-              <ClipboardCopy className="h-3 w-3" />
-              {t("shot.externalFrameHelper")}
+              <ImageIcon className="h-3 w-3" />
+              {t("shot.pickFrameReference")}
             </Button>
           )}
-          {generationMode !== "reference" && prevChainFrame && (
+          {showAdoptPrevEpisode && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={handleAdoptPrevEpisodeFrame}
+              disabled={adoptingPrevEpisode || generatingFrames || generatingVideo}
+              title="将上一集最后一镜的视频尾帧（或 AI 尾帧）直拷为本镜首帧"
+            >
+              {adoptingPrevEpisode
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <span className="text-[10px]">↑↑</span>
+              }
+              承接上一集尾帧
+            </Button>
+          )}
+          {prevChainFrame && (
             <Button
               size="xs"
               variant="ghost"
               onClick={handleAdoptPrevChainFrame}
-              disabled={adoptingPrevFrame || generatingFrames || generatingVideo || batchGeneratingFrames}
+              disabled={adoptingPrevFrame || generatingFrames || generatingVideo}
               title={
                 prevChainFrameSource === "video"
                   ? "将上一镜视频的真实尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
@@ -1222,13 +1345,14 @@ export function ShotCard({
               size="xs"
               variant={nextStep === "video" ? "default" : "outline"}
               onClick={handleGenerateVideo}
-              disabled={generatingVideo || batchGeneratingVideos || isGenerating || enhancingVideo || (generationMode === "keyframe" && !firstFrame)}
+              disabled={generatingVideo || isGenerating || enhancingVideo || !canGenerateVideo}
+              title={!canGenerateVideo && !videoReadiness.ready ? videoReadiness.message : undefined}
             >
-              {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
+              {(generatingVideo || (isGenerating && !hasVideo))
                 ? <Loader2 className="h-3 w-3 animate-spin" />
                 : <VideoIcon className="h-3 w-3" />
               }
-              {(generatingVideo || batchGeneratingVideos || (isGenerating && !hasVideo))
+              {(generatingVideo || (isGenerating && !hasVideo))
                 ? t("common.generating")
                 : hasVideo ? t("shot.regenerateVideo") : t("project.generateVideo")
               }
@@ -1242,7 +1366,7 @@ export function ShotCard({
                 size="xs"
                 variant="outline"
                 onClick={handleEnhanceVideo}
-                disabled={enhancingVideo || generatingVideo || batchGeneratingVideos || isGenerating}
+                disabled={enhancingVideo || generatingVideo || isGenerating}
                 className="border-violet-300 text-violet-700 hover:bg-violet-50"
               >
                 {enhancingVideo
@@ -1418,6 +1542,15 @@ export function ShotCard({
           </div>
         </DialogContent>
       </Dialog>
+
+      <FrameReferencePicker
+        open={frameRefPickerOpen}
+        onOpenChange={setFrameRefPickerOpen}
+        shots={frameRefShots}
+        currentShotId={id}
+        title={t("shot.frameReferenceTitle")}
+        onConfirm={handleFrameReferenceConfirm}
+      />
     </div>
   );
 }

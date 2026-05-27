@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useModelStore } from "@/stores/model-store";
 import { apiFetch } from "@/lib/api-fetch";
-import type { ModelStorePersistPayload } from "@/lib/user-client-prefs";
+import type { ModelStorePersistPayload } from "@/stores/model-store";
 
 function toPayload(state: ReturnType<typeof useModelStore.getState>): ModelStorePersistPayload {
   return {

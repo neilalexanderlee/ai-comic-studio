@@ -21,9 +21,9 @@ function buildVersionLabel(versionNum: number): string {
  *   label?          – custom label (defaults to date-VN)
  *   sourceVersionId – if present, clone shots from that version
  *   copyText        – copy prompt / motionScript / startFrameDesc / endFrameDesc / cameraDirection / duration
- *   copyFrames      – copy firstFrame / lastFrame / sceneRefFrame
+ *   copyFrames      – copy anchorFirst / anchorLastAi / cutPoint
  *   copyVideoPrompts– copy videoPrompt / videoScript
- *   copyVideos      – copy videoUrl / referenceVideoUrl
+ *   copyVideos      – copy videoUrl
  */
 export async function POST(
   request: Request,
@@ -100,14 +100,12 @@ export async function POST(
         cameraDirection: body.copyText ? (s.cameraDirection ?? "static") : "static",
         duration: body.copyText ? (s.duration ?? 10) : 10,
         // frame fields
-        firstFrame: body.copyFrames ? s.firstFrame : null,
-        lastFrame: body.copyFrames ? s.lastFrame : null,
-        sceneRefFrame: body.copyFrames ? s.sceneRefFrame : null,
+        anchorFirst: body.copyFrames ? s.anchorFirst : null,
+        anchorLastAi: body.copyFrames ? s.anchorLastAi : null,
         // video prompt
         videoPrompt: body.copyVideoPrompts ? s.videoPrompt : null,
         // video
         videoUrl: body.copyVideos ? s.videoUrl : null,
-        referenceVideoUrl: body.copyVideos ? s.referenceVideoUrl : null,
         status: "pending",
         warnings: null,
       });

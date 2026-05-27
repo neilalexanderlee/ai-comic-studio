@@ -35,25 +35,21 @@ interface Shot {
   motionScript: string | null;
   cameraDirection: string;
   duration: number;
-  firstFrame: string | null;
-  lastFrame: string | null;
+  anchorFirst: string | null;
+  anchorLastAi: string | null;
   videoUrl: string | null;
-  referenceVideoUrl: string | null;
   remoteVideoUrl: string | null;
   remoteVideoStatus: string | null;
   remoteVideoExpiresAt: string | null;
   remoteVideoLastDownloadAt: string | null;
-  remoteReferenceVideoUrl: string | null;
-  remoteReferenceVideoStatus: string | null;
-  remoteReferenceVideoExpiresAt: string | null;
-  remoteReferenceVideoLastDownloadAt: string | null;
   lastFrameUrl: string | null;
-  sceneRefFrame: string | null;
   videoPrompt: string | null;
   status: string;
   warnings?: string | null;
   videoResolution?: string | null;
-  seedanceLastFrame?: string | null;
+  cutPoint?: string | null;
+  chainSourceShotId?: string | null;
+  chainSourceType?: string | null;
   dialogues: Dialogue[];
 }
 
@@ -71,9 +67,9 @@ interface Project {
   script: string;
   status: string;
   finalVideoUrl: string | null;
-  generationMode: "keyframe" | "reference";
   useProjectPrompts?: number;
   enhancePrompts?: number;
+  linkShotsViaCutPoint?: number;
   visualStyle: string;
   characters: Character[];
   shots: Shot[];

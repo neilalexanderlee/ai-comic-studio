@@ -141,11 +141,11 @@ export async function GET(
     script: episode.script,
     status: episode.status,
     finalVideoUrl: episode.finalVideoUrl,
-    generationMode: episode.generationMode,
     // Project-level settings needed by the client store
     visualStyle: project.visualStyle,
     useProjectPrompts: project.useProjectPrompts,
     enhancePrompts: project.enhancePrompts,
+    linkShotsViaCutPoint: project.linkShotsViaCutPoint,
     characters: epCharacters,
     shots: enrichedShots,
     versions: allVersions.map((v) => ({
@@ -184,11 +184,10 @@ export async function PATCH(
     idea: string;
     script: string;
     status: "draft" | "processing" | "completed";
-    generationMode: "keyframe" | "reference";
     targetDurationSeconds: number | null;
   }>;
 
-  const { title, description, keywords, idea, script, status, generationMode, targetDurationSeconds } = body;
+  const { title, description, keywords, idea, script, status, targetDurationSeconds } = body;
 
   const [updated] = await db
     .update(episodes)
@@ -199,7 +198,6 @@ export async function PATCH(
       ...(idea !== undefined && { idea }),
       ...(script !== undefined && { script }),
       ...(status !== undefined && { status }),
-      ...(generationMode !== undefined && { generationMode }),
       ...(targetDurationSeconds !== undefined && { targetDurationSeconds }),
       updatedAt: new Date(),
     })
