@@ -35,6 +35,8 @@ import { ShotFrameAssets } from "./shot-frame-assets";
 import { ShotVideoHistoryDialog } from "./shot-video-history-dialog";
 import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
 import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
+import { RemoteVideoRecoveryHint } from "./remote-video-recovery-hint";
+import { ShotVideoEnhanceButton } from "./shot-video-enhance-button";
 
 interface Dialogue {
   id: string;
@@ -57,6 +59,11 @@ interface DrawerShot {
   cutPoint?: string | null;
   videoPrompt?: string | null;
   videoUrl: string | null;
+  remoteVideoUrl?: string | null;
+  remoteVideoStatus?: string | null;
+  remoteVideoExpiresAt?: string | Date | null;
+  remoteVideoLastDownloadAt?: string | Date | null;
+  videoResolution?: string | null;
   dialogues: Dialogue[];
   isCrowdShot?: boolean;
 }
@@ -623,9 +630,27 @@ export function ShotDrawer({
                     <VideoIcon className="h-4 w-4 text-[--text-primary] translate-x-0.5" />
                   </div>
                 </div>
+                {shot.videoResolution && (
+                  <div
+                    className={`absolute top-1.5 right-1.5 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                      shot.videoResolution === "720p"
+                        ? "bg-emerald-600/90 text-white"
+                        : "bg-amber-500/90 text-white"
+                    }`}
+                  >
+                    {shot.videoResolution}
+                  </div>
+                )}
               </div>
             )}
             <div className="flex flex-wrap gap-1.5">
+              <RemoteVideoRecoveryHint
+                remoteVideoUrl={shot.remoteVideoUrl}
+                remoteVideoStatus={shot.remoteVideoStatus}
+                remoteVideoExpiresAt={shot.remoteVideoExpiresAt}
+                remoteVideoLastDownloadAt={shot.remoteVideoLastDownloadAt}
+                hasLocalVideo={hasVideo}
+              />
               <Button
                 size="xs"
                 variant={hasVideoPrompt && !hasVideo ? "default" : "outline"}
@@ -638,7 +663,20 @@ export function ShotDrawer({
                   ? t("common.generating")
                   : hasVideo ? t("shot.regenerateVideo") : t("project.generateVideo")
                 }
+                {videoGenerationResolution && (
+                  <span className="ml-1 rounded bg-white/20 px-1 text-[10px] font-bold">
+                    {videoGenerationResolution}
+                  </span>
+                )}
               </Button>
+              <ShotVideoEnhanceButton
+                projectId={projectId}
+                shotId={shot.id}
+                videoUrl={shot.videoUrl}
+                videoResolution={shot.videoResolution}
+                onEnhanced={onUpdate}
+                disabled={generatingVideo || anyGenerating}
+              />
               {hasVideo && (
                 <Button
                   size="xs"

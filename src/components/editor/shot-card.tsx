@@ -25,9 +25,7 @@ import {
   Circle,
   XCircle,
   Trash2,
-  Wand2,
   History,
-  RotateCcw,
   Plus,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
@@ -43,6 +41,8 @@ import { ShotFrameAssets } from "./shot-frame-assets";
 import { ShotVideoHistoryDialog } from "./shot-video-history-dialog";
 import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
 import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
+import { RemoteVideoRecoveryHint } from "./remote-video-recovery-hint";
+import { ShotVideoEnhanceButton } from "./shot-video-enhance-button";
 
 interface Dialogue {
   id: string;
@@ -254,7 +254,6 @@ export function ShotCard({
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
-  const [enhancingVideo, setEnhancingVideo] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
 
   // 台词编辑状态
@@ -301,18 +300,6 @@ export function ShotCard({
   const hasFrame = !!(anchorFirst || anchorLastAi || cutPoint);
   const hasVideoPrompt = !!videoPrompt;
   const hasVideo = !!videoUrl;
-  const remoteExpiresAtMs = remoteVideoExpiresAt ? new Date(remoteVideoExpiresAt).getTime() : null;
-  const hasRecoverableRemoteVideo =
-    !!remoteVideoUrl &&
-    remoteVideoStatus !== "expired" &&
-    (!remoteExpiresAtMs || remoteExpiresAtMs > Date.now()) &&
-    !hasVideo;
-  const remoteExpiryLabel = remoteExpiresAtMs
-    ? new Date(remoteExpiresAtMs).toLocaleString()
-    : "未知";
-  const remoteLastAttemptLabel = remoteVideoLastDownloadAt
-    ? new Date(remoteVideoLastDownloadAt).toLocaleString()
-    : null;
   const isGenerating = status === "generating";
 
   // Step states
@@ -415,24 +402,6 @@ export function ShotCard({
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     }
     setGeneratingVideo(false);
-  }
-
-  async function handleEnhanceVideo() {
-    setEnhancingVideo(true);
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/enhance`, {
-        method: "POST",
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "画质增强失败");
-      }
-      toast.success("画质增强完成，视频已升级至 720p");
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "画质增强失败");
-    }
-    setEnhancingVideo(false);
   }
 
   async function handleRewriteText() {
@@ -946,24 +915,18 @@ export function ShotCard({
             </div>
           )}
           <div className="flex flex-wrap gap-1.5">
-            {hasRecoverableRemoteVideo && (
-              <div
-                className="inline-flex h-7 items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 text-[11px] font-medium text-sky-700"
-                title={
-                  remoteVideoStatus === "download_failed"
-                    ? `远程结果仍在，可优先重新下载；最近尝试：${remoteLastAttemptLabel ?? "暂无"}；预计有效至：${remoteExpiryLabel}`
-                    : `已有远程结果，生成时会优先恢复下载；预计有效至：${remoteExpiryLabel}`
-                }
-              >
-                <RotateCcw className="h-3 w-3" />
-                {remoteVideoStatus === "download_failed" ? "可重下远程结果" : "可恢复远程结果"}
-              </div>
-            )}
+            <RemoteVideoRecoveryHint
+              remoteVideoUrl={remoteVideoUrl}
+              remoteVideoStatus={remoteVideoStatus}
+              remoteVideoExpiresAt={remoteVideoExpiresAt}
+              remoteVideoLastDownloadAt={remoteVideoLastDownloadAt}
+              hasLocalVideo={hasVideo}
+            />
             <Button
               size="xs"
               variant={nextStep === "video" ? "default" : "outline"}
               onClick={handleGenerateVideo}
-              disabled={generatingVideo || isGenerating || enhancingVideo || !canGenerateVideo}
+              disabled={generatingVideo || isGenerating || !canGenerateVideo}
               title={!canGenerateVideo && !videoReadiness.ready ? videoReadiness.message : undefined}
             >
               {(generatingVideo || (isGenerating && !hasVideo))
@@ -978,22 +941,14 @@ export function ShotCard({
                 <span className="ml-1 rounded bg-white/20 px-1 text-[10px] font-bold">{videoGenerationResolution}</span>
               )}
             </Button>
-            {/* 画质增强按钮：仅当已有视频且分辨率为 480p（或未知）时显示 */}
-            {hasVideo && videoResolution !== "720p" && (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleEnhanceVideo}
-                disabled={enhancingVideo || generatingVideo || isGenerating}
-                className="border-violet-300 text-violet-700 hover:bg-violet-50"
-              >
-                {enhancingVideo
-                  ? <Loader2 className="h-3 w-3 animate-spin" />
-                  : <Wand2 className="h-3 w-3" />
-                }
-                {enhancingVideo ? "增强中…" : "画质增强↑720p"}
-              </Button>
-            )}
+            <ShotVideoEnhanceButton
+              projectId={projectId}
+              shotId={id}
+              videoUrl={videoUrl}
+              videoResolution={videoResolution}
+              onEnhanced={onUpdate}
+              disabled={generatingVideo || isGenerating}
+            />
           </div>
         </StepRow>
 

@@ -53,9 +53,8 @@ import {
   collectVisionFramePaths,
   shouldUseFirstFrameVideoMode,
 } from "@/lib/storyboard/shot-video-readiness.server";
-
-const DEPRECATED_PIPELINE_ACTION_MSG =
-  "frame_generate / video_generate 任务队列已废弃，请使用 single_* 接口";
+import { resolveDeprecatedGenerateAction } from "@/lib/storyboard/generate-route-deprecations";
+import { buildVideoCutPointUpdate } from "@/lib/storyboard/video-cut-point";
 
 export const maxDuration = 300;
 
@@ -84,31 +83,6 @@ async function maybeAutoLinkNextShotAfterVideo(
     };
   }
   return { status: "skipped", reason: link.reason ?? "unknown" };
-}
-
-/** Download Seedance return_last_frame → 写入本镜 cut_point（不覆盖 anchor_last_ai）。 */
-async function buildVideoLastFrameUpdate(params: {
-  remoteLastFrameUrl: string;
-  shotId: string;
-  uploadDir: string;
-  existingCutPoint?: string | null;
-}): Promise<Record<string, string>> {
-  const fs = await import("node:fs");
-  const nodePath = await import("node:path");
-  const frameRes = await fetch(params.remoteLastFrameUrl);
-  if (!frameRes.ok) return {};
-
-  const buffer = Buffer.from(await frameRes.arrayBuffer());
-  const framesDir = nodePath.join(params.uploadDir, "frames");
-  fs.mkdirSync(framesDir, { recursive: true });
-  const framePath = nodePath.join(framesDir, `${params.shotId}_seedance_lastframe_${Date.now()}.png`);
-  fs.writeFileSync(framePath, buffer);
-
-  if (params.existingCutPoint && params.existingCutPoint !== framePath) {
-    try { fs.unlinkSync(params.existingCutPoint); } catch { /* ignore */ }
-  }
-
-  return { cutPoint: framePath };
 }
 
 /** Map user-facing ratio string to ImageOptions fields */
@@ -466,11 +440,9 @@ export async function POST(
     return handleFramePromptPreview(projectId, userId, payload, episodeId);
   }
 
-  if (action === "batch_frame_generate") {
-    return NextResponse.json(
-      { error: "批量生成首尾帧已移除，请逐镜使用「生成画面」或手动衔接上一镜尾帧" },
-      { status: 410 }
-    );
+  const deprecated = resolveDeprecatedGenerateAction(action);
+  if (deprecated) {
+    return NextResponse.json({ error: deprecated.error }, { status: deprecated.status });
   }
 
   if (action === "single_frame_generate") {
@@ -479,26 +451,6 @@ export async function POST(
 
   if (action === "single_video_generate") {
     return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig, enhancePrompts);
-  }
-
-  if (action === "batch_video_generate") {
-    return NextResponse.json(
-      { error: "批量生成视频已移除，请逐镜生成视频；连续镜头可开启「镜头衔接（视频尾帧）」" },
-      { status: 410 }
-    );
-  }
-
-  if (
-    action === "batch_chain_generate" ||
-    action === "single_scene_frame" ||
-    action === "batch_scene_frame" ||
-    action === "single_reference_video" ||
-    action === "batch_reference_video"
-  ) {
-    return NextResponse.json(
-      { error: "Reference/链式批量能力已移除，请使用单镜 keyframe 流程" },
-      { status: 410 }
-    );
   }
 
   if (action === "single_video_prompt") {
@@ -517,10 +469,6 @@ export async function POST(
 
   if (action === "video_assemble") {
     return handleVideoAssembleSync(projectId, payload, episodeId);
-  }
-
-  if (action === "frame_generate" || action === "video_generate") {
-    return NextResponse.json({ error: DEPRECATED_PIPELINE_ACTION_MSG }, { status: 410 });
   }
 
   // Image/video generation - keep in task queue
@@ -2104,7 +2052,7 @@ async function handleSingleVideoGenerate(
     let singleLastFrameUpdate: Record<string, unknown> = {};
     if (result.lastFrameUrl) {
       try {
-        singleLastFrameUpdate = await buildVideoLastFrameUpdate({
+        singleLastFrameUpdate = await buildVideoCutPointUpdate({
           remoteLastFrameUrl: result.lastFrameUrl,
           shotId,
           uploadDir: versionedUploadDir,

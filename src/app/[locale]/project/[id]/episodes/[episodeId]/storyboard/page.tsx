@@ -210,6 +210,11 @@ export default function EpisodeStoryboardPage() {
     cutPoint: shot.cutPoint,
     videoPrompt: shot.videoPrompt,
     videoUrl: shot.videoUrl,
+    remoteVideoUrl: shot.remoteVideoUrl,
+    remoteVideoStatus: shot.remoteVideoStatus,
+    remoteVideoExpiresAt: shot.remoteVideoExpiresAt,
+    remoteVideoLastDownloadAt: shot.remoteVideoLastDownloadAt,
+    videoResolution: shot.videoResolution,
     dialogues: shot.dialogues || [],
     isCrowdShot: filterShotCharacters(buildShotCharacterText(shot), project.characters).length === 0,
   }));
