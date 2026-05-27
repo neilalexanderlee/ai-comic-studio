@@ -682,6 +682,7 @@ export default function EpisodeStoryboardPage() {
             prompt: shot.prompt,
             anchorFirst: shot.anchorFirst,
             anchorLastAi: shot.anchorLastAi,
+            cutPoint: shot.cutPoint ?? null,
             videoPrompt: shot.videoPrompt,
             videoUrl: shot.videoUrl,
           }))}
@@ -746,26 +747,50 @@ export default function EpisodeStoryboardPage() {
                 cutPoint: s.cutPoint,
               }))}
               enhancePrompts={enhancePrompts}
+              versionId={selectedVersionId}
             />
             );
           })}
         </div>
       )}
 
-      {openDrawerShotId && (
-        <ShotDrawer
-          shots={drawerShots}
-          openShotId={openDrawerShotId}
-          onClose={() => setOpenDrawerShotId(null)}
-          onShotChange={(id) => setOpenDrawerShotId(id)}
-          onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
-          projectId={project.id}
-          videoRatio={videoRatio}
-          selectedVersionId={selectedVersionId}
-          anyGenerating={anyGenerating}
-          enhancePrompts={enhancePrompts}
-        />
-      )}
+      {openDrawerShotId && (() => {
+        const drawerIndex = project.shots.findIndex((s) => s.id === openDrawerShotId);
+        const drawerShot = drawerIndex >= 0 ? project.shots[drawerIndex] : null;
+        const chainSourceSequence = drawerShot?.chainSourceShotId
+          ? project.shots.find((s) => s.id === drawerShot.chainSourceShotId)?.sequence ?? null
+          : null;
+        return (
+          <ShotDrawer
+            shots={drawerShots}
+            openShotId={openDrawerShotId}
+            onClose={() => setOpenDrawerShotId(null)}
+            onShotChange={(id) => setOpenDrawerShotId(id)}
+            onUpdate={() =>
+              fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)
+            }
+            projectId={project.id}
+            episodeId={(urlEpisodeId || currentEpisodeId)!}
+            videoRatio={videoRatio}
+            selectedVersionId={selectedVersionId}
+            anyGenerating={anyGenerating}
+            enhancePrompts={enhancePrompts}
+            videoGenerationResolution={videoGenerationResolution}
+            showAdoptPrevEpisode={drawerIndex === 0 && canAdoptPrevEpisode}
+            prevCutPoint={drawerIndex > 0 ? project.shots[drawerIndex - 1]?.cutPoint : null}
+            prevAnchorLastAi={drawerIndex > 0 ? project.shots[drawerIndex - 1]?.anchorLastAi : null}
+            frameRefShots={project.shots.map((s) => ({
+              id: s.id,
+              sequence: s.sequence,
+              anchorFirst: s.anchorFirst,
+              anchorLastAi: s.anchorLastAi,
+              cutPoint: s.cutPoint,
+            }))}
+            chainSourceSequence={chainSourceSequence}
+            chainSourceType={drawerShot?.chainSourceType ?? null}
+          />
+        );
+      })()}
 
       <NewVersionDialog
         open={newVersionDialogOpen}

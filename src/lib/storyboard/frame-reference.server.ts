@@ -41,7 +41,7 @@ export function resolveChainFramePath(shot: {
   return resolveShotFrameByType(shot, "cut_point") ?? resolveShotFrameByType(shot, "anchor_last_ai");
 }
 
-/** 解析用户选择的参考帧（同 project 内可跨集；仅校验 projectId + 磁盘文件存在）。 */
+/** 解析用户选择的参考帧（同 project；UI 仅暴露本集当前版本，仅校验 projectId + 磁盘文件存在）。 */
 export async function resolveFrameReferenceForProject(
   projectId: string,
   ref: FrameReferencePayload

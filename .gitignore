@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+src/__tests__/fixtures/tmp-frames/
 
 # next.js
 /.next/

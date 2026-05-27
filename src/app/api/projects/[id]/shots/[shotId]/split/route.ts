@@ -91,7 +91,6 @@ export async function POST(
       anchorLastAi: null,
       videoUrl: null,
       cutPoint: null,
-      lastFrameUrl: null,
       videoPrompt: null,
     })
     .where(eq(shots.id, shotId));

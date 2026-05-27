@@ -86,33 +86,26 @@ async function maybeAutoLinkNextShotAfterVideo(
   return { status: "skipped", reason: link.reason ?? "unknown" };
 }
 
-/** Download Seedance return_last_frame and return shot DB field updates. */
+/** Download Seedance return_last_frame → 写入本镜 cut_point（不覆盖 anchor_last_ai）。 */
 async function buildVideoLastFrameUpdate(params: {
-  lastFrameUrl: string;
+  remoteLastFrameUrl: string;
   shotId: string;
   uploadDir: string;
-  /** @deprecated 视频尾帧只写入 seedance_last_frame；链式继承读 cutPoint，不覆盖 AI last_frame */
-  replaceAiLastFrame: boolean;
-  existingLastFrame?: string | null;
-  existingSeedanceLastFrame?: string | null;
+  existingCutPoint?: string | null;
 }): Promise<Record<string, string>> {
   const fs = await import("node:fs");
   const nodePath = await import("node:path");
-  const frameRes = await fetch(params.lastFrameUrl);
+  const frameRes = await fetch(params.remoteLastFrameUrl);
   if (!frameRes.ok) return {};
 
   const buffer = Buffer.from(await frameRes.arrayBuffer());
   const framesDir = nodePath.join(params.uploadDir, "frames");
   fs.mkdirSync(framesDir, { recursive: true });
-  const suffix = params.replaceAiLastFrame ? "lastframe" : "seedance_lastframe";
-  const framePath = nodePath.join(framesDir, `${params.shotId}_${suffix}_${Date.now()}.png`);
+  const framePath = nodePath.join(framesDir, `${params.shotId}_seedance_lastframe_${Date.now()}.png`);
   fs.writeFileSync(framePath, buffer);
 
-  if (params.replaceAiLastFrame && params.existingLastFrame && params.existingLastFrame !== framePath) {
-    try { fs.unlinkSync(params.existingLastFrame); } catch { /* ignore */ }
-  }
-  if (!params.replaceAiLastFrame && params.existingSeedanceLastFrame && params.existingSeedanceLastFrame !== framePath) {
-    try { fs.unlinkSync(params.existingSeedanceLastFrame); } catch { /* ignore */ }
+  if (params.existingCutPoint && params.existingCutPoint !== framePath) {
+    try { fs.unlinkSync(params.existingCutPoint); } catch { /* ignore */ }
   }
 
   return { cutPoint: framePath };
@@ -2112,12 +2105,10 @@ async function handleSingleVideoGenerate(
     if (result.lastFrameUrl) {
       try {
         singleLastFrameUpdate = await buildVideoLastFrameUpdate({
-          lastFrameUrl: result.lastFrameUrl,
+          remoteLastFrameUrl: result.lastFrameUrl,
           shotId,
           uploadDir: versionedUploadDir,
-          replaceAiLastFrame: false,
-          existingLastFrame: shot.anchorLastAi,
-          existingSeedanceLastFrame: shot.cutPoint,
+          existingCutPoint: shot.cutPoint,
         });
         if (Object.keys(singleLastFrameUpdate).length > 0) {
           console.log(

@@ -141,7 +141,7 @@ VideoProvider    // generateVideo
 | `projects` | 顶层实体，含 `visualStyle`、`generationMode`（legacy）、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
 | `episodes` | 分属 project 的剧集，含 `generationMode`（可覆盖 project 级） |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；Plan B 帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`、`chainSourceShotId`、`chainSourceType` |
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`、`chainSourceShotId`、`chainSourceType`（语义见 `docs/ARCHITECTURE-FRAMES.md` §0「Plan B」） |
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint` |
 | `character_assets` | 角色图片（morph/blueprint 类型，带 tag 状态标签） |
 | `episode_characters` | 多对多：角色参与哪些剧集 |

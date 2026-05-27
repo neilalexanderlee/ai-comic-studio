@@ -1,11 +1,33 @@
-# 分镜帧与视频工作流 — 架构说明（Plan B）
+# 分镜帧与视频工作流 — 架构说明
 
 > 用户操作见 [WORKFLOW.md](./WORKFLOW.md)。系统全景见 [ARCHITECTURE.md](./ARCHITECTURE.md)。  
-> 本文是 **帧/视频语义** 的单一事实来源（2026-05，与代码同步）。
+> 本文是 **帧/视频字段含义与镜间衔接规则** 的单一事实来源（2026-05，与代码同步）。
 
 ---
 
-## 1. 三个资产字段（Plan B）
+## 0. 「Plan B」是什么？（先读这一节）
+
+**Plan B** 是开发文档里的**内部代号**，指 **2026-03～05 一轮分镜帧语义改版之后、当前正在使用的方案**。  
+你在界面里**不会**看到「Plan B」字样；助手或迁移文件里出现这个词时，指的就是**下面这套规则**。
+
+### 和旧方案（文档里偶称 Plan A）差在哪
+
+| 维度 | 旧方案（已废弃） | 当前方案（Plan B / 本文） |
+|------|------------------|---------------------------|
+| 数据库字段名 | `first_frame`、`last_frame`、`seedance_last_frame` 等混用 | `anchor_first`、`anchor_last_ai`、`cut_point`（见 §1） |
+| 生成画面前 | 常自动把上一镜尾帧当下镜首帧 | **不自动**；默认独立生成，可选手动参考图或「承接上一镜」 |
+| 视频尾帧存哪 | 有时写 `last_frame`，与 AI 尾帧混淆 | **只**写入 `cut_point`；AI 尾帧只在 `anchor_last_ai` |
+| 镜间接续 | 批量链式、一键续跑、隐式链式较多 | 默认手动；可选项目开关「镜头衔接（视频尾帧）」自动直拷 |
+| 参考图模式双轨 | `sceneRefFrame` + Reference 视频管线 | 已删；统一为「首帧 + 可选 AI 尾帧」驱动 Seedance |
+| 批量生成 | 批量帧/批量视频按钮 | 已移除（API 410）；保留「批量视频提示词」 |
+
+**你只需要记住：** 制作时以 [WORKFLOW.md](./WORKFLOW.md) 为准；争论「这个字段该不该写进下一镜」时查 **本文 §1～§2**。
+
+数据库迁移：`drizzle/0029_shot_frame_semantics.sql`（字段重命名）、`0030`（衔接开关）、`0033`（删除废弃列 `last_frame_url`）。
+
+---
+
+## 1. 三个资产字段（当前方案）
 
 | 字段 | 含义 | 谁写入 | 用途 |
 |------|------|--------|------|
@@ -54,7 +76,7 @@
 
 | 操作 | 行为 | 范围 |
 |------|------|------|
-| 参考图选择器 | 选他镜三帧之一 → AI 重绘本镜 `anchor_first` | **仅本集** `project.shots` |
+| 参考图选择器 | 选他镜三帧之一 → AI 重绘本镜 `anchor_first` | **仅本集** `project.shots`（列表卡或看板→抽屉） |
 | 「承接上一镜尾帧」 | `anchor_first = 上一镜 cut_point ?? anchor_last_ai`（**路径直拷**） | **本集上一镜**（`index - 1`） |
 | 「承接上一集尾帧」 | 同上，源为上一集最后一镜 | **跨集**（`POST .../adopt-prev-episode-frame`） |
 | 「镜头衔接（视频尾帧）」 | 视频成功后自动直拷下一镜 `anchor_first` | 同集同版本；项目级开关，**默认关** |
@@ -141,15 +163,18 @@ flowchart TB
 
 | # | 说明 |
 |---|------|
-| L1 | 参考图选择器仍 **不列出上一集** 分镜；跨集仅「承接上一集尾帧」 |
+| L1 | 参考图选择器仅 **本集当前版本**；跨集用「承接上一集尾帧」，不进选择器 |
+| L5 | **看板**= 进度列 + 点开 `ShotDrawer`；抽屉与列表共用 `useShotFrameActions` / `ShotFrameToolbar` / `ShotFrameAssets` |
+| L6 | 列表 `ShotCard` 与抽屉共用 `useShotFrameActions` / 帧组件；列表另保留画质增强、远程视频恢复、字段 AI 优化 |
 | L2 | 历史仅 `reference_video_url` 的成片已在迁移 0032 并入 `video_url` |
-| L3 | `pipeline/frame-generate.ts` 等文件仍在仓库，handler 未注册，勿 enqueue |
-| L4 | 衔接失败无 Toast（仅静默跳过，如 `crowd_to_character_cut`） |
+| L3 | 已删除未注册的 `pipeline/frame-generate.ts` / `video-generate.ts`；生成走 `generate/route` |
+| L4 | 自动衔接跳过（如 `crowd_to_character_cut`）会在视频生成后以 **info Toast** 提示；成功衔接为 success Toast（`shot-auto-link-messages.ts`） |
 
 ---
 
 ## 7. 迁移
 
-- `drizzle/0029_shot_frame_semantics.sql` — Plan B 字段
+- `drizzle/0029_shot_frame_semantics.sql` — 字段语义改版（Plan B）
 - `drizzle/0030_link_shots_via_cut_point.sql` — `link_shots_via_cut_point`
+- `drizzle/0033_drop_shot_last_frame_url.sql` — 移除废弃列 `last_frame_url`（视频尾帧仅存 `cut_point`）
 - 启动时 `bootstrap()` 自动应用

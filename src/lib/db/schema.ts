@@ -143,7 +143,6 @@ export const shots = sqliteTable("shots", {
   remoteVideoCreatedAt: integer("remote_video_created_at", { mode: "timestamp" }),
   remoteVideoExpiresAt: integer("remote_video_expires_at", { mode: "timestamp" }),
   remoteVideoLastDownloadAt: integer("remote_video_last_download_at", { mode: "timestamp" }),
-  lastFrameUrl: text("last_frame_url"),
   videoScript: text("video_script"),
   videoPrompt: text("video_prompt"),
   episodeId: text("episode_id").references(() => episodes.id, {

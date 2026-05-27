@@ -42,7 +42,6 @@ interface Shot {
   remoteVideoStatus: string | null;
   remoteVideoExpiresAt: string | null;
   remoteVideoLastDownloadAt: string | null;
-  lastFrameUrl: string | null;
   videoPrompt: string | null;
   status: string;
   warnings?: string | null;

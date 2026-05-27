@@ -1,14 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore } from "@/stores/model-store";
@@ -30,33 +24,25 @@ import {
   CheckCircle2,
   Circle,
   XCircle,
-  Upload,
   Trash2,
-  ClipboardCopy,
   Wand2,
   History,
   RotateCcw,
   Plus,
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
-import { FrameReferencePicker, type FrameReferenceChoice } from "./frame-reference-picker";
+import { FrameReferencePicker } from "./frame-reference-picker";
 import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
-import { useFrameImageMissing } from "@/hooks/use-frame-image-missing";
 import { describeShotAutoLinkToast, type ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { Scissors } from "lucide-react";
-
-function WithFramePathMissing({
-  src,
-  children,
-}: {
-  src: string | null | undefined;
-  children: (pathMissing: boolean) => ReactNode;
-}) {
-  const pathMissing = useFrameImageMissing(src);
-  return <>{children(pathMissing)}</>;
-}
+import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
+import { ShotFrameToolbar } from "./shot-frame-toolbar";
+import { ShotFrameAssets } from "./shot-frame-assets";
+import { ShotVideoHistoryDialog } from "./shot-video-history-dialog";
+import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
+import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
 
 interface Dialogue {
   id: string;
@@ -92,6 +78,7 @@ interface ShotCardProps {
   /** 本集第一镜且存在上一集时显示「承接上一集尾帧」 */
   showAdoptPrevEpisode?: boolean;
   videoRatio?: string;
+  versionId?: string | null;
   isCompact?: boolean;
   onOpenDrawer?: (id: string) => void;
   batchGeneratingVideoPrompts?: boolean;
@@ -205,6 +192,7 @@ export function ShotCard({
   episodeId,
   showAdoptPrevEpisode = false,
   videoRatio = "16:9",
+  versionId = null,
   isCompact = false,
   onOpenDrawer,
   batchGeneratingVideoPrompts = false,
@@ -227,10 +215,19 @@ export function ShotCard({
   );
   const canGenerateVideo = videoReadiness.ready;
   const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);
-  const prevChainFrame = prevCutPoint ?? prevAnchorLastAi ?? null;
-  const prevChainFrameSource: "video" | "ai" | null =
-    prevCutPoint ? "video" : prevAnchorLastAi ? "ai" : null;
   const getModelConfig = useModelStore((s) => s.getModelConfig);
+  const frameActions = useShotFrameActions({
+    projectId,
+    shotId: id,
+    episodeId,
+    videoRatio,
+    versionId,
+    enhancePrompts,
+    frameRefShots,
+    prevCutPoint,
+    prevAnchorLastAi,
+    onUpdate,
+  });
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
   const [splittingShot, setSplittingShot] = useState(false);
 
@@ -254,14 +251,11 @@ export function ShotCard({
   useEffect(() => { setEditCameraDirection(cameraDirection ?? "static"); }, [cameraDirection]);
   useEffect(() => { setEditDuration(duration); }, [duration]);
 
-  // Generation state
-  const [generatingFrames, setGeneratingFrames] = useState(false);
-  const [generatingFrameTarget, setGeneratingFrameTarget] = useState<"first" | "last" | null>(null);
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
-  const [restoringText, setRestoringText] = useState(false);
   const [enhancingVideo, setEnhancingVideo] = useState(false);
+  const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
 
   // 台词编辑状态
   type EditDialogue = { id?: string; characterName: string; text: string };
@@ -291,27 +285,6 @@ export function ShotCard({
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [framePromptOpen, setFramePromptOpen] = useState(false);
-  const [framePromptLoading, setFramePromptLoading] = useState(false);
-  const [framePromptCopied, setFramePromptCopied] = useState<"first" | "last" | null>(null);
-  const [framePromptData, setFramePromptData] = useState<{
-    reusePreviousLastFrame: boolean;
-    firstPrompt: string;
-    lastPrompt: string;
-    startFrameDesc: string;
-    endFrameDesc: string;
-  } | null>(null);
-  const [uploadingField, setUploadingField] = useState<string | null>(null);
-  const uploadInputRef = useRef<HTMLInputElement>(null);
-  const uploadFieldRef = useRef<string | null>(null);
-
-  // 视频版本历史
-  type HistoryEntry = { id: string; videoUrl: string; resolution: string | null; label: string | null; createdAt: number };
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [historyList, setHistoryList] = useState<HistoryEntry[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [revertingId, setRevertingId] = useState<string | null>(null);
-
   // 右键菜单
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => {
@@ -321,7 +294,6 @@ export function ShotCard({
     return () => window.removeEventListener("click", close);
   }, [ctxMenu]);
 
-  const imageGuard = useModelGuard("image");
   const videoGuard = useModelGuard("video");
 
   // Derived state
@@ -346,7 +318,7 @@ export function ShotCard({
   // Step states
   const textState: StepState = rewritingText ? "generating" : hasText ? "done" : "idle";
   const frameState: StepState =
-    generatingFrames ? "generating"
+    frameActions.generatingFrames ? "generating"
     : status === "failed" && !hasFrame ? "error"
     : hasFrame ? "done" : "idle";
   const promptState: StepState = generatingPrompt || batchGeneratingVideoPrompts ? "generating" : hasVideoPrompt ? "done" : "idle";
@@ -366,41 +338,6 @@ export function ShotCard({
     });
   }
 
-  const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
-  const [adoptingPrevEpisode, setAdoptingPrevEpisode] = useState(false);
-
-  async function handleAdoptPrevEpisodeFrame() {
-    if (!episodeId) return;
-    setAdoptingPrevEpisode(true);
-    try {
-      const res = await apiFetch(
-        `/api/projects/${projectId}/episodes/${episodeId}/shots/${id}/adopt-prev-episode-frame`,
-        { method: "POST" }
-      );
-      if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        throw new Error(data.error || "承接失败");
-      }
-      toast.success("已承接上一集尾帧为本镜首帧");
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "承接上一集尾帧失败");
-    } finally {
-      setAdoptingPrevEpisode(false);
-    }
-  }
-
-  async function handleAdoptPrevChainFrame() {
-    if (!prevChainFrame) return;
-    setAdoptingPrevFrame(true);
-    try {
-      await patchShot({ anchorFirst: prevChainFrame });
-      onUpdate();
-    } finally {
-      setAdoptingPrevFrame(false);
-    }
-  }
-
   async function handleSplitShot() {
     if (!durationOverLimit) return;
     setSplittingShot(true);
@@ -418,81 +355,6 @@ export function ShotCard({
     } finally {
       setSplittingShot(false);
     }
-  }
-
-  const [frameRefPickerOpen, setFrameRefPickerOpen] = useState(false);
-  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "both" | null>(null);
-
-  async function executeFrameGenerate(
-    frameTarget: "first" | "last" | "both",
-    choice?: FrameReferenceChoice
-  ) {
-    const payload: Record<string, unknown> = {
-      shotId: id,
-      ratio: videoRatio,
-      frameTarget,
-    };
-    if (choice?.mode === "pick") {
-      payload.frameReference = {
-        shotId: choice.shotId,
-        frameType: choice.frameType,
-      };
-    }
-    await apiFetch(`/api/projects/${projectId}/generate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "single_frame_generate",
-        payload,
-        modelConfig: getModelConfig(),
-        enhancePrompts,
-      }),
-    });
-    onUpdate();
-  }
-
-  function openFrameReferencePicker(frameTarget: "first" | "both") {
-    if (!imageGuard()) return;
-    setPendingFrameTarget(frameTarget);
-    setFrameRefPickerOpen(true);
-  }
-
-  async function handleFrameReferenceConfirm(choice: FrameReferenceChoice) {
-    const target = pendingFrameTarget;
-    if (!target) return;
-    setGeneratingFrames(true);
-    if (target === "first") setGeneratingFrameTarget("first");
-    try {
-      await executeFrameGenerate(target, choice);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-    setGeneratingFrames(false);
-    setGeneratingFrameTarget(null);
-    setPendingFrameTarget(null);
-  }
-
-  function handleGenerateFrames() {
-    openFrameReferencePicker("both");
-  }
-
-  function handleGenerateOneFrame(target: "first" | "last") {
-    if (target === "last") {
-      void (async () => {
-        if (!imageGuard()) return;
-        setGeneratingFrames(true);
-        setGeneratingFrameTarget("last");
-        try {
-          await executeFrameGenerate("last");
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-        }
-        setGeneratingFrames(false);
-        setGeneratingFrameTarget(null);
-      })();
-      return;
-    }
-    openFrameReferencePicker("first");
   }
 
   async function handleGenerateVideoPrompt() {
@@ -573,41 +435,6 @@ export function ShotCard({
     setEnhancingVideo(false);
   }
 
-  async function handleOpenHistory() {
-    setCtxMenu(null);
-    setHistoryOpen(true);
-    setHistoryLoading(true);
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/video-history`);
-      const data = await res.json();
-      setHistoryList(data.history ?? []);
-    } catch {
-      toast.error("加载历史失败");
-    }
-    setHistoryLoading(false);
-  }
-
-  async function handleRevertHistory(historyId: string) {
-    setRevertingId(historyId);
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/video-history`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ historyId }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "回退失败");
-      }
-      toast.success("已恢复该历史版本");
-      setHistoryOpen(false);
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "回退失败");
-    }
-    setRevertingId(null);
-  }
-
   async function handleRewriteText() {
     setRewritingText(true);
     try {
@@ -627,106 +454,12 @@ export function ShotCard({
     setRewritingText(false);
   }
 
-  async function handleRestoreTextFromScript() {
-    setRestoringText(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_shot_restore_from_script",
-          payload: { shotId: id },
-        }),
-      });
-      onUpdate();
-      toast.success("已从原始剧本还原文本字段");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "从剧本还原失败");
-    }
-    setRestoringText(false);
-  }
-
-  async function handleClearFrame(field: "anchorFirst" | "anchorLastAi") {
-    await patchShot({ [field]: null });
-    onUpdate();
-  }
-
-  function handleUploadFrame(field: "anchorFirst" | "anchorLastAi") {
-    uploadFieldRef.current = field;
-    uploadInputRef.current?.click();
-  }
-
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    const field = uploadFieldRef.current;
-    if (!file || !field) return;
-    e.target.value = "";
-    setUploadingField(field);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("field", field);
-      const res = await apiFetch(`/api/projects/${projectId}/shots/${id}/upload`, {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok) throw new Error("Upload failed");
-      onUpdate();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    }
-    setUploadingField(null);
-  }
-
   function handleCopyPrompt() {
     const text = videoPrompt || `${videoScript || motionScript || prompt}\nCamera: ${cameraDirection}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
-
-  async function handleOpenFramePromptDialog() {
-    setFramePromptLoading(true);
-    setFramePromptOpen(true);
-
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "frame_prompt_preview",
-          payload: { shotId: id },
-        }),
-      });
-      const data = await res.json();
-      setFramePromptData(data);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-      setFramePromptOpen(false);
-    } finally {
-      setFramePromptLoading(false);
-    }
-  }
-
-  async function handleCopyFramePrompt(kind: "first" | "last") {
-    if (!framePromptData) return;
-    const text = kind === "first" ? framePromptData.firstPrompt : framePromptData.lastPrompt;
-    await navigator.clipboard.writeText(text);
-    setFramePromptCopied(kind);
-    setTimeout(() => setFramePromptCopied(null), 1800);
-  }
-
-  type FrameAssetField = "anchorFirst" | "anchorLastAi" | "cutPoint";
-  const frameAssets: Array<{
-    src: string | null | undefined;
-    label: string;
-    field: FrameAssetField;
-    readOnly?: boolean;
-  }> = [
-    { src: anchorFirst, label: t("shot.anchorFirst"), field: "anchorFirst" },
-    { src: anchorLastAi, label: t("shot.anchorLastAi"), field: "anchorLastAi" },
-    { src: cutPoint, label: t("shot.cutPoint"), field: "cutPoint", readOnly: true },
-  ];
 
   // Progress dots: how many steps done out of 4
   if (isCompact) {
@@ -1071,26 +804,22 @@ export function ShotCard({
               )}
             </div>
 
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-1.5">
               <Button
                 size="xs"
                 variant="outline"
                 onClick={handleRewriteText}
-                disabled={rewritingText || restoringText}
+                disabled={rewritingText}
               >
                 {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {rewritingText ? t("common.generating") : t("shot.rewriteText")}
               </Button>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleRestoreTextFromScript}
-                disabled={restoringText || rewritingText}
-                title="从原始剧本还原此镜头的文本字段（不影响已生成的首尾帧和视频）"
-              >
-                {restoringText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
-                {restoringText ? "还原中…" : "从剧本还原"}
-              </Button>
+              <ShotRestoreFromScriptButton
+                projectId={projectId}
+                shotId={id}
+                onRestored={onUpdate}
+                disabled={rewritingText}
+              />
             </div>
           </div>
         </StepRow>
@@ -1104,154 +833,43 @@ export function ShotCard({
           {chainSourceHint && (
             <p className="mb-2 text-[11px] font-medium text-primary/90">{chainSourceHint}</p>
           )}
-          <div className="mb-2.5 flex gap-2 flex-wrap">
-            {frameAssets.map((asset) => {
-              const fieldName = asset.field;
-              const isUploading = uploadingField === fieldName;
-              const colWidth = "calc(33.333% - 6px)";
-              return (
-                <WithFramePathMissing key={fieldName} src={asset.src}>
-                  {(pathMissing) => (
-                <div className="flex flex-col gap-1" style={{ width: colWidth, minWidth: 100 }}>
-                  <div
-                    className={`relative overflow-hidden rounded-lg border bg-[--surface] ${
-                      pathMissing
-                        ? "border-red-400 ring-1 ring-red-200"
-                        : "border-[--border-subtle]"
-                    } ${asset.src && !isUploading && !pathMissing ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
-                    onClick={() =>
-                      asset.src && !isUploading && !pathMissing && setPreviewSrc(uploadUrl(asset.src))
-                    }
-                  >
-                    {isUploading ? (
-                      <div className="flex h-16 items-center justify-center"><Loader2 className="h-4 w-4 animate-spin text-primary" /></div>
-                    ) : asset.src && !pathMissing ? (
-                      <img src={uploadUrl(asset.src)} className="w-full object-contain" />
-                    ) : pathMissing ? (
-                      <div className="flex h-16 flex-col items-center justify-center gap-0.5 px-1">
-                        <XCircle className="h-4 w-4 text-red-500" />
-                        <span className="text-[9px] text-red-600 text-center">文件缺失</span>
-                      </div>
-                    ) : (
-                      <div className="flex h-16 items-center justify-center"><ImageIcon className="h-4 w-4 text-[--text-muted]" /></div>
-                    )}
-                  </div>
-                  <p className={`text-[10px] text-center truncate ${pathMissing ? "text-red-600 font-medium" : "text-[--text-muted]"}`}>
-                    {asset.label}
-                    {pathMissing ? " · 缺失" : ""}
-                  </p>
-                  {!asset.readOnly && (
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => handleUploadFrame(fieldName as "anchorFirst" | "anchorLastAi")}
-                      disabled={isUploading}
-                      className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[--border-subtle] bg-white py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
-                    >
-                      <Upload className="h-2.5 w-2.5" />
-                      上传
-                    </button>
-                    {asset.src && (
-                      <button
-                        onClick={() => handleClearFrame(fieldName as "anchorFirst" | "anchorLastAi")}
-                        className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-red-300 hover:text-red-500"
-                      >
-                        <Trash2 className="h-2.5 w-2.5" />
-                      </button>
-                    )}
-                    {(fieldName === "anchorFirst" || fieldName === "anchorLastAi") && (
-                      <button
-                        onClick={() => handleGenerateOneFrame(fieldName === "anchorFirst" ? "first" : "last")}
-                        disabled={generatingFrames || generatingVideo}
-                        title={fieldName === "anchorFirst" ? "单独重新生成首帧（可选参考图）" : "单独重新生成尾帧"}
-                        className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary disabled:opacity-40"
-                      >
-                        {generatingFrames && generatingFrameTarget === (fieldName === "anchorFirst" ? "first" : "last")
-                          ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                          : <RefreshCw className="h-2.5 w-2.5" />
-                        }
-                      </button>
-                    )}
-                  </div>
-                  )}
-                  {asset.readOnly && !asset.src && (
-                    <p className="text-[9px] text-center text-[--text-muted]">生成视频后出现</p>
-                  )}
-                </div>
-                  )}
-                </WithFramePathMissing>
-              );
-            })}
+          <ShotFrameAssets
+            projectId={projectId}
+            shotId={id}
+            anchorFirst={anchorFirst}
+            anchorLastAi={anchorLastAi}
+            cutPoint={cutPoint}
+            onPreview={setPreviewSrc}
+            onUpdate={onUpdate}
+            generatingFrames={frameActions.generatingFrames}
+            generatingFrameTarget={frameActions.generatingFrameTarget}
+            onGenerateOneFrame={frameActions.handleGenerateOneFrame}
+            disabled={generatingVideo}
+          />
+          <div className="mt-2">
+            <ShotFrameToolbar
+              hasFrame={hasFrame}
+              frameRefShotsCount={frameRefShots.length}
+              showAdoptPrevEpisode={showAdoptPrevEpisode}
+              prevChainFrame={frameActions.prevChainFrame}
+              prevChainFrameSource={frameActions.prevChainFrameSource}
+              generatingFrames={frameActions.generatingFrames}
+              adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
+              adoptingPrevFrame={frameActions.adoptingPrevFrame}
+              disabled={generatingVideo}
+              onGenerateFrames={frameActions.handleGenerateFrames}
+              onPickReference={() => frameActions.openFrameReferencePicker("first")}
+              onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}
+              onAdoptPrevChain={frameActions.handleAdoptPrevChainFrame}
+              trailing={
+                <ShotExternalFrameHelper
+                  projectId={projectId}
+                  shotId={id}
+                  disabled={frameActions.frameActionsBusy || generatingVideo}
+                />
+              }
+            />
           </div>
-          <Button
-            size="xs"
-            variant={nextStep === "frame" ? "default" : "outline"}
-            onClick={handleGenerateFrames}
-            disabled={generatingFrames || generatingVideo}
-          >
-            {generatingFrames
-              ? <Loader2 className="h-3 w-3 animate-spin" />
-              : <ImageIcon className="h-3 w-3" />
-            }
-            {generatingFrames
-              ? t("common.generating")
-              : hasFrame ? t("shot.regenerateFrames") : t("project.generateFrames")
-            }
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={handleOpenFramePromptDialog}
-            disabled={generatingFrames || generatingVideo}
-          >
-            <ClipboardCopy className="h-3 w-3" />
-            {t("shot.externalFrameHelper")}
-          </Button>
-          {frameRefShots.length > 0 && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={() => openFrameReferencePicker("first")}
-              disabled={generatingFrames || generatingVideo}
-            >
-              <ImageIcon className="h-3 w-3" />
-              {t("shot.pickFrameReference")}
-            </Button>
-          )}
-          {showAdoptPrevEpisode && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={handleAdoptPrevEpisodeFrame}
-              disabled={adoptingPrevEpisode || generatingFrames || generatingVideo}
-              title="将上一集最后一镜的视频尾帧（或 AI 尾帧）直拷为本镜首帧"
-            >
-              {adoptingPrevEpisode
-                ? <Loader2 className="h-3 w-3 animate-spin" />
-                : <span className="text-[10px]">↑↑</span>
-              }
-              承接上一集尾帧
-            </Button>
-          )}
-          {prevChainFrame && (
-            <Button
-              size="xs"
-              variant="ghost"
-              onClick={handleAdoptPrevChainFrame}
-              disabled={adoptingPrevFrame || generatingFrames || generatingVideo}
-              title={
-                prevChainFrameSource === "video"
-                  ? "将上一镜视频的真实尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
-                  : "将上一镜 AI 生成的尾帧直接用作本镜首帧，跳过 Seedream 重新生成"
-              }
-            >
-              {adoptingPrevFrame
-                ? <Loader2 className="h-3 w-3 animate-spin" />
-                : <span className="text-[10px]">↑</span>
-              }
-              承接上一镜尾帧
-              {prevChainFrameSource === "video" ? "（视频尾帧）" : "（AI 尾帧）"}
-            </Button>
-          )}
         </StepRow>
 
         {/* Step 3: 视频提示词 */}
@@ -1381,63 +999,6 @@ export function ShotCard({
 
       </div>
 
-      {/* Hidden file input for frame uploads */}
-      <input
-        ref={uploadInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleFileChange}
-      />
-
-      <Dialog open={framePromptOpen} onOpenChange={setFramePromptOpen}>
-        <DialogContent className="sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>{t("shot.externalFrameHelper")}</DialogTitle>
-          </DialogHeader>
-          {framePromptLoading ? (
-            <div className="flex min-h-[200px] items-center justify-center">
-              <Loader2 className="h-5 w-5 animate-spin text-primary" />
-            </div>
-          ) : framePromptData ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 text-xs text-[--text-secondary]">
-                <div>{t("shot.externalFrameHelperHint")}</div>
-                {framePromptData.reusePreviousLastFrame && (
-                  <div className="mt-1 text-amber-700">{t("shot.reusePreviousLastFrame")}</div>
-                )}
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="rounded-xl border border-blue-200 bg-blue-50/30 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-blue-700">{t("shot.startFramePrompt")}</div>
-                    <Button size="xs" variant="outline" onClick={() => handleCopyFramePrompt("first")}>
-                      {framePromptCopied === "first" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                      {framePromptCopied === "first" ? t("common.copied") : t("shot.copyPrompt")}
-                    </Button>
-                  </div>
-                  <div className="mb-2 text-[11px] text-[--text-muted]">{framePromptData.startFrameDesc}</div>
-                  <Textarea value={framePromptData.firstPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
-                </div>
-
-                <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-amber-700">{t("shot.endFramePrompt")}</div>
-                    <Button size="xs" variant="outline" onClick={() => handleCopyFramePrompt("last")}>
-                      {framePromptCopied === "last" ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                      {framePromptCopied === "last" ? t("common.copied") : t("shot.copyPrompt")}
-                    </Button>
-                  </div>
-                  <div className="mb-2 text-[11px] text-[--text-muted]">{framePromptData.endFrameDesc}</div>
-                  <Textarea value={framePromptData.lastPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </DialogContent>
-      </Dialog>
-
       {/* Preview lightbox */}
       {previewSrc && (
         <div
@@ -1469,7 +1030,10 @@ export function ShotCard({
         >
           <button
             className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[--text-primary] hover:bg-[--surface] transition-colors"
-            onClick={handleOpenHistory}
+            onClick={() => {
+              setCtxMenu(null);
+              setVideoHistoryOpen(true);
+            }}
           >
             <History className="h-3.5 w-3.5 text-[--text-muted]" />
             版本历史
@@ -1477,79 +1041,21 @@ export function ShotCard({
         </div>
       )}
 
-      {/* 历史版本 Dialog */}
-      <Dialog open={historyOpen} onOpenChange={setHistoryOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <History className="h-4 w-4" />
-              视频历史版本
-            </DialogTitle>
-          </DialogHeader>
-          <div className="mt-2 space-y-2">
-            {historyLoading ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-5 w-5 animate-spin text-[--text-muted]" />
-              </div>
-            ) : historyList.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[--text-muted]">暂无历史版本</p>
-            ) : (
-              historyList.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="flex items-center gap-3 rounded-lg border border-[--border-subtle] p-2.5"
-                >
-                  {/* 缩略图 */}
-                  <div className="h-14 w-24 flex-shrink-0 overflow-hidden rounded-md bg-black">
-                    <video
-                      src={uploadUrl(entry.videoUrl)}
-                      className="h-full w-full object-contain"
-                      muted
-                    />
-                  </div>
-                  {/* 信息 */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-[--text-primary] truncate">
-                      {entry.label ?? "视频"}
-                    </p>
-                    <p className="mt-0.5 text-[10px] text-[--text-muted]">
-                      {new Date(entry.createdAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      {entry.resolution && (
-                        <span className={`ml-1.5 rounded px-1 py-px font-bold ${entry.resolution === "720p" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}`}>
-                          {entry.resolution}
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                  {/* 恢复按钮 */}
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => handleRevertHistory(entry.id)}
-                    disabled={revertingId === entry.id}
-                    className="flex-shrink-0"
-                  >
-                    {revertingId === entry.id
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <RotateCcw className="h-3 w-3" />
-                    }
-                    恢复
-                  </Button>
-                </div>
-              ))
-            )}
-            <p className="pt-1 text-center text-[10px] text-[--text-muted]">最多保留 5 个历史版本，超出时自动清理最旧的</p>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ShotVideoHistoryDialog
+        open={videoHistoryOpen}
+        onOpenChange={setVideoHistoryOpen}
+        projectId={projectId}
+        shotId={id}
+        onReverted={onUpdate}
+      />
 
       <FrameReferencePicker
-        open={frameRefPickerOpen}
-        onOpenChange={setFrameRefPickerOpen}
+        open={frameActions.frameRefPickerOpen}
+        onOpenChange={frameActions.setFrameRefPickerOpen}
         shots={frameRefShots}
         currentShotId={id}
         title={t("shot.frameReferenceTitle")}
-        onConfirm={handleFrameReferenceConfirm}
+        onConfirm={frameActions.handleFrameReferenceConfirm}
       />
     </div>
   );

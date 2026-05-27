@@ -11,6 +11,7 @@ interface KanbanShot {
   prompt: string;
   anchorFirst: string | null;
   anchorLastAi: string | null;
+  cutPoint: string | null;
   videoPrompt: string | null;
   videoUrl: string | null;
 }
@@ -38,8 +39,8 @@ function classifyShot(shot: KanbanShot) {
   const hasFrame = !!(shot.anchorFirst || shot.anchorLastAi);
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
-  if (!hasFrame) return "frames";
-  if (!hasVideoPrompt) return "prompt";
+  if (!hasFrame && !hasVideo) return "frames";
+  if (!hasVideoPrompt && !hasVideo) return "prompt";
   if (!hasVideo) return "video";
   return "done";
 }
@@ -138,7 +139,7 @@ export function ShotKanban({
               </div>
             ) : (
               col.shots.map((shot) => {
-                const thumb = shot.anchorFirst || shot.anchorLastAi;
+                const thumb = shot.anchorFirst || shot.cutPoint || shot.anchorLastAi;
                 return (
                   <div
                     key={shot.id}

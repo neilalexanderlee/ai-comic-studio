@@ -25,13 +25,13 @@ describe("enhanceVideoPrompt", () => {
     expect(provider.generateText).toHaveBeenCalledOnce();
   });
 
-  it("passes systemPrompt to the text provider (seedance uses 五段式)", async () => {
+  it("passes Seedance-specific system prompt", async () => {
     const provider = makeTextProvider("ok");
     await enhanceVideoPrompt("raw", "seedance", provider as never);
     const callArgs = provider.generateText.mock.calls[0];
     const options = callArgs[1] as { systemPrompt?: string };
     expect(options?.systemPrompt).toContain("Seedance");
-    expect(options?.systemPrompt).toContain("五段式");
+    expect(options?.systemPrompt).toContain("首尾帧模式");
   });
 
   it("passes systemPrompt for kling protocol", async () => {
@@ -39,7 +39,7 @@ describe("enhanceVideoPrompt", () => {
     await enhanceVideoPrompt("raw", "kling", provider as never);
     const callArgs = provider.generateText.mock.calls[0];
     const options = callArgs[1] as { systemPrompt?: string };
-    expect(options?.systemPrompt).toContain("可灵");
+    expect(options?.systemPrompt).toContain("Kling");
   });
 
   it("uses generic fallback for unknown protocol", async () => {
@@ -47,8 +47,7 @@ describe("enhanceVideoPrompt", () => {
     await enhanceVideoPrompt("raw", "unknown_model_xyz", provider as never);
     const callArgs = provider.generateText.mock.calls[0];
     const options = callArgs[1] as { systemPrompt?: string };
-    // Generic prompt should mention "视频提示词"
-    expect(options?.systemPrompt).toContain("视频提示词");
+    expect(options?.systemPrompt).toContain("分镜提示词");
   });
 
   it("returns original prompt when provider throws — silent fallback", async () => {
@@ -105,8 +104,7 @@ describe("enhanceImagePrompt", () => {
     const callArgs = provider.generateText.mock.calls[0];
     const options = callArgs[1] as { systemPrompt?: string };
     expect(options?.systemPrompt).toContain("DALL-E");
-    // OpenAI prompt should instruct English output
-    expect(options?.systemPrompt).toContain("English");
+    expect(options?.systemPrompt).toContain("comma-separated");
   });
 
   it("uses generic fallback for unknown image protocol", async () => {
@@ -114,7 +112,7 @@ describe("enhanceImagePrompt", () => {
     await enhanceImagePrompt("raw", "some_new_model", provider as never);
     const callArgs = provider.generateText.mock.calls[0];
     const options = callArgs[1] as { systemPrompt?: string };
-    expect(options?.systemPrompt).toContain("图片提示词");
+    expect(options?.systemPrompt).toContain("关键帧");
   });
 
   it("falls back to original on error", async () => {
