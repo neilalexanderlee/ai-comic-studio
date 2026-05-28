@@ -1,5 +1,6 @@
 {
-  "name": "ai-comic-builder",
+  "name": "ai-comic-studio",
+  "description": "AI漫剧工坊 — open-source workflow for manju (漫剧): script to storyboard, frames, and video",
   "version": "0.1.0",
   "private": true,
   "scripts": {

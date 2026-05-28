@@ -1,18 +1,22 @@
-# AI Comic Builder
+# AI漫剧工坊
 
+**AI Comic Studio** (`ai-comic-studio`) — 开源漫剧（manju）工作流：从剧本到分镜、首尾帧、视频与合成。
+
+| | |
+|---|---|
+| **GitHub** | [github.com/neilalexanderlee/ai-comic-studio](https://github.com/neilalexanderlee/ai-comic-studio) |
+| **npm 包名** | `ai-comic-studio` |
+| **建议本地目录** | `ai-comic-studio`（见 [docs/OPEN_SOURCE.md](./docs/OPEN_SOURCE.md)） |
 
 社区交流：[https://linux.do/](https://linux.do/)
 
-
 > v0.2.2
 
-AI 驱动的漫剧生成器 — 从剧本到动画视频的全自动流水线。
+AI 驱动的漫剧工坊 — 从剧本到动画视频的全自动流水线。
 
-📺 **系统介绍视频**：
+📺 **系统介绍 / Demo**：[Bilibili — AI漫剧工坊](https://b23.tv/3xzE8uz)
 
-[Bilibili](https://www.bilibili.com/video/BV1gMQSBQEoi/) 
-
-[v0.2.1 版本更新](https://www.bilibili.com/video/BV13CXQB8EwL/)
+> 基于 [AIComicBuilder](https://github.com/twwch/AIComicBuilder)（Apache-2.0）演进。上游致谢与版权说明见 [NOTICE](./NOTICE)。
 
 添加飞书群：
 
@@ -182,21 +186,7 @@ src/
 
 ## Demo
 
-https://www.bilibili.com/video/BV19rwVzUEeD/
-
-https://www.bilibili.com/video/BV1RrwVzUE3x/
-
-https://www.bilibili.com/video/BV15rwVzSEKZ/
-
-https://www.bilibili.com/video/BV15kwiz7E6Q/
-
-https://www.bilibili.com/video/BV1hTw1zAEgY/
-
-最新版生成
-
-[《拳魂·最后一回合》-seedance1.5](https://www.bilibili.com/video/BV1WGAPzrEs1/)
-
-[《拳魂·最后一回合》-seedance2](https://www.bilibili.com/video/BV1fVAuzLEAX/)
+[Bilibili — AI漫剧工坊](https://b23.tv/3xzE8uz)
 
 ## 模型配置（重要）
 
@@ -367,7 +357,10 @@ src/
 
 ## License
 
-[Apache License 2.0](./LICENSE)
+本项目采用 [Apache License 2.0](./LICENSE)。
+
+- 版权与衍生说明：[NOTICE](./NOTICE)
+- 首次开源 / 改目录名 / 推送 GitHub：[docs/OPEN_SOURCE.md](./docs/OPEN_SOURCE.md)
 
 
 

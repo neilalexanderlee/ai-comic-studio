@@ -1,4 +1,4 @@
-# AIComicBuilder — Claude 开发指南
+# AI漫剧工坊 — Claude 开发指南
 
 > 本文件是面向 AI 助手（Claude）的项目级开发指南。
 > 每次开始任务前请先读本文件，所有改动必须符合此处记录的约定。
@@ -13,7 +13,7 @@
 
 ## 项目概述
 
-AIComicBuilder 是一个基于 AI 的漫画/短剧分镜生成工具。用户可以：
+AI漫剧工坊（英文 **AI Comic Studio**，仓库名 `ai-comic-studio`）是一个基于 AI 的漫剧/短剧分镜生成工具。用户可以：
 1. 创建项目 → 编写剧情大纲和剧本
 2. 将剧本解析为分镜版本（storyboard versions）
 3. 为每个分镜生成首帧/尾帧（keyframe 模式）或参考帧（reference 模式）
@@ -41,7 +41,7 @@ AIComicBuilder 是一个基于 AI 的漫画/短剧分镜生成工具。用户可
 ## 目录结构
 
 ```
-AIComicBuilder/
+ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 ├── CLAUDE.md                  # ← 本文件
 ├── docs/
 │   ├── ARCHITECTURE.md        # 系统架构详解

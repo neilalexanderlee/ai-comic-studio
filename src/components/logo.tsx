@@ -6,7 +6,7 @@ interface LogoIconProps {
 }
 
 /**
- * AI Comic Builder logo — a comic speech bubble with a sparkle/AI star,
+ * AI漫剧工坊 logo — a comic speech bubble with a sparkle/AI star,
  * representing AI-powered comic creation.
  */
 export function LogoIcon({ className, size = 20 }: LogoIconProps) {
@@ -44,7 +44,7 @@ export function LogoFull({ className }: { className?: string }) {
         <LogoIcon size={18} />
       </div>
       <span className="font-display text-[15px] font-bold tracking-tight text-[#1A1A1A]">
-        AI Comic Builder
+        AI漫剧工坊
       </span>
     </div>
   );

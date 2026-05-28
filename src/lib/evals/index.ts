@@ -20,7 +20,7 @@ const selectedSuite = suiteFlag !== -1 ? args[suiteFlag + 1] : null;
 const allSuites = [characterRoutingSuite, promptEnhancementSuite];
 
 async function main() {
-  console.log("AIComicBuilder — AI Eval Runner");
+  console.log("AI漫剧工坊 — AI Eval Runner");
   console.log("================================\n");
 
   if (selectedSuite) {
