@@ -7,7 +7,7 @@ import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
   buildRefVideoPromptRequest,
-  getRefVideoPromptSystem,
+  resolveRefVideoPromptSystem,
 } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { collectVisionFramePaths } from "@/lib/storyboard/shot-video-readiness.server";
@@ -89,6 +89,8 @@ export async function generateAndPersistVisionVideoPrompt(params: {
   shotCharacters: EpisodeCharacter[];
   shotDialogues: DialogueRow[];
   modelConfig?: ModelConfigPayload;
+  userId: string;
+  projectId: string;
   deps: VideoPromptSyncDeps;
 }): Promise<string> {
   const { shot, shotCharacters, shotDialogues, modelConfig, deps } = params;
@@ -102,7 +104,10 @@ export async function generateAndPersistVisionVideoPrompt(params: {
   const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
   const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
   const textProvider = resolveAIProvider(modelConfig);
-  const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
+  const refVideoSystem = await resolveRefVideoPromptSystem(modelConfig?.video?.protocol, {
+    userId: params.userId,
+    projectId: params.projectId,
+  });
 
   const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
   const dialogueList: DialoguePromptEntry[] = shotDialogues.map((d) => {
@@ -168,6 +173,8 @@ export async function syncVideoPromptIfStale(params: {
   shotCharacters: EpisodeCharacter[];
   shotDialogues: DialogueRow[];
   modelConfig?: ModelConfigPayload;
+  userId: string;
+  projectId: string;
   deps: VideoPromptSyncDeps;
 }): Promise<{ videoPrompt: string | null; refreshed: boolean }> {
   if (!shouldRefreshVideoPrompt(params.shot)) {

@@ -12,7 +12,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "eval": "tsx src/lib/evals/index.ts"
+    "eval": "tsx src/lib/evals/index.ts",
+    "prune-prompt-overrides": "tsx scripts/prune-prompt-overrides.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",

@@ -15,8 +15,8 @@ import {
 } from "@/lib/import-utils";
 import {
   buildImportCharacterExtractPrompt,
-  buildImportCharacterExtractSystem,
   buildImportCharacterNameExtractionPrompt,
+  resolveImportCharacterExtractSystem,
   IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM,
 } from "@/lib/ai/prompts/import-character-extract";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -58,10 +58,10 @@ export async function POST(
 
   const chunks = chunkText(body.text);
   const model = createLanguageModel(resolvedModelConfig.text);
-  // Build system prompt from project's visualStyle.
-  // resolvePrompt checks for user-level slot overrides in the DB; if none,
-  // we use the visualStyle-aware default so the style tag is always correct.
-  const importCharSystem = buildImportCharacterExtractSystem(project.visualStyle || "anime_2d");
+  const importCharSystem = await resolveImportCharacterExtractSystem(
+    project.visualStyle || "anime_2d",
+    { userId, projectId }
+  );
 
   // Extract the official character-names table (系统提取·角色标准名) from the script
   // preamble so it can be prepended to every chunk — prevents the LLM from inventing

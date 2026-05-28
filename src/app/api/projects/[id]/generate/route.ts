@@ -13,7 +13,12 @@ import { enqueueTask } from "@/lib/task-queue";
 import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
-import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
+import { buildCharacterExtractPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, resolveCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
+import {
+  buildSingleShotRewriteUserPrompt,
+  resolveSingleShotRewriteSystem,
+} from "@/lib/ai/prompts/single-shot-rewrite";
+import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
@@ -24,7 +29,7 @@ import {
 } from "@/lib/ai/prompts/frame-generate";
 import { resolveImageProvider, resolveVideoProvider, resolveAIProvider } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
-import { buildRefVideoPromptRequest, getRefVideoPromptSystem } from "@/lib/ai/prompts/ref-video-prompt-generate";
+import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
 import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { assembleVideo } from "@/lib/video/ffmpeg";
@@ -437,7 +442,13 @@ export async function POST(
   }
 
   if (action === "single_shot_rewrite") {
-    return handleSingleShotRewrite(projectId, payload, resolvedModelConfig, episodeId);
+    return handleSingleShotRewrite(
+      projectId,
+      userId,
+      payload,
+      resolvedModelConfig,
+      episodeId
+    );
   }
 
   if (action === "single_shot_restore_from_script") {
@@ -695,7 +706,10 @@ async function handleCharacterExtract(
   }
 
   // ── Pass 2: Full character sheet generation ────────────────────────────────
-  const charExtractSystem = buildCharacterExtractSystemPrompt(visualStyle);
+  const charExtractSystem = await resolveCharacterExtractSystemPrompt(visualStyle, {
+    userId,
+    projectId,
+  });
   console.log("[CharacterExtract] visualStyle:", visualStyle, "confirmed names:", confirmedNames.length);
 
   const { text } = await generateText({
@@ -1353,6 +1367,7 @@ async function handleSingleShotRestoreFromScript(
 
 async function handleSingleShotRewrite(
   projectId: string,
+  userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
   episodeId?: string
@@ -1389,83 +1404,30 @@ async function handleSingleShotRewrite(
 
   const hasNamedChars = characterDescriptions.length > 0;
 
-  const prompt = `你是一位资深商业动画导演兼分镜督导，正在对一个镜头的脚本字段做全面审查与重写。
+  const system = await resolveSingleShotRewriteSystem(
+    { userId, projectId },
+    rewriteVisualStyleTag
+  );
+  const userPrompt = buildSingleShotRewriteUserPrompt({
+    sequence: shot.sequence,
+    duration: shot.duration ?? 10,
+    prompt: shot.prompt,
+    startFrameDesc: shot.startFrameDesc,
+    endFrameDesc: shot.endFrameDesc,
+    motionScript: shot.motionScript,
+    videoScript: shot.videoScript,
+    cameraDirection: shot.cameraDirection,
+    characterDescriptions,
+    hasNamedChars,
+  });
 
-━━━ 工作哲学 ━━━
-设计感来自取舍。先问"这个镜头的导演意图是什么"，再决定写什么。每个细节都要有画面贡献。
-
-━━━ 任务说明 ━━━
-根据场景描述，对各字段做两步处理：
-① 先做【物理与逻辑自检】——找出现有字段里的矛盾点
-② 再做【导演视角重写】——用正确的信息重写所有字段
-
-叙事事实（时间/地点/谁在场）不得改动。所有字段用中文，专业术语可保留英文。
-${rewriteVisualStyleTag ? `画风锁定：${rewriteVisualStyleTag}` : ""}
-
-━━━ 当前镜头（序号 ${shot.sequence}，时长 ${shot.duration}s）━━━
-场景描述：${shot.prompt || "（空）"}
-现有首帧：${shot.startFrameDesc || "（空）"}
-现有尾帧：${shot.endFrameDesc || "（空）"}
-现有动作脚本：${shot.motionScript || "（空）"}
-现有视频脚本：${shot.videoScript || "（空）"}
-现有运镜：${shot.cameraDirection || "static"}
-
-${characterDescriptions ? `角色参考（仅供理解叙事，帧描述里只写名字不写外貌）：\n${characterDescriptions}` : ""}
-
-━━━ 第一步：物理与逻辑自检 ━━━
-在重写前，先在脑中检查以下问题（有问题就修正，无问题则保持原意）：
-
-▸ 首帧是「动作开始前的静止状态」——若现有首帧描述里含有运动词（跑/扑/飞/挥），改为动作发生前的预备姿态
-▸ 尾帧是「动作完成后的稳定状态」——若与首帧构图相同或差异不可见，重新设计有空间位移的落幅
-▸ motionScript 时序——若时间线里的动作顺序违反物理规律（如"人已落地"但下一段写"起跳"），修正时序
-▸ 运镜与内容匹配——若镜头运动方向与角色运动方向矛盾（如角色向右跑但镜头向左推），修正运镜
-▸ 时长合理性——${shot.duration}s 的镜头，motionScript 总时长需精确等于 ${shot.duration}s
-
-━━━ 第二步：各字段写作标准 ━━━
-
-【videoScript】—— 这个镜头"在做什么"，不是"里面有什么"
-先问：导演安排这个镜头的意图是什么？然后写：
-- 主体 + 一个核心动作动词（具体到身体部位，如"右手向后猛地一拽"）
-- 镜头运动：起幅→运动方式+速度→落幅（最重要，不能省）
-- 可加一个锁定情绪的感官细节（特定光色/材质，只选一个，可不加）
-- 散文，不列要素，不超过 60 字
-
-【startFrameDesc / endFrameDesc】—— 给图像模型的静帧构图锚点
-一帧 = 一个主导印象。这帧里哪个元素是导演最想让观众看到的？
-- 格式：景别/视角 ＋ ${hasNamedChars ? `视觉重心角色的位置和姿态（静止姿态，不写运动过程）` : `最核心场景元素的位置`} ＋ 背景关键环境元素（从场景描述里提取，锚定场景，防止图像模型自由脑补）＋ 主光（颜色+方向+来源）
-- 背景描述举例：「背后是金色麦垛堆叠，稻草堆边缘隐约可见」「远处是篝火橙光映照的木屋轮廓」——具体到能锁定场景的一个视觉元素即可，不需要描述全部
-${hasNamedChars ? `- 多人：聚焦视觉重心最重的一个角色，次要角色最多一句"XX随其后"` : `- 不堆叠多个场景层次`}
-- 原始内容里有价值的细节（特定光源名称、有构图张力的背景元素）保留
-
-【motionScript】—— 精确时间线
-格式：0-Xs: [动作+镜头起落]. Xs-Ys: [续]. 每段 2-4s，总时长精确等于 ${shot.duration}s
-
-【cameraDirection】—— 运镜意图
-格式：起幅[景别] → 运动方式+速度 → 落幅[景别]
-
-━━━ 绝对禁止 ━━━
-- 改动场景的时间/地点/大气环境
-- 帧描述里写角色外貌括注（如「龙渊（黑碎发琥珀眼）」）
-- 帧描述里写运镜词或运动词（"镜头推进""视角下沉""飞奔""一拽"——帧是静止的）
-- 同一帧里两个以上光源
-- "神情专注""眼神复杂""情绪丰富"等空洞情绪词
-- videoScript 超过 60 字或没有镜头运动意图
-- videoScript 里写任何配乐/BGM/背景音乐描述——音乐后期统一叠加
-
-仅返回 JSON，无 markdown 无注释：
-{
-  "startFrameDesc": "首帧静帧：景别/视角，主体+静止姿态，背景关键环境元素，主光颜色+方向+来源",
-  "endFrameDesc": "尾帧静帧：景别/视角，主体+稳定落幅姿态，背景关键环境元素，与首帧有可见构图差异",
-  "motionScript": "0-Xs: [动作+镜头]. Xs-${shot.duration}s: [续，总时长精确=${shot.duration}s].",
-  "videoScript": "导演意图一句话+核心动作+镜头运动，散文不超60字",
-  "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]"
-}`;
-
-  console.log(`[SingleShotRewrite] Shot ${shot.sequence} prompt length=${prompt.length}`);
+  console.log(
+    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length}`
+  );
 
   try {
     const { text } = await import("ai").then(({ generateText }) =>
-      generateText({ model, prompt, temperature: 0.7 })
+      generateText({ model, system, prompt: userPrompt, temperature: 0.7 })
     );
 
     const parsed = JSON.parse(extractJSON(text)) as {
@@ -2001,6 +1963,8 @@ async function handleSingleVideoGenerate(
         shotCharacters,
         shotDialogues,
         modelConfig,
+        userId,
+        projectId,
         deps: videoPromptSyncDeps,
       });
     if (videoPromptRefreshed) {
@@ -2288,6 +2252,8 @@ async function handleSingleVideoPrompt(
       shotCharacters,
       shotDialogues,
       modelConfig,
+      userId,
+      projectId,
       deps: {
         stripBgmContent,
         ensureDialoguesInPrompt,
@@ -2346,6 +2312,8 @@ async function handleBatchVideoPrompt(
           shotCharacters: batchCharacters,
           shotDialogues,
           modelConfig,
+          userId,
+          projectId,
           deps: {
             stripBgmContent,
             ensureDialoguesInPrompt,

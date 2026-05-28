@@ -2,7 +2,11 @@ import { db } from "@/lib/db";
 import { projects, characters } from "@/lib/db/schema";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import type { ModelConfigPayload } from "@/lib/ai/provider-factory";
-import { buildCharacterExtractPrompt, buildCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
+import {
+  buildCharacterExtractPrompt,
+  buildCharacterExtractSystemPrompt,
+  resolveCharacterExtractSystemPrompt,
+} from "@/lib/ai/prompts/character-extract";
 import { extractJSON } from "@/lib/ai/ai-sdk";
 import { eq, and } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -28,7 +32,12 @@ export async function handleCharacterExtract(task: Task) {
     visualStyle = project?.visualStyle || "anime_2d";
   }
 
-  const systemPrompt = buildCharacterExtractSystemPrompt(visualStyle);
+  const systemPrompt = payload.userId
+    ? await resolveCharacterExtractSystemPrompt(visualStyle, {
+        userId: payload.userId,
+        projectId: payload.projectId,
+      })
+    : buildCharacterExtractSystemPrompt(visualStyle);
 
   const ai = resolveAIProvider(payload.modelConfig);
   const result = await ai.generateText(

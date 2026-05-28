@@ -7,7 +7,10 @@ import { projects } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { addImportLog } from "@/lib/import-utils";
-import { OUTLINE_EXPAND_SYSTEM, buildOutlineExpandPrompt } from "@/lib/ai/prompts/outline-expand";
+import {
+  buildOutlineExpandPrompt,
+  resolveOutlineExpandSystem,
+} from "@/lib/ai/prompts/outline-expand";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
 
 export const maxDuration = 600;
@@ -47,9 +50,11 @@ export async function POST(
 
   const model = createLanguageModel(resolvedModelConfig.text);
 
+  const outlineSystem = await resolveOutlineExpandSystem({ userId, projectId });
+
   const result = streamText({
     model,
-    system: OUTLINE_EXPAND_SYSTEM,
+    system: outlineSystem,
     prompt: buildOutlineExpandPrompt(body.outline),
     onFinish: async ({ text }) => {
       try {

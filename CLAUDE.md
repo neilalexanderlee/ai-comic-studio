@@ -66,7 +66,6 @@ AIComicBuilder/
 │   │   │   ├── prompt-enhancer.ts     # 模型感知 prompt 增强
 │   │   │   ├── prompts/               # Prompt 构建函数 + 注册表
 │   │   │   │   ├── outline-expand.ts  # AI 自动生成（大纲→S级剧本）
-│   │   │   │   ├── shot-complete.ts   # 解析分镜 LLM 字段补全
 │   │   │   │   ├── frame-strategy-judge.ts  # 帧生成策略 LLM judge prompt
 │   │   │   │   └── ...
 │   │   │   └── providers/             # 各模型实现（openai/gemini/kling/seedance/jimeng/...）
@@ -199,14 +198,17 @@ const visualStyleTag = VISUAL_STYLE_PRESETS[project.visualStyle]?.tag ?? "";
 
 ### 6. handleCharacterExtract — 必须传入 visualStyle
 
-`handleCharacterExtract` 必须总是先查项目的 `visualStyle`，再用 `buildCharacterExtractSystemPrompt(visualStyle)` 构建 system prompt。不得用 `resolvePrompt("character_extract", ...)` 替代，因为 `resolvePrompt` 不注入 visualStyle，会导致输出写实风格而非项目设定的画风。
+`handleCharacterExtract` 必须总是先查项目的 `visualStyle`，再用 `resolveCharacterExtractSystemPrompt(visualStyle, { userId, projectId })` 构建 system prompt。该函数在 `resolvePrompt("character_extract")` 之后**仍会把** `{STYLE_INSTRUCTION}` 替换为项目画风（不得单独 `resolvePrompt` 而跳过 visualStyle 注入）。
 
 ```typescript
 // ✅ 正确
 const [proj] = await db.select({ visualStyle: projects.visualStyle }).from(projects)...;
-const charExtractSystem = buildCharacterExtractSystemPrompt(proj?.visualStyle || "anime_2d");
+const charExtractSystem = await resolveCharacterExtractSystemPrompt(
+  proj?.visualStyle || "anime_2d",
+  { userId, projectId }
+);
 
-// ❌ 错误：resolvePrompt 不注入 visualStyle
+// ❌ 错误：裸 resolvePrompt 不注入 visualStyle
 const charExtractSystem = await resolvePrompt("character_extract", { userId, projectId });
 ```
 
@@ -266,14 +268,14 @@ where(eq(storyboardVersions.episodeId, null))
 
 系统所有 AI 生成分镜内容的路径均已集成 S 级分镜标准（首帧/尾帧/videoScript 四要素/微表情词汇/禁用模板列表）。
 
-### 覆盖的四条路径
+### 覆盖的产线路径
 
-| 功能入口 | 文件 | 说明 |
+| 功能入口 | 文件 / Key | 说明 |
 |---|---|---|
-| AI 自动生成（大纲扩写） | `src/lib/ai/prompts/outline-expand.ts` | 将故事大纲扩写为完整多集 S 级剧本 |
-| 解析分镜（LLM 字段补全） | `src/lib/ai/prompts/shot-complete.ts` | 解析结构化剧本时补全缺失的首帧/尾帧/videoScript |
-| 单镜头改写按钮 | `generate/route.ts` → `handleSingleShotRewrite` | 分镜描述面板底部的刷新按钮 |
-| 散文剧本切镜 | `src/lib/ai/prompts/registry.ts` → `shot_split` | LLM 从散文剧本切分分镜时已内置 S 级规范 |
+| AI 自动生成（大纲扩写） | `outline-expand.ts` / `outline_expand` | 故事大纲 → 多集 S 级剧本 |
+| 解析分镜（散文） | `registry` → `shot_split` | 一次 LLM 切镜并写全字段 |
+| 解析分镜（结构化 md） | `finalizeExtractedShotsForDb` | 无 LLM，缺字段保持 null |
+| 单镜「重新生成文本」 | `single-shot-rewrite.ts` / `single_shot_rewrite` | 分镜卡片刷新按钮 |
 
 ### 不在此范围内的路径
 
@@ -335,7 +337,7 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 群演场景注入全部角色图 | `filterShotCharacters` 无匹配时 fallback 到全量 | `generate/route.ts` + `filterShotCharacters`：移除 fallback |
 | `enhance_prompts` column 缺失 | schema 先于 migration 被 Drizzle 读取 | migration 0027 + Python 直接 ALTER |
 | 视频生成跳过 visualStyleTag | 生成路径未传参数 | 各 handler 全面审计 |
-| 角色解析后变成写实风 | `handleCharacterExtract` 用 `resolvePrompt` 未传 visualStyle | `generate/route.ts` 改用 `buildCharacterExtractSystemPrompt(visualStyle)` |
+| 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
 | PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧 |
 

@@ -1,4 +1,5 @@
 import { runMigrations } from "@/lib/db";
+import { pruneStalePromptOverrides } from "@/lib/ai/prompts/prune-stale-prompt-overrides";
 import { initializeProviders } from "@/lib/ai/setup";
 import { registerPipelineHandlers } from "@/lib/pipeline";
 import { startWorker } from "@/lib/task-queue";
@@ -15,6 +16,17 @@ export async function bootstrap() {
 
   console.log("[Bootstrap] Running database migrations...");
   runMigrations();
+
+  try {
+    const pruned = await pruneStalePromptOverrides();
+    if (pruned.deleted > 0) {
+      console.log(
+        `[Bootstrap] Pruned ${pruned.deleted} stale prompt_templates row(s)`
+      );
+    }
+  } catch (err) {
+    console.warn("[Bootstrap] prompt_templates prune skipped:", err);
+  }
 
   console.log("[Bootstrap] Initializing AI providers...");
   initializeProviders();

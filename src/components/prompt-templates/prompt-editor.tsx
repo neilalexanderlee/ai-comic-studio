@@ -17,7 +17,18 @@ import { getModelMaxDuration } from "@/lib/ai/model-limits";
 
 const CATEGORIES = ["all", "script", "character", "storyboard"] as const;
 
-const FRAME_PROMPT_KEYS = new Set(["frame_generate_first", "frame_generate_last"]);
+/** i18n key under promptTemplates.editor — shown above slot editor */
+const PROMPT_HINT_I18N: Record<string, string> = {
+  frame_generate_first: "framePromptHint",
+  frame_generate_last: "framePromptHint",
+  video_generate: "videoGenerateHint",
+  ref_video_prompt: "refVideoPromptHint",
+  character_extract: "characterExtractHint",
+  import_character_extract: "importCharacterExtractHint",
+  outline_expand: "outlineExpandHint",
+  shot_split: "shotSplitHint",
+  single_shot_rewrite: "singleShotRewriteHint",
+};
 
 // Map the UI category to actual registry categories
 const CATEGORY_MAP: Record<string, string[]> = {
@@ -356,9 +367,13 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
         <div className="flex flex-1 flex-col">
           {selectedPrompt ? (
             <>
-              {selectedPromptKey && FRAME_PROMPT_KEYS.has(selectedPromptKey) && (
+              {selectedPromptKey && PROMPT_HINT_I18N[selectedPromptKey] && (
                 <div className="border-b border-amber-200/60 bg-amber-50/80 px-4 py-2.5 text-xs leading-relaxed text-amber-950">
-                  {t("editor.framePromptHint")}
+                  {t(
+                    `editor.${PROMPT_HINT_I18N[selectedPromptKey]}` as Parameters<
+                      typeof t
+                    >[0]
+                  )}
                 </div>
               )}
               {/* Editor header — always visible */}

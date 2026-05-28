@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useProjectStore } from "@/stores/project-store";
 import { apiFetch } from "@/lib/api-fetch";
-import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/character-extract";
+import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { Palette, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 

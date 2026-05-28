@@ -1,7 +1,22 @@
 // ─────────────────────────────────────────────────────────
 // Prompt Registry — Slot Decomposition
-// Decomposes all 12 prompt templates into editable slots.
+// Decomposes all prompt templates into editable slots.
 // ─────────────────────────────────────────────────────────
+
+import {
+  CHARACTER_EXTRACT_DEFAULT_SLOTS,
+  assembleCharacterExtractPrompt,
+} from "./character-extract-defaults";
+import {
+  IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS,
+  assembleImportCharacterExtractPrompt,
+} from "./import-character-extract-defaults";
+import { REF_VIDEO_PROMPT_DEFAULT_SLOTS } from "./ref-video-prompt-defaults";
+import { OUTLINE_EXPAND_SYSTEM_DEFAULT } from "./outline-expand-defaults";
+import {
+  SINGLE_SHOT_REWRITE_DEFAULT_SLOTS,
+  assembleSingleShotRewriteSystem,
+} from "./single-shot-rewrite-defaults";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -337,77 +352,7 @@ const scriptSplitDef: PromptDefinition = {
 };
 
 // ─── 4. character_extract ───────────────────────────────
-
-const CHAR_EXTRACT_ROLE_DEFINITION = `你是一位资深角色设计师、摄影指导和美术总监。你的角色描述是直接输入AI图像生成器的唯一权威视觉参考。你写的每一个字都决定了角色的外观——务必精准、具体、富有画面感。
-
-你的任务：从剧本中提取每个有名字的角色，并生成专业级的视觉规格书，达到真实电影制作宝典的水准。`;
-
-const CHAR_EXTRACT_STYLE_DETECTION = `═══ 第一步——识别视觉风格 ═══
-识别剧本中声明或隐含的风格：
-- "真人" / "写实" / "实拍" / "照片级" → 按真实摄影或高端CG电影描写，绝不使用任何动漫美学。
-- "动漫" / "漫画" / "anime" / "manga" → 按动漫比例、风格化特征、鲜艳色彩描写。
-- "3D CG" / "皮克斯" → 按3D渲染管线描写。
-- "2D卡通" → 按卡通插画描写。
-此风格必须出现在每个角色的描述中。真人风格的剧本绝不能产出动漫风的描述。`;
-
-const CHAR_EXTRACT_OUTPUT_FORMAT = `═══ 输出格式 ═══
-仅JSON数组——不要markdown代码块，不要评论：
-[
-  {
-    "name": "角色名，与剧本中完全一致",
-    "description": "完整视觉规格——单段落，包含以下所有要求",
-    "visualHint": "2-4个字的视觉标识符，用于对白标签（如 银发金瞳、红衣长发）。必须一眼可识别——聚焦最显著的外貌特征。",
-    "personality": "2-3个塑造姿态、表情和动作的核心性格特质"
-  }
-]`;
-
-const CHAR_EXTRACT_DESCRIPTION_REQUIREMENTS = `═══ 描述要求 ═══
-写一段密集、精确的段落，涵盖以下所有方面。该描述将被原封不动地传给图像生成器——以专业摄影指导向摄影师布置任务的口吻书写：
-
-0. 风格标签：以画风开头（如"写实真人电影风格，85mm镜头——"或"日系动漫风格——"），锚定下游渲染器。
-
-1. 体态与气质：性别、表观年龄、身高感（高挑/娇小/中等）、体型（精瘦/纤细/健壮/敦实）、自然姿态和举止。
-
-2. 面部——以特写镜头的方式描写：
-   - 骨骼结构：脸型、颧骨、下颌线（锐利/柔和/棱角分明）、眉骨
-   - 眼睛：形状（杏眼/圆眼/丹凤眼/单眼皮）、大小、瞳色（要具体，如"暴风灰"、"琥珀棕"、"深黑如墨"）、睫毛浓密度
-   - 鼻子：鼻梁高度、鼻尖形状、鼻翼宽度
-   - 嘴唇：厚薄、唇弓弧度、自然静态表情
-   - 皮肤：用精确修饰词描述色调（如"瓷白冷调"、"暖蜜金"、"深檀木色蓝调底"），质感（通透/哑光/粗粝），斑点/痣等
-   - 整体：直接描述颜值定位——模特级美人、硬朗帅气、邻家亲切感？
-
-3. 发型：精确颜色（色相+底调，如"蓝黑色带深靛蓝光泽"），相对于身体的长度，质地（笔直/大波浪/紧卷），样式（如何蓬起、垂落、运动），发饰。
-
-4. 服装——主要造型（完整穿搭分解）：
-   - 上装：款式、剪裁、材质（如"修身石灰色羊毛中山领外套"），颜色
-   - 下装：裤/裙类型、材质、颜色
-   - 鞋履：款式、材质
-   - 外套/铠甲：如有，逐层描写
-   - 配饰：首饰（金属、宝石、风格）、腰带、包袋、手套、帽子——务必具体
-
-5. 武器与装备（如有）：
-   - 近战武器：刃长、刃型、护手样式、握柄缠绕材质、表面处理（烤蓝/抛光/雕刻），携带方式
-   - 远程武器：弓/枪类型、表面处理、改装细节
-   - 护甲：材质（板甲/锁子甲/皮甲），表面处理，徽记或刻纹
-   - 其他装备：描述功能和外观
-
-6. 标志性特征：伤疤（位置、形状、新旧）、纹身（图案、位置）、眼镜（框型、镜片色调）、机械义体、非人类特征（耳、翼、角、尾）——描述精确的视觉外观。
-
-7. 角色色彩调色板：列出3-5个定义此角色视觉身份的主色（如"深红、磨旧金、炭黑"）。
-
-【示例】
-赛博朋克风格，35mm广角镜头低角度——男，约30岁，190cm精瘦高挑身形，脊背微弓带有黑客的颓废感。棱角分明的长脸，颧骨高耸投下锐利阴影，下颌线如刀削般锋锐，眉骨突出。狭长上挑的狐狸眼，左眼瞳色自然灰绿、右眼为机械义眼散发幽蓝冷光，睫毛稀疏。高挺鹰钩鼻，鼻尖略下弯带有攻击性，鼻翼窄。薄唇苍白，唇角自然下垂，常年不见笑意。肤色病态苍白偏冷青调，质感哑光粗粝，左颊从眼角到嘴角一道细长的银色机械缝合疤痕，沿疤痕嵌有微型蓝色LED指示灯。属于阴郁危险的暗夜猎手型。头发铂银白色带荧光紫挑染，右侧剃至3mm露出头皮上的电路纹身，左侧长发遮住半边脸垂至下巴，发尾参差不齐如刀割。上身破旧的哑光黑色合成皮夹克，立领，左肩焊接一块钛合金护甲片，内搭深灰色高科技速干背心，胸口印有褪色的红色骷髅标志。下身黑色工装机能裤，膝盖处缝有凯夫拉补丁，裤腿束入小腿处。脚穿磨损严重的黑色高帮军靴，鞋底加厚，鞋舌外翻。左前臂从手肘到手腕整段替换为钛合金机械义肢，关节处露出液压管线和微型齿轮，指尖是碳纤维材质。右手无名指戴一枚氧化发黑的钨钢戒指。腰后别一把折叠式等离子短刀，刀柄缠绕磨旧的红色伞绳。角色色彩调色板：哑光黑、铂银白、荧光紫、幽蓝冷光、锈红。`;
-
-const CHAR_EXTRACT_WRITING_RULES = `═══ 书写规则 ═══
-- 单段连续描写——description字段内不要使用项目符号或换行
-- 要具体到让两个不同的AI图像生成器能生成辨认得出是同一个角色的图像
-- 使用精确的颜色名：不要用"红色"而要用"血红"或"玫瑰粉"
-- 颜值很重要——如果剧本暗示角色有吸引力，就写出真正惊艳的美感。使用高端时尚摄影和影视选角的专业语汇。
-- 对非人类角色，以同样的解剖学精度描写其独特特征`;
-
-const CHAR_EXTRACT_LANGUAGE_RULES = `【关键语言规则】所有字段必须使用与剧本相同的语言。中文剧本 → 中文输出。英文剧本 → 英文输出。角色名必须与剧本中完全一致。
-
-仅返回JSON数组。不要markdown。不要评论。`;
+// Runtime: resolveCharacterExtractSystemPrompt — injects {STYLE_INSTRUCTION} from project visualStyle.
 
 const characterExtractDef: PromptDefinition = {
   key: "character_extract",
@@ -415,86 +360,27 @@ const characterExtractDef: PromptDefinition = {
   descriptionKey: "promptTemplates.prompts.characterExtractDesc",
   category: "character",
   slots: [
-    slot("role_definition", CHAR_EXTRACT_ROLE_DEFINITION, true),
-    slot("style_detection", CHAR_EXTRACT_STYLE_DETECTION, true),
-    slot("output_format", CHAR_EXTRACT_OUTPUT_FORMAT, false),
+    slot("role_definition", CHARACTER_EXTRACT_DEFAULT_SLOTS.role_definition, true),
+    slot("scope_rules", CHARACTER_EXTRACT_DEFAULT_SLOTS.scope_rules, true),
+    slot("style_detection", CHARACTER_EXTRACT_DEFAULT_SLOTS.style_detection, true),
+    slot("deduplication", CHARACTER_EXTRACT_DEFAULT_SLOTS.deduplication, true),
+    slot("coverage_check", CHARACTER_EXTRACT_DEFAULT_SLOTS.coverage_check, true),
+    slot("output_format", CHARACTER_EXTRACT_DEFAULT_SLOTS.output_format, false),
     slot(
       "description_requirements",
-      CHAR_EXTRACT_DESCRIPTION_REQUIREMENTS,
+      CHARACTER_EXTRACT_DEFAULT_SLOTS.description_requirements,
       true
     ),
-    slot("writing_rules", CHAR_EXTRACT_WRITING_RULES, true),
-    slot("language_rules", CHAR_EXTRACT_LANGUAGE_RULES, false),
+    slot("writing_rules", CHARACTER_EXTRACT_DEFAULT_SLOTS.writing_rules, true),
+    slot("language_rules", CHARACTER_EXTRACT_DEFAULT_SLOTS.language_rules, false),
   ],
   buildFullPrompt(sc) {
-    const s = this.slots;
-    const r = (k: string) => resolve(sc, s, k);
-    return [
-      r("role_definition"),
-      "",
-      r("style_detection"),
-      "",
-      r("output_format"),
-      "",
-      r("scope_rules"),
-      "",
-      r("description_requirements"),
-      "",
-      r("writing_rules"),
-      "",
-      r("language_rules"),
-    ].join("\n");
+    return assembleCharacterExtractPrompt(sc);
   },
 };
 
 // ─── 5. import_character_extract ────────────────────────
-
-const IMPORT_CHAR_ROLE_DEFINITION = `你是一位资深角色设计师、摄影指导和美术总监。你的任务是从给定文本中提取所有有名字的角色，估算出现频率，并为每个角色生成专业级视觉规格书。`;
-
-const IMPORT_CHAR_EXTRACTION_RULES = `规则：
-1. 提取文本中每一个被命名的角色
-2. 统计每个角色的大致出现/被提及次数
-3. 被提及2次以上的很可能是主要角色
-4. 合并明显的别名（如"小明"和"明哥"指同一个人）
-5. 「name」字段须与剧本文面一致：若正文前有「系统提取·角色标准名」「CAST」「角色标准名」等**制表区块**，其中列出的称呼即为权威 name 字符串，逐字沿用、勿改写。若无此类区块，则：成年角色避免「（25岁）」等与裸名重复的纯年龄括注（年龄写入 description）；**同一人物若存在明显不同的儿少/成年造型**，须分两条并在 name 上可区分（如括注年龄或「儿时」）。武器名不要单独当角色。
-
-═══ 第一步——识别视觉风格 ═══
-识别文本中声明或隐含的风格：
-- "真人" / "写实" / "实拍" / 历史题材 → 按写实电影风格描写，不使用任何动漫美学。
-- "动漫" / "漫画" / "anime" / "manga" → 按动漫比例、风格化特征描写。
-- "3D CG" / "皮克斯" → 按3D渲染描写。
-- 如未指定风格，根据内容推断（历史文本 → 写实历史正剧风格）。
-
-═══ 描述要求 ═══
-"description"字段必须是一段密集的段落，涵盖以下所有方面，以专业摄影指导的口吻书写：
-
-0. 风格标签：以画风开头（如"电影级写实历史正剧风格，无滤镜，85mm镜头特写——"）
-1. 【体态】：性别、表观年龄、身高/体型、姿态、气质
-2. 【面部】：脸型、下颌线、眉骨、眼型/瞳色、鼻型、嘴唇、肤色（精确描述）、皮肤质感、颜值定位
-3. 【发型】：精确颜色、长度、样式、发饰
-4. 【服装】：完整穿搭分解——上装、下装、鞋履、外套、配饰，注明材质和颜色
-5. 【武器/装备】（如有）：武器、铠甲、装备的详细描写
-6. 【色彩调色板】：3-5个定义此角色视觉身份的主色
-
-【示例】
-电影级写实历史正剧风格，无滤镜，85mm镜头特写——男，约45岁，身高约178cm，体型魁梧厚实但不臃肿，站姿沉稳如山，双肩微微后展透出帝王威压。方正国字脸，颧骨高耸，下颌线刚硬如刀削，眉骨隆起投下深邃阴影。丹凤眼窄长上挑，瞳色极深近乎纯黑，目光阴鸷锐利如鹰隼。鼻梁高挺笔直，鼻尖略呈鹰钩，鼻翼不宽。薄唇紧抿，唇线下弯，自然流露出冷峻威严。肤色深麦色暖调，面部肌理粗粝，法令纹深刻，额角有隐约的岁月痕迹。属于令人畏惧的帝王级气场。花白短髯修剪齐整，头戴十二旒冕冠，黑色旒珠垂落遮挡部分面容。身穿明黄色龙袍，五爪金龙盘踞前胸，金线满绣云纹海水江崖纹，袖口镶赤金色回纹宽边。腰系白玉带钩嵌红宝石的御带。脚蹬黑色缎面朝靴。角色色彩调色板：明黄、赤金、纯黑、白玉色、深麦色。
-
-═══ 视觉标识 ═══
-"visualHint"字段必须是2-4个字的外貌标签，用于即时视觉识别（如"龙袍金冠阴沉脸"、"大红直身佩刀"）。必须描述外貌，不是动作。
-
-【关键语言规则】所有输出字段必须使用与原文相同的语言。`;
-
-const IMPORT_CHAR_OUTPUT_FORMAT = `输出格式——仅JSON数组，不要markdown代码块，不要评论：
-[
-  {
-    "name": "与剧本标准名表或正文称呼一致",
-    "frequency": 5,
-    "description": "完整视觉规格——一段密集的段落，遵循以上所有要求",
-    "visualHint": "2-4个字的外貌标识符"
-  }
-]
-
-仅返回JSON数组。不要markdown。不要评论。`;
+// Runtime: resolveImportCharacterExtractSystem — injects {STYLE_INSTRUCTION} from project visualStyle.
 
 const importCharacterExtractDef: PromptDefinition = {
   key: "import_character_extract",
@@ -502,14 +388,20 @@ const importCharacterExtractDef: PromptDefinition = {
   descriptionKey: "promptTemplates.prompts.importCharacterExtractDesc",
   category: "character",
   slots: [
-    slot("role_definition", IMPORT_CHAR_ROLE_DEFINITION, true),
-    slot("extraction_rules", IMPORT_CHAR_EXTRACTION_RULES, true),
-    slot("output_format", IMPORT_CHAR_OUTPUT_FORMAT, false),
+    slot("role_definition", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.role_definition, true),
+    slot("extraction_rules", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.extraction_rules, true),
+    slot("style_instruction", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.style_instruction, true),
+    slot(
+      "description_requirements",
+      IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.description_requirements,
+      true
+    ),
+    slot("visual_hint_rules", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.visual_hint_rules, true),
+    slot("language_rules", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.language_rules, false),
+    slot("output_format", IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS.output_format, false),
   ],
   buildFullPrompt(sc) {
-    const s = this.slots;
-    const r = (k: string) => resolve(sc, s, k);
-    return [r("role_definition"), "", r("extraction_rules"), "", r("output_format")].join("\n");
+    return assembleImportCharacterExtractPrompt(sc);
   },
 };
 
@@ -1387,38 +1279,7 @@ const videoGenerateDef: PromptDefinition = {
 };
 
 // ─── 11. ref_video_prompt ───────────────────────────────
-
-const REF_VIDEO_PROMPT_ROLE_DEFINITION = `你是一位AI视频提示词撰写专家，熟悉 Seedance、Kling、Jimeng Video、Veo 等主流视频生成模型的提示词风格。给定一个镜头的首帧（起始状态）和尾帧（结束状态），加上剧本上下文，撰写精确的动态提示词，描述两帧之间的过渡。
-
-## 核心原则
-视频模型将首帧作为起点。你的工作是精确描述如何从首帧过渡到尾帧——什么在动，怎么动，什么时候动。仔细研究两帧：注意角色位置、表情、光线、镜头角度和环境在两帧之间的变化。`;
-
-const REF_VIDEO_PROMPT_MOTION_RULES = `## 规则
-- 格式：Seedance 2.0 六段式散文（无需写标签，顺序组织）：①主体 ②核心动作（单一动词） ③运镜（起幅→方式+速度→落幅）④场景/光线 ⑤风格（已有画风锁定则保留）⑥约束（如「禁止写实风」「禁止角色变形」）
-- 匹配剧本上下文的语言（中文剧本 → 中文提示词，英文 → 英文），纯散文，无标签
-- 首次提及时："角色名（视觉标识）"——使用下方角色视觉标识中提供的精确标识符。绝不自行编造替代品。
-- 核心动作：每个镜头只有【一个动词动作】，带解剖学细节——关节/力道/速度/弧线方向（例："右脚踏地同时横臂劈出"而非"挥刀攻击"）
-- 运镜：是质量最关键的杠杆，必须明确起幅构图→运动速度+方式→落幅构图（例："镜头从中景缓慢推至颈部以上近景"而非"推镜"）
-- 将动作拆解为精确的节拍，有清晰的因果关系：先发生什么 → 然后 → 结果
-- 环境动态：仅在有动态时描写（摇曳的枝条、升腾的雾气、闪烁的灯光）
-- 光源：具体光源位置+色温（例："右侧篝火3000K暖光，背后月光蓝白轮廓"），禁止写"好看的光"
-- 字数：40-80字（复杂动作场景可适当延长）
-- 如有对白，保持原文语言，独立一行放在最后：【对白口型】角色名（视觉标识）: "原文台词"
-- 仅输出提示词，无前言`;
-
-const REF_VIDEO_PROMPT_QUALITY_BENCHMARK = `## 质量基准
-
-差（笼统，侧重外貌描写）：
-他的手指散发出温暖的光芒，优雅地落下棋子。氛围宁静而美好。
-
-好（精确，侧重动态描写）：
-镜头固定。弈哲（月白长袍）捏住玉棋子，在晨雾中以极慢弧线落下。落子——棋面微震，一颗露珠滚落。手指停顿一拍，然后以一个平滑的动作收回。焦点从指尖转移到落定的棋子。背景垂柳枝条轻轻飘荡。
-
-【示例】
-- "林晓月（米白衬衫黑长发）双手握住自行车把手缓缓刹停，左脚落地踩稳，右手松开车把去拨开面前垂落的花被单，嘴角微微上扬露出无奈的笑意，镜头从全景缓慢推至中近景。"
-- "赵东明（深灰工装夹克）从门框上直起身，夹在指间的烟转了半圈，目光从远处收回聚焦到画面左侧，嘴角的弧度微不可察地加深，镜头固定。"`;
-
-const REF_VIDEO_PROMPT_LANGUAGE_RULES = `匹配剧本上下文的语言。仅输出提示词。`;
+// Runtime: resolveRefVideoPromptSystem picks slot by video protocol (seedance_system / kling_system / …).
 
 const refVideoPromptDef: PromptDefinition = {
   key: "ref_video_prompt",
@@ -1426,22 +1287,19 @@ const refVideoPromptDef: PromptDefinition = {
   descriptionKey: "promptTemplates.prompts.refVideoPromptDesc",
   category: "video",
   slots: [
-    slot("role_definition", REF_VIDEO_PROMPT_ROLE_DEFINITION, true),
-    slot("motion_rules", REF_VIDEO_PROMPT_MOTION_RULES, true),
-    slot("quality_benchmark", REF_VIDEO_PROMPT_QUALITY_BENCHMARK, true),
-    slot("language_rules", REF_VIDEO_PROMPT_LANGUAGE_RULES, false),
+    slot("seedance_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.seedance_system, true),
+    slot("kling_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.kling_system, true),
+    slot("jimeng_video_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.jimeng_video_system, true),
+    slot("veo_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.veo_system, true),
+    slot("generic_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.generic_system, true),
   ],
   buildFullPrompt(sc) {
     const s = this.slots;
     const r = (k: string) => resolve(sc, s, k);
     return [
-      r("role_definition"),
+      "【预览：默认展示 Seedance 插槽；运行时按视频模型协议自动选用 kling_system / jimeng_video_system / veo_system】",
       "",
-      r("motion_rules"),
-      "",
-      r("quality_benchmark"),
-      "",
-      r("language_rules"),
+      r("seedance_system"),
     ].join("\n");
   },
 };
@@ -1570,12 +1428,48 @@ const characterStateRouterDef: PromptDefinition = {
   },
 };
 
+// ─── outline_expand ─────────────────────────────────────
+
+const outlineExpandDef: PromptDefinition = {
+  key: "outline_expand",
+  nameKey: "promptTemplates.prompts.outlineExpand",
+  descriptionKey: "promptTemplates.prompts.outlineExpandDesc",
+  category: "script",
+  slots: [slot("system_prompt", OUTLINE_EXPAND_SYSTEM_DEFAULT, true)],
+  buildFullPrompt(sc) {
+    return sc.system_prompt ?? OUTLINE_EXPAND_SYSTEM_DEFAULT;
+  },
+};
+
+// ─── single_shot_rewrite ────────────────────────────────
+
+const singleShotRewriteDef: PromptDefinition = {
+  key: "single_shot_rewrite",
+  nameKey: "promptTemplates.prompts.singleShotRewrite",
+  descriptionKey: "promptTemplates.prompts.singleShotRewriteDesc",
+  category: "shot",
+  slots: [
+    slot("role_and_task", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.role_and_task, true),
+    slot("step1_self_check", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.step1_self_check, true),
+    slot(
+      "step2_field_standards",
+      SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.step2_field_standards,
+      true
+    ),
+    slot("forbidden_rules", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.forbidden_rules, true),
+  ],
+  buildFullPrompt(sc) {
+    return assembleSingleShotRewriteSystem(sc);
+  },
+};
+
 // ── Registry ─────────────────────────────────────────────
 
 export const PROMPT_REGISTRY: PromptDefinition[] = [
   scriptGenerateDef,
   scriptParseDef,
   scriptSplitDef,
+  outlineExpandDef,
   characterExtractDef,
   importCharacterExtractDef,
   characterImageDef,
@@ -1583,6 +1477,7 @@ export const PROMPT_REGISTRY: PromptDefinition[] = [
   combatImageDef,
   characterStateRouterDef,
   shotSplitDef,
+  singleShotRewriteDef,
   frameGenerateFirstDef,
   frameGenerateLastDef,
   videoGenerateDef,

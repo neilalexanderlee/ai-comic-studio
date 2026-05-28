@@ -18,10 +18,42 @@ flowchart LR
 
 | 层 | 职责 | 代码入口 |
 |----|------|----------|
-| **1. 上游** | `shot_split` / `shot_complete` / `outline_expand` 写出合规字段 | [registry.ts](../src/lib/ai/prompts/registry.ts) |
+| **1. 上游** | 分镜字段 LLM 写出合规 start/end/videoScript 等 | 见下表「提示词分层」 |
 | **2. 组装** | 把 DB 字段拼成模型输入；**不**把 `prompt` 当首/尾帧主画面 | [frame-prompt-context.ts](../src/lib/storyboard/frame-prompt-context.ts)、[frame-generate.ts](../src/lib/ai/prompts/frame-generate.ts)、[video-generate.ts](../src/lib/ai/prompts/video-generate.ts) |
 | **3. 增强** | 按协议改写；推理链由 [sanitize-model-output.ts](../src/lib/ai/sanitize-model-output.ts) 剥离 | [prompt-enhancer.ts](../src/lib/ai/prompt-enhancer.ts) |
 | **4. API** | 图像静帧 / 视频运动 | `generate/route.ts` |
+
+---
+
+## 提示词分层（剧本 vs 分镜 vs 组装）
+
+避免在「提示词管理」里误改期待：**不是所有条目都是 S 级单镜四要素标准**。
+
+| 层级 | 用途 | 是否在提示词管理 | 代表入口 |
+|------|------|------------------|----------|
+| **剧本层** | 大纲、整本剧本、分集、角色规格书 | 是（`script_*`、`character_*`） | `script_generate`、`script_parse`、`script_split`、`character_extract` |
+| **分镜上游** | 切镜 / 单镜重写 → DB 字段 | 是（见下表） | `shot_split`、`single_shot_rewrite` 等 |
+| **组装层** | 把 DB 字段拼成 Seedream/Seedance 输入 | 是（`frame_*`、`video_generate`） | `frame-prompt-context`、`video-generate.ts` |
+| **Vision 精炼** | 看图写 `videoPrompt` | 是（`ref_video_prompt` 按协议插槽） | `resolveRefVideoPromptSystem` |
+
+### 解析分镜：产线实际走哪条路
+
+| 剧本类型 | 代码路径 | 用的提示词 | 是否 LLM |
+|----------|----------|------------|----------|
+| 结构化 md（带分镜块） | `extractShotsFromScript` → `finalizeExtractedShotsForDb` | 无 | 否（尊重作者原文，缺字段保持 null） |
+| 散文 / 无分镜块 | `handleShotSplitStream` → `shot_split` | `shot_split` | 是（一次切镜并写全字段） |
+| 单镜不满意 | 分镜卡片「重新生成文本」 | `single_shot_rewrite` | 是 |
+
+### 分镜上游（已接入 `resolvePrompt` 且产线会调用）
+
+| Registry Key | 运行时 | 说明 |
+|--------------|--------|------|
+| `outline_expand` | `resolveOutlineExpandSystem` | 大纲扩写 system；user 为 `buildOutlineExpandPrompt` |
+| `single_shot_rewrite` | `resolveSingleShotRewriteSystem` + `buildSingleShotRewriteUserPrompt` | system 可配置；`{VISUAL_STYLE_LOCK}` 注入项目画风 |
+
+默认文案：`outline-expand-defaults.ts`、`single-shot-rewrite-defaults.ts`。
+
+已移除 `shot_complete`（历史批量补全，从未接入产线；缺字段请改剧本、`shot_split` 或 `single_shot_rewrite`）。
 
 ---
 
@@ -59,9 +91,12 @@ flowchart LR
 
 ### 提示词管理 UI
 
-- 编辑的是 registry **默认插槽**；用户自定义插槽会覆盖默认文案。
+- 编辑的是 registry **默认插槽**；用户自定义插槽会覆盖默认文案（`resolvePrompt` / `resolveSlotContents`）。
 - **环境镜**走代码内置渲染块，与插槽里「角色占 40–70%」无关。
-- 改版后可在插槽页「恢复默认」同步新文案。
+- **`video_generate`**：预览为插槽拼装 + 占位符；实际送模由 `buildVideoPrompt` / `buildReferenceVideoPrompt` 按分镜字段组装。
+- **`ref_video_prompt`**：预览默认 Seedance 插槽；运行时按视频协议选 `seedance_system` / `kling_system` 等。
+- **`character_extract` / `import_character_extract`**：须保留 `{STYLE_INSTRUCTION}`，运行时注入项目 `visualStyle`。
+- 改版后可在插槽页「恢复默认」；强制清空见 `pnpm prune-prompt-overrides`。
 
 ### 增强开关 `enhancePrompts`
 
@@ -78,13 +113,25 @@ flowchart LR
 |------|------|------|
 | 首尾帧插值 | 有效 `anchor_last_ai` | [buildVideoPrompt](../src/lib/ai/prompts/video-generate.ts)；弱化角色块；简化 FRAME ANCHORS |
 | 首帧参考 | 群演 / 无 AI 尾帧 | [buildReferenceVideoPrompt](../src/lib/ai/prompts/video-generate.ts) |
-| Vision 精炼 | 按钮或 **B2 自动** | [ref-video-prompt-generate.ts](../src/lib/ai/prompts/ref-video-prompt-generate.ts) → 写入 `videoPrompt` |
+| Vision 精炼 | 按钮或 **B2 自动** | `resolveRefVideoPromptSystem`（registry `ref_video_prompt`，按视频协议选插槽）→ 写入 `videoPrompt` |
 
 ### B2：条件自动刷新 `videoPrompt`
 
 - 字段：`shots.video_prompt_frame_fingerprint`（路径 + mtime 指纹）
 - 触发：`single_video_generate` 前，若无 `videoPrompt` 或指纹与当前帧不一致 → 自动 vision 精炼
 - 手动「生成视频提示词」始终可用
+
+---
+
+## 提示词管理 ↔ 运行时（已接 `resolvePrompt`）
+
+| Registry Key | 运行时函数 | 说明 |
+|--------------|------------|------|
+| `character_extract` | `resolveCharacterExtractSystemPrompt` | 插槽默认与产线一致；运行时把 `{STYLE_INSTRUCTION}` 替换为项目 `visualStyle` |
+| `import_character_extract` | `resolveImportCharacterExtractSystem` | 同上（导入剧本抽角色） |
+| `ref_video_prompt` | `resolveRefVideoPromptSystem` | 按 `modelConfig.video.protocol` 选用 `seedance_system` / `kling_system` / `jimeng_video_system` / `veo_system`；预览默认展示 Seedance 插槽 |
+
+代码默认文案来源：`character-extract-defaults.ts`、`import-character-extract-defaults.ts`、`ref-video-prompt-defaults.ts`（避免 registry ↔ resolver 循环依赖）。
 
 ---
 
@@ -97,7 +144,9 @@ flowchart LR
 | `scene_frame_generate` | 旧「场景参考帧」；现由 `frame_generate_first` + `anchor_first` 替代 |
 | `ref_video_generate` | 旧「参考视频」对白插槽；现 `buildReferenceVideoPrompt` 共用 `video_generate.dialogue_format` |
 
-对应 API（`single_scene_frame`、`single_reference_video` 等）仍返回 **410**。DB 里若仍有这两类的自定义插槽覆盖，可手动删除或忽略。
+对应 API（`single_scene_frame`、`single_reference_video` 等）仍返回 **410**。
+
+**DB 恢复默认**：在提示词管理 UI 点「恢复本模板全部默认」，或手动执行 `pnpm prune-prompt-overrides`（会清空已接线三个 key 的全部自定义）。日常 `pnpm dev` 启动仅清理**无效插槽名**与已废弃的 prompt key，不会动你在 UI 里保存的有效自定义。
 
 ---
 
@@ -105,7 +154,7 @@ flowchart LR
 
 | ID | 决策 |
 |----|------|
-| **A** | A1 组装层 + A2 上游文案（`shot_split` / `shot_complete` / WORKFLOW） |
+| **A** | A1 组装层 + A2 上游文案（`shot_split` / WORKFLOW） |
 | **B** | B2 有帧且 prompt 过期时自动 vision 精炼 |
 
 ---
