@@ -6,26 +6,12 @@
 |---|---|
 | **GitHub** | [github.com/neilalexanderlee/ai-comic-studio](https://github.com/neilalexanderlee/ai-comic-studio) |
 | **npm 包名** | `ai-comic-studio` |
-| **建议本地目录** | `ai-comic-studio`（见 [docs/OPEN_SOURCE.md](./docs/OPEN_SOURCE.md)） |
-
-社区交流：[https://linux.do/](https://linux.do/)
-
-> v0.2.2
 
 AI 驱动的漫剧工坊 — 从剧本到动画视频的全自动流水线。
 
 📺 **系统介绍 / Demo**：[Bilibili — AI漫剧工坊](https://b23.tv/3xzE8uz)
 
 > 基于 [AIComicBuilder](https://github.com/twwch/AIComicBuilder)（Apache-2.0）演进。上游致谢与版权说明见 [NOTICE](./NOTICE)。
-
-添加飞书群：
-
-![飞书群](images/lark-chat.png)
-
-本网站全程由 AI 驱动开发， 开发指南：https://github.com/twwch/vibe-coding
-
-
-
 
 ## 功能特性
 
@@ -360,7 +346,6 @@ src/
 本项目采用 [Apache License 2.0](./LICENSE)。
 
 - 版权与衍生说明：[NOTICE](./NOTICE)
-- 首次开源 / 改目录名 / 推送 GitHub：[docs/OPEN_SOURCE.md](./docs/OPEN_SOURCE.md)
 
 
 
