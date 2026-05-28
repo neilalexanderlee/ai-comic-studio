@@ -48,6 +48,16 @@
 
 ## 2. 当前实现（与代码一致）
 
+### 2.0 首帧 prompt 语义（`first-frame-prompt.ts` + `frame_generate_first`）
+
+| 字段 | 用途 |
+|------|------|
+| `startFrameDesc` | **首帧唯一画面依据**（动作开始前的静止态） |
+| `prompt`（场景描述） | 镜头整体情节；有 `startFrameDesc` 时仅作「禁止画进首帧」的上下文 |
+| `cameraDirection` | 仅 **起幅** 段注入首帧（`→` 后的跳切/特写不进首帧） |
+| 群演/无具名角色 | `shotKind=environment`：不用「角色占 40–70%」，改用环境主体渲染块 |
+| `frameReference` | `frameReferenceMode=continuity`：参考图按镜间衔接规则，非角色设定图 |
+
 ### 2.1 生成画面 `single_frame_generate`
 
 | 参数 | 说明 |

@@ -15,6 +15,8 @@
  */
 
 import type { AIProvider } from "./types";
+import { sanitizeEnhancedPromptOutput } from "./sanitize-model-output";
+import { compressFramePromptForEnhancement } from "@/lib/storyboard/compress-frame-prompt-for-enhance";
 
 // ── Per-protocol system prompts ──────────────────────────────────────────────
 
@@ -129,7 +131,9 @@ const IMAGE_ENHANCE_SYSTEM_PROMPTS: Record<string, string> = {
 - 质量词：masterpiece, best quality, highly detailed, sharp linework, 8K
 - 禁止：多个光源并列 / 堆砌多层场景细节 / 写运动过程（只写静止状态）
 
-输出格式：「视频静帧画面。」开头，逗号分隔的纯提示词，无标签无解释，180字以内`,
+输入可能是从分镜组装器摘出的「结构化摘要」，不是最终送图文本；你的任务是把它改写成一条短静帧 prompt。
+输出格式：「视频静帧画面。」开头，逗号分隔的纯提示词，无标签无解释，180字以内
+严禁输出思考过程、markdown 标题、编号列表或任何解释，只输出一行最终提示词`,
 
   /**
    * Kling Image (可图): 可灵图片生成
@@ -231,7 +235,8 @@ const GENERIC_IMAGE_SYSTEM_PROMPT = `你是一位资深动画导演，正在为 
 async function enhancePrompt(
   rawPrompt: string,
   systemPrompt: string,
-  textProvider: AIProvider
+  textProvider: AIProvider,
+  sanitizeOptions?: { requiredPrefix?: string; maxTokens?: number }
 ): Promise<string> {
   if (!rawPrompt.trim()) return rawPrompt;
 
@@ -239,10 +244,15 @@ async function enhancePrompt(
     const enhanced = await textProvider.generateText(rawPrompt, {
       systemPrompt,
       temperature: 0.3,
-      maxTokens: 600,
+      maxTokens: sanitizeOptions?.maxTokens ?? 600,
     });
-    const trimmed = enhanced.trim();
-    return trimmed || rawPrompt;
+    const cleaned = sanitizeEnhancedPromptOutput(enhanced, rawPrompt, sanitizeOptions);
+    if (cleaned !== enhanced.trim() && enhanced.includes("<think>")) {
+      console.warn(
+        "[PromptEnhancer] Stripped reasoning from enhanced output; using sanitized prompt"
+      );
+    }
+    return cleaned || rawPrompt;
   } catch (err) {
     console.warn("[PromptEnhancer] Enhancement failed, using original prompt:", err);
     return rawPrompt;
@@ -265,7 +275,7 @@ export async function enhanceVideoPrompt(
 ): Promise<string> {
   const systemPrompt =
     VIDEO_ENHANCE_SYSTEM_PROMPTS[protocol] ?? GENERIC_VIDEO_SYSTEM_PROMPT;
-  return enhancePrompt(rawPrompt, systemPrompt, textProvider);
+  return enhancePrompt(rawPrompt, systemPrompt, textProvider, { maxTokens: 800 });
 }
 
 /**
@@ -282,5 +292,15 @@ export async function enhanceImagePrompt(
 ): Promise<string> {
   const systemPrompt =
     IMAGE_ENHANCE_SYSTEM_PROMPTS[protocol] ?? GENERIC_IMAGE_SYSTEM_PROMPT;
-  return enhancePrompt(rawPrompt, systemPrompt, textProvider);
+  const requiredPrefix = protocol === "doubao" ? "视频静帧画面。" : undefined;
+  const enhanceInput = compressFramePromptForEnhancement(rawPrompt);
+  if (enhanceInput.length < rawPrompt.length) {
+    console.log(
+      `[PromptEnhancer] Frame prompt compressed for enhance: ${rawPrompt.length} → ${enhanceInput.length} chars`
+    );
+  }
+  return enhancePrompt(enhanceInput, systemPrompt, textProvider, {
+    requiredPrefix,
+    maxTokens: 512,
+  });
 }

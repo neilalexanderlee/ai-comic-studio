@@ -19,6 +19,7 @@ vi.mock("@/lib/ai/prompts/resolver", () => ({
 }));
 
 import { buildFirstFramePrompt, buildLastFramePrompt } from "@/lib/ai/prompts/frame-generate";
+import { buildReferenceVideoPrompt, buildVideoPrompt } from "@/lib/ai/prompts/video-generate";
 
 // ── buildFirstFramePrompt ────────────────────────────────────────────────────
 
@@ -117,5 +118,34 @@ describe("buildLastFramePrompt", () => {
       visualStyleTag: "写实电影风格，胶片颗粒",
     });
     expect(result).toContain("写实电影风格");
+  });
+
+});
+
+describe("buildVideoPrompt slim anchors", () => {
+  it("uses short frame anchor hint when visual frames attached", () => {
+    const result = buildVideoPrompt({
+      videoScript: "龙渊拔剑，镜头缓推。",
+      cameraDirection: "dolly in",
+      startFrameDesc: "龙渊握剑柄特写",
+      endFrameDesc: "剑已出鞘半身",
+      hasVisualFrameAnchors: true,
+      characters: [{ name: "龙渊", visualHint: "黑甲", description: "x".repeat(300) }],
+    });
+    expect(result).toContain("attached as images");
+    expect(result).not.toContain("剑已出鞘");
+    expect(result).toContain("在场角色");
+    expect(result).not.toContain("【体态】");
+  });
+
+  it("crowd shot has no long character block in reference mode", () => {
+    const result = buildReferenceVideoPrompt({
+      videoScript: "人群奔逃。",
+      cameraDirection: "static",
+      characters: [],
+      slimCharacterSection: true,
+    });
+    expect(result).not.toContain("[CHARACTERS]");
+    expect(result).not.toContain("角色形象");
   });
 });

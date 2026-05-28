@@ -145,6 +145,8 @@ export const shots = sqliteTable("shots", {
   remoteVideoLastDownloadAt: integer("remote_video_last_download_at", { mode: "timestamp" }),
   videoScript: text("video_script"),
   videoPrompt: text("video_prompt"),
+  /** 首/尾帧路径+mtime 指纹；与 videoPrompt 对照以触发 B2 自动 vision 刷新 */
+  videoPromptFrameFingerprint: text("video_prompt_frame_fingerprint"),
   episodeId: text("episode_id").references(() => episodes.id, {
     onDelete: "cascade",
   }),

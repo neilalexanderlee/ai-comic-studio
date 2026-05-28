@@ -123,4 +123,14 @@ describe("enhanceImagePrompt", () => {
     const result = await enhanceImagePrompt("my image prompt", "kling", provider as never);
     expect(result).toBe("my image prompt");
   });
+
+  it("falls back to raw prompt when doubao enhancement is only reasoning chain", async () => {
+    const raw =
+      "视频静帧画面。远景俯视，静谧小镇，masterpiece, best quality, 8K";
+    const provider = makeTextProvider(`<think>
+用户需要我整理分镜关键帧提示词。**核心要求：** 180字以内
+</think>`);
+    const result = await enhanceImagePrompt(raw, "doubao", provider as never);
+    expect(result).toBe(raw);
+  });
 });

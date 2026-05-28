@@ -53,6 +53,14 @@ import {
   collectVisionFramePaths,
   shouldUseFirstFrameVideoMode,
 } from "@/lib/storyboard/shot-video-readiness.server";
+import {
+  pickFirstFramePromptBuildParams,
+  pickLastFramePromptBuildParams,
+} from "@/lib/storyboard/frame-prompt-context";
+import {
+  generateAndPersistVisionVideoPrompt,
+  syncVideoPromptIfStale,
+} from "@/lib/storyboard/shot-video-prompt-sync.server";
 import { resolveDeprecatedGenerateAction } from "@/lib/storyboard/generate-route-deprecations";
 import { buildVideoCutPointUpdate } from "@/lib/storyboard/video-cut-point";
 
@@ -1548,27 +1556,37 @@ async function handleFramePromptPreview(
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
-  const previewCleanedCamera = shot.cameraDirection?.replace(/^\*+\s*/, "").replace(/\*+$/, "").trim() || undefined;
+  const previewShotChars = filterShotCharacters(
+    buildShotCharacterText(shot),
+    projectCharacters
+  );
 
-  const firstPrompt = buildFirstFramePrompt({
-    sceneDescription: shot.prompt || "",
-    startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-    characterDescriptions,
-    previousLastFrame: previousShot?.anchorLastAi || undefined,
-    visualStyleTag: previewVisualStyleTag,
-    cameraDirection: previewCleanedCamera,
-    slotContents: frameFirstSlots,
-  });
+  const firstPrompt = buildFirstFramePrompt(
+    pickFirstFramePromptBuildParams({
+      shot,
+      characterDescriptions,
+      namedCharacterCount: previewShotChars.length,
+      hasContinuityReference: false,
+      hasCharacterSheetRefs: previewShotChars.length > 0,
+      visualStyleTag: previewVisualStyleTag,
+      cameraDirection: shot.cameraDirection ?? undefined,
+      slotContents: frameFirstSlots,
+      previousLastFrame: previousShot?.anchorLastAi || undefined,
+    })
+  );
 
-  const lastPrompt = buildLastFramePrompt({
-    sceneDescription: shot.prompt || "",
-    endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-    characterDescriptions,
-    firstFramePath: shot.anchorFirst || previousShot?.anchorLastAi || "first-frame-reference",
-    visualStyleTag: previewVisualStyleTag,
-    cameraDirection: previewCleanedCamera,
-    slotContents: frameLastSlots,
-  });
+  const lastPrompt = buildLastFramePrompt(
+    pickLastFramePromptBuildParams({
+      shot,
+      characterDescriptions,
+      namedCharacterCount: previewShotChars.length,
+      hasAnchorFirst: !!(shot.anchorFirst || previousShot?.anchorLastAi),
+      hasCharacterSheetRefs: previewShotChars.length > 0,
+      visualStyleTag: previewVisualStyleTag,
+      cameraDirection: shot.cameraDirection ?? undefined,
+      slotContents: frameLastSlots,
+    })
+  );
 
   return NextResponse.json({
     shotId,
@@ -1711,14 +1729,18 @@ async function handleSingleFrameGenerate(
       const refImages = continuityRef
         ? [continuityRef.path, ...charRefImages]
         : charRefImages;
-      const firstPromptRaw = buildFirstFramePrompt({
-        sceneDescription: shot.prompt || "",
-        startFrameDesc: shot.startFrameDesc || shot.prompt || "",
-        characterDescriptions: characterDescriptionsWithHints,
-        visualStyleTag: singleVisualStyleTag,
-        cameraDirection: singleCleanedCamera,
-        slotContents: frameFirstSlots,
-      });
+      const firstPromptRaw = buildFirstFramePrompt(
+        pickFirstFramePromptBuildParams({
+          shot,
+          characterDescriptions: characterDescriptionsWithHints,
+          namedCharacterCount: charsForFrame.length,
+          hasContinuityReference: !!continuityRef,
+          hasCharacterSheetRefs: !continuityRef && charRefImages.length > 0,
+          visualStyleTag: singleVisualStyleTag,
+          cameraDirection: singleCleanedCamera,
+          slotContents: frameFirstSlots,
+        })
+      );
       const firstPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(firstPromptRaw, singleImageProtocol, singleTextProvider)
         : firstPromptRaw;
@@ -1766,15 +1788,18 @@ async function handleSingleFrameGenerate(
         await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
         return NextResponse.json({ error: "首帧不存在，请先生成首帧" }, { status: 400 });
       }
-      const lastPromptRaw = buildLastFramePrompt({
-        sceneDescription: shot.prompt || "",
-        endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-        characterDescriptions: characterDescriptionsWithHints,
-        firstFramePath: existingFirstFrame,
-        visualStyleTag: singleVisualStyleTag,
-        cameraDirection: singleCleanedCamera,
-        slotContents: frameLastSlots,
-      });
+      const lastPromptRaw = buildLastFramePrompt(
+        pickLastFramePromptBuildParams({
+          shot,
+          characterDescriptions: characterDescriptionsWithHints,
+          namedCharacterCount: charsForFrame.length,
+          hasAnchorFirst: true,
+          hasCharacterSheetRefs: charRefImages.length > 0,
+          visualStyleTag: singleVisualStyleTag,
+          cameraDirection: singleCleanedCamera,
+          slotContents: frameLastSlots,
+        })
+      );
       const lastPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
         : lastPromptRaw;
@@ -1826,15 +1851,18 @@ async function handleSingleFrameGenerate(
     }
 
     // Both frames: generate anchorLastAi
-    const lastPromptRaw = buildLastFramePrompt({
-      sceneDescription: shot.prompt || "",
-      endFrameDesc: shot.endFrameDesc || shot.prompt || "",
-      characterDescriptions: characterDescriptionsWithHints,
-      firstFramePath,
-      visualStyleTag: singleVisualStyleTag,
-      cameraDirection: singleCleanedCamera,
-      slotContents: frameLastSlots,
-    });
+    const lastPromptRaw = buildLastFramePrompt(
+      pickLastFramePromptBuildParams({
+        shot,
+        characterDescriptions: characterDescriptionsWithHints,
+        namedCharacterCount: charsForFrame.length,
+        hasAnchorFirst: true,
+        hasCharacterSheetRefs: charRefImages.length > 0,
+        visualStyleTag: singleVisualStyleTag,
+        cameraDirection: singleCleanedCamera,
+        slotContents: frameLastSlots,
+      })
+    );
     const lastPrompt = enhancePrompts && singleTextProvider
       ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
       : lastPromptRaw;
@@ -1960,20 +1988,53 @@ async function handleSingleVideoGenerate(
 
     const ratio = (payload?.ratio as string) || "16:9";
 
+    const videoPromptSyncDeps = {
+      stripBgmContent,
+      ensureDialoguesInPrompt,
+      isCharacterOnScreen,
+      stripThinkingBlocks,
+    };
+
+    const { videoPrompt: syncedVideoPrompt, refreshed: videoPromptRefreshed } =
+      await syncVideoPromptIfStale({
+        shot,
+        shotCharacters,
+        shotDialogues,
+        modelConfig,
+        deps: videoPromptSyncDeps,
+      });
+    if (videoPromptRefreshed) {
+      console.log(
+        `[SingleVideoGenerate] Shot ${shot.sequence}: auto-refreshed videoPrompt (B2 frame fingerprint)`
+      );
+    }
+    const shotForVideo = syncedVideoPrompt
+      ? { ...shot, videoPrompt: syncedVideoPrompt }
+      : shot;
+
     const videoModelId = modelConfig?.video?.modelId;
     const videoMaxDuration = getModelMaxDuration(videoModelId);
     const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
 
-    const videoScript = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
+    const videoScript = stripBgmContent(
+      shotForVideo.videoScript || shotForVideo.motionScript || shotForVideo.prompt || "",
+      shotForVideo.bgmNote
+    );
     const videoContextForDialogue = videoScript;
     const onScreenDialogueChars = shotDialogues
       .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-      .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
+      .filter((name) =>
+        isCharacterOnScreen(name, videoContextForDialogue, shotForVideo.startFrameDesc)
+      );
 
     const dialogueList = shotDialogues.map((d) => {
       const char = shotCharacters.find((c) => c.id === d.characterId);
       const characterName = char?.name ?? "Unknown";
-      const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
+      const onScreen = isCharacterOnScreen(
+        characterName,
+        videoContextForDialogue,
+        shotForVideo.startFrameDesc
+      );
       const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
       return {
         characterName,
@@ -1986,35 +2047,39 @@ async function handleSingleVideoGenerate(
     // vision-informed, model-specific prompt — but we still need to:
     //   1. Strip any BGM language the LLM may have included (was based on old motionScript w/ BGM)
     //   2. Inject fresh dialogues from DB (pre-generated prompt may be stale or LLM may have omitted them)
-    const hasPreGeneratedPrompt = !!shot.videoPrompt;
-    // 首帧参考图模式：仅用 anchorFirst；群演镜头或无有效 AI 尾帧文件时走此路径（不因 DB 残留 last_frame 误入首尾帧模式）。
+    const hasPreGeneratedPrompt = !!shotForVideo.videoPrompt;
+    const hasVisualFrameAnchors =
+      !useSingleVideoReferenceMode &&
+      !!shotForVideo.anchorLastAi &&
+      shotFrameFileOnDisk(shotForVideo.anchorLastAi);
     const videoPromptBase = stripBgmContent(
-      shot.videoPrompt || (
-        useSingleVideoReferenceMode
+      shotForVideo.videoPrompt ||
+        (useSingleVideoReferenceMode
           ? buildReferenceVideoPrompt({
               videoScript,
-              cameraDirection: shot.cameraDirection || "static",
+              cameraDirection: shotForVideo.cameraDirection || "static",
               duration: effectiveDuration,
               characters: singleVideoShotChars,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: videoSlots,
               visualStyleTag: singleVideoStyleTag,
-              soundEffectNote: shot.soundEffectNote,
+              soundEffectNote: shotForVideo.soundEffectNote,
+              slimCharacterSection: true,
             })
           : buildVideoPrompt({
               videoScript,
-              cameraDirection: shot.cameraDirection || "static",
-              startFrameDesc: shot.startFrameDesc ?? undefined,
-              endFrameDesc: shot.endFrameDesc ?? undefined,
+              cameraDirection: shotForVideo.cameraDirection || "static",
+              startFrameDesc: shotForVideo.startFrameDesc ?? undefined,
+              endFrameDesc: shotForVideo.endFrameDesc ?? undefined,
               duration: effectiveDuration,
               characters: singleVideoShotChars,
               dialogues: dialogueList.length > 0 ? dialogueList : undefined,
               slotContents: videoSlots,
               visualStyleTag: singleVideoStyleTag,
-              soundEffectNote: shot.soundEffectNote,
-            })
-      ),
-      shot.bgmNote
+              soundEffectNote: shotForVideo.soundEffectNote,
+              hasVisualFrameAnchors,
+            })),
+      shotForVideo.bgmNote
     );
     const singleVideoTextProvider = (enhancePrompts && !hasPreGeneratedPrompt) ? resolveAIProvider(modelConfig) : null;
     const videoPromptEnhanced = enhancePrompts && !hasPreGeneratedPrompt && singleVideoTextProvider
@@ -2041,8 +2106,23 @@ async function handleSingleVideoGenerate(
     };
     const result = await videoProvider.generateVideo(
       useSingleVideoReferenceMode
-        ? { initialImage: shot.anchorFirst, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
-        : { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi!, prompt: videoPrompt, duration: effectiveDuration, ratio, ...(resolution && { resolution }), onRemoteResult: onRemoteResultSingle }
+        ? {
+            initialImage: shotForVideo.anchorFirst!,
+            prompt: videoPrompt,
+            duration: effectiveDuration,
+            ratio,
+            ...(resolution && { resolution }),
+            onRemoteResult: onRemoteResultSingle,
+          }
+        : {
+            anchorFirst: shotForVideo.anchorFirst!,
+            anchorLastAi: shotForVideo.anchorLastAi!,
+            prompt: videoPrompt,
+            duration: effectiveDuration,
+            ratio,
+            ...(resolution && { resolution }),
+            onRemoteResult: onRemoteResultSingle,
+          }
     );
 
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
@@ -2202,61 +2282,22 @@ async function handleSingleVideoPrompt(
     .from(dialogues)
     .where(eq(dialogues.shotId, shotId))
     .orderBy(asc(dialogues.sequence));
-  const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
-  const onScreenDialogueChars = shotDialogues
-    .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
-    .filter((name) => isCharacterOnScreen(name, videoContextForDialogue, shot.startFrameDesc));
-
-  const dialogueList = shotDialogues.map((d) => {
-    const char = shotCharacters.find((c) => c.id === d.characterId);
-    const characterName = char?.name ?? "Unknown";
-    const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
-    const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-    return {
-      characterName,
-      text: d.text,
-      offscreen: !onScreen,
-      visualHint,
-    };
-  });
-
   try {
-    const videoModelId = modelConfig?.video?.modelId;
-    const videoMaxDuration = getModelMaxDuration(videoModelId);
-    const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-    const textProvider = resolveAIProvider(modelConfig);
-    const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
-    // Prefer videoScript (already optimized for video models) over raw motionScript.
-    // Strip BGM first so the LLM never sees BGM descriptions and never writes them into videoPrompt.
-    const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-    // 合并所有文本字段做角色匹配——确保场景描述里的「10岁龙渊」能触发精确年龄匹配，
-    // 即使 videoScript/motionScript 里只写了「龙渊」也不丢失年龄信息
-    const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
-      .filter(Boolean)
-      .join(" ");
-    // 只传本镜头实际出现的角色（filterShotCharacters 无匹配时返回 []，不 fallback 到全量）
-    const filteredCharsForPrompt = filterShotCharacters(allShotText, shotCharacters, {
-      contextText: shot.startFrameDesc ?? undefined,
+    const videoPrompt = await generateAndPersistVisionVideoPrompt({
+      shot,
+      shotCharacters,
+      shotDialogues,
+      modelConfig,
+      deps: {
+        stripBgmContent,
+        ensureDialoguesInPrompt,
+        isCharacterOnScreen,
+        stripThinkingBlocks,
+      },
     });
-    const promptRequest = buildRefVideoPromptRequest({
-      motionScript: motionContext,
-      cameraDirection: shot.cameraDirection || "static",
-      duration: effectiveDuration,
-      frameCount: visionFrames.length,
-      characters: filteredCharsForPrompt,
-      dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-    });
-    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
-    const rawPrompt = await textProvider.generateText(promptRequest, {
-      systemPrompt: refVideoSystem,
-      images: visionFrames,
-    });
-    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
-    // 生成后立即用 DB 对白覆盖——保证 UI 显示的就是最终发给视频模型的完整 prompt
-    const videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
-    const videoPrompt = ensureDialoguesInPrompt(videoPromptRaw, dialogueList);
-    console.log(`\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
-    await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shotId));
+    console.log(
+      `\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+    );
     return NextResponse.json({ shotId, videoPrompt, status: "ok" });
   } catch (err) {
     console.error("[SingleVideoPrompt] Error:", err);
@@ -2284,10 +2325,6 @@ async function handleBatchVideoPrompt(
 
   const eligible = batchShots.filter((s) => collectVisionFramePaths(s).length > 0);
 
-  const textProvider = resolveAIProvider(modelConfig);
-  const refVideoSystem = getRefVideoPromptSystem(modelConfig?.video?.protocol);
-  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
-
   console.log(`[BatchVideoPrompt] Processing ${eligible.length} shots (${batchShots.length} total, ${batchCharacters.length} chars)`);
   const bvpStartTime = Date.now();
 
@@ -2295,7 +2332,6 @@ async function handleBatchVideoPrompt(
     eligible.map(async (shot) => {
       try {
         const shotStart = Date.now();
-        const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
         const visionFrames = collectVisionFramePaths(shot);
         if (visionFrames.length === 0) {
           return { shotId: shot.id, sequence: shot.sequence, status: "error" as const, error: "No frame on disk" };
@@ -2305,48 +2341,18 @@ async function handleBatchVideoPrompt(
           .from(dialogues)
           .where(eq(dialogues.shotId, shot.id))
           .orderBy(asc(dialogues.sequence));
-        const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
-
-        const dialogueList = shotDialogues.map((d) => {
-          const char = batchCharacters.find((c) => c.id === d.characterId);
-          const characterName = char?.name ?? "Unknown";
-          const onScreen = isCharacterOnScreen(characterName, videoContextForDialogue, shot.startFrameDesc);
-          const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-          return {
-            characterName,
-            text: d.text,
-            offscreen: !onScreen,
-            visualHint,
-          };
+        const videoPrompt = await generateAndPersistVisionVideoPrompt({
+          shot,
+          shotCharacters: batchCharacters,
+          shotDialogues,
+          modelConfig,
+          deps: {
+            stripBgmContent,
+            ensureDialoguesInPrompt,
+            isCharacterOnScreen,
+            stripThinkingBlocks,
+          },
         });
-
-        const motionContext = stripBgmContent(shot.videoScript || shot.motionScript || shot.prompt || "", shot.bgmNote);
-        // 合并所有文本字段做角色匹配——确保场景描述里的「10岁龙渊」能触发精确年龄匹配
-        const allBatchShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
-          .filter(Boolean)
-          .join(" ");
-        // 只传本镜头实际出现的角色（filterShotCharacters 无匹配时返回 []，不 fallback 到全量）
-        const filteredCharsForBatchPrompt = filterShotCharacters(allBatchShotText, batchCharacters, {
-          contextText: shot.startFrameDesc ?? undefined,
-        });
-        const promptRequest = buildRefVideoPromptRequest({
-          motionScript: motionContext,
-          cameraDirection: shot.cameraDirection || "static",
-          duration: effectiveDuration,
-          frameCount: visionFrames.length,
-          characters: filteredCharsForBatchPrompt,
-          dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-        });
-        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — SYSTEM PROMPT\n${"=".repeat(80)}\n${refVideoSystem}\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — USER PROMPT\n${"=".repeat(80)}\n${promptRequest}\n${"=".repeat(80)}\n`);
-        const rawPrompt = await textProvider.generateText(promptRequest, {
-          systemPrompt: refVideoSystem,
-          images: visionFrames,
-        });
-        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — LLM RAW OUTPUT\n${"=".repeat(80)}\n${rawPrompt}\n${"=".repeat(80)}\n`);
-        // 生成后立即用 DB 对白覆盖——保证 UI 显示的就是最终发给视频模型的完整 prompt
-        const videoPromptRaw2 = `Duration: ${effectiveDuration}s.\n\n${stripThinkingBlocks(rawPrompt)}`;
-        const videoPrompt = ensureDialoguesInPrompt(videoPromptRaw2, dialogueList);
-        await db.update(shots).set({ videoPrompt }).where(eq(shots.id, shot.id));
         console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
         console.log(`[BatchVideoPrompt] Shot ${shot.sequence} done (${((Date.now() - shotStart) / 1000).toFixed(1)}s, ${visionFrames.length} frames)`);
         return { shotId: shot.id, status: "ok" };

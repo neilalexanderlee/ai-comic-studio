@@ -166,16 +166,18 @@ export async function DELETE(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  await db
-    .delete(promptTemplates)
-    .where(
-      and(
-        eq(promptTemplates.userId, userId),
-        eq(promptTemplates.promptKey, promptKey),
-        eq(promptTemplates.scope, "project"),
-        eq(promptTemplates.projectId, id)
-      )
-    );
+  const slotKey = new URL(request.url).searchParams.get("slotKey");
+  const conditions = [
+    eq(promptTemplates.userId, userId),
+    eq(promptTemplates.promptKey, promptKey),
+    eq(promptTemplates.scope, "project"),
+    eq(promptTemplates.projectId, id),
+  ];
+  if (slotKey) {
+    conditions.push(eq(promptTemplates.slotKey, slotKey));
+  }
+
+  await db.delete(promptTemplates).where(and(...conditions));
 
   return new NextResponse(null, { status: 204 });
 }

@@ -2,6 +2,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModel } from "ai";
 import { jsonrepair } from "jsonrepair";
+import { stripReasoningFromModelOutput } from "./sanitize-model-output";
 
 export interface ProviderConfig {
   protocol: string;
@@ -37,16 +38,7 @@ export function createLanguageModel(config: ProviderConfig): LanguageModel {
  * unescaped quotes, literal newlines, trailing commas, missing brackets, etc.
  */
 export function extractJSON(text: string): string {
-  // Strip <think>...</think> blocks (extended thinking from reasoning models).
-  // Also handles truncated thinking (no closing tag) — strip everything from <think> onward
-  // if there is no </think>, which happens when maxOutputTokens cuts off mid-thought.
-  let processed = text.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-  if (processed.includes("<think>")) {
-    // Truncated thinking block with no closing tag — discard from <think> onward
-    processed = processed.slice(0, processed.indexOf("<think>")).trim();
-  }
-  // Strip HTML comment lines (e.g. <!-- PLAN: ... --> planning comments before the JSON array)
-  processed = processed.replace(/<!--[\s\S]*?-->/g, "").trim();
+  let processed = stripReasoningFromModelOutput(text);
   const match = processed.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = match ? match[1].trim() : processed.trim();
   // Remove non-printable control characters

@@ -40,7 +40,7 @@ ${params.characterDescriptions || "无"}
 ${hintBlock}
 
 当前镜头：
-- 场景描述: ${params.prompt || ""}
+- 场景描述（prompt，镜头情节/场次卡，可含进行态；勿把动态情节写进首尾帧）: ${params.prompt || ""}
 - 首帧: ${params.startFrameDesc || "（待补全）"}
 - 尾帧: ${params.endFrameDesc || "（待补全）"}
 - 动作脚本: ${params.motionScript || "（待补全）"}
@@ -50,7 +50,10 @@ ${hintBlock}
 
 ═══ S 级字段规范（仅对「待补全」字段生效）═══
 
-【startFrameDesc / endFrameDesc】——AI 图像生成锚点
+【prompt（场景描述）】——镜头情节卡，供剪辑/理解场次；Seedream 首/尾帧生成时仅作上下文，不作主画面
+- 可写本镜发生的事、氛围、对白情境；禁止与 startFrameDesc 矛盾（例如 prompt 写「魔族入侵中」而首帧写「静谧小镇」）
+
+【startFrameDesc / endFrameDesc】——AI 图像生成锚点（唯一主依据）
 格式：景别/视角 + 角色精确位置和姿态 + 光线来源和质感 + 情绪身体表现（禁用情绪形容词，改用身体解剖细节）
 - startFrameDesc = 动作开始前的静止状态（不写运动）
 - endFrameDesc = 动作完成后的静止状态，必须与 startFrameDesc 不同，体现这个镜头的起止位移

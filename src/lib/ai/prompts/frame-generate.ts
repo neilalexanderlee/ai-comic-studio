@@ -1,9 +1,17 @@
 import { getPromptDefinition } from "./registry";
+import type {
+  FrameReferenceMode,
+  FrameShotKind,
+} from "@/lib/storyboard/frame-prompt-context";
 
 export function buildFirstFramePrompt(params: {
   sceneDescription: string;
   startFrameDesc: string;
   characterDescriptions: string;
+  /** 具名角色镜头 vs 环境/群演空镜 */
+  shotKind?: FrameShotKind;
+  /** 参考图是镜间衔接帧还是角色设定图 */
+  frameReferenceMode?: FrameReferenceMode;
   previousLastFrame?: string;
   /**
    * 项目画风标签（来自 projects.visualStyle → VISUAL_STYLE_PRESETS[style].tag）。
@@ -27,6 +35,8 @@ export function buildFirstFramePrompt(params: {
       sceneDescription: params.sceneDescription,
       startFrameDesc: params.startFrameDesc,
       characterDescriptions: params.characterDescriptions,
+      shotKind: params.shotKind ?? "character",
+      frameReferenceMode: params.frameReferenceMode ?? "none",
       previousLastFrame: params.previousLastFrame,
       visualStyleTag: params.visualStyleTag,
       cameraDirection: params.cameraDirection,
@@ -111,6 +121,9 @@ export function buildLastFramePrompt(params: {
   endFrameDesc: string;
   characterDescriptions: string;
   firstFramePath?: string;
+  shotKind?: FrameShotKind;
+  hasAnchorFirst?: boolean;
+  hasCharacterSheetRefs?: boolean;
   /** 项目画风标签（同 buildFirstFramePrompt），锁定尾帧画风一致性。 */
   visualStyleTag?: string;
   /** 运镜方向，用于指定尾帧构图视角。 */
@@ -125,6 +138,9 @@ export function buildLastFramePrompt(params: {
       sceneDescription: params.sceneDescription,
       endFrameDesc: params.endFrameDesc,
       characterDescriptions: params.characterDescriptions,
+      shotKind: params.shotKind ?? "character",
+      hasAnchorFirst: params.hasAnchorFirst ?? !!params.firstFramePath,
+      hasCharacterSheetRefs: params.hasCharacterSheetRefs ?? false,
       visualStyleTag: params.visualStyleTag,
       cameraDirection: params.cameraDirection,
       sceneTitle: params.sceneTitle,

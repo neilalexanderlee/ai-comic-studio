@@ -16,9 +16,20 @@ function extractAppearanceForVideo(description: string): string {
   return content.slice(0, 200).trimEnd();
 }
 
-function buildCharacterSection(characters?: CharacterRef[]): string[] {
+function buildCharacterSection(
+  characters?: CharacterRef[],
+  options?: { slim?: boolean }
+): string[] {
   const valid = (characters ?? []).filter((c) => c.name && (c.visualHint || c.description));
   if (!valid.length) return [];
+
+  if (options?.slim) {
+    const labels = valid.map((c) => {
+      const hint = c.visualHint ? `（${c.visualHint}）` : "";
+      return `${c.name}${hint}`;
+    });
+    return [`在场角色（外貌以参考帧为准）：${labels.join("、")}`, ``];
+  }
 
   if (valid.length === 1) {
     const c = valid[0];
@@ -28,7 +39,6 @@ function buildCharacterSection(characters?: CharacterRef[]): string[] {
     return [`角色形象：${c.name}${hint}`, ``];
   }
 
-  // 多角色：换行列表格式，方便 Seedance 区分
   const lines = [`角色形象：`];
   for (const c of valid) {
     const hint = c.visualHint ? `（${c.visualHint}）` : "";
@@ -92,6 +102,8 @@ export function buildReferenceVideoPrompt(params: {
   visualStyleTag?: string;
   /** 场景级音效提示（来自 【音效】 标签，注入视频 prompt 引导模型生成原生 SFX）*/
   soundEffectNote?: string | null;
+  /** 参考图已提供角色外貌时，仅保留 visualHint 一行标识 */
+  slimCharacterSection?: boolean;
 }): string {
   const lines: string[] = [];
 
@@ -100,13 +112,16 @@ export function buildReferenceVideoPrompt(params: {
     lines.push(``);
   }
 
-  // 画风硬锁前缀
   if (params.visualStyleTag) {
     lines.push(`【画风硬锁】${params.visualStyleTag}严禁写实风格。严禁3D CG风格。`);
     lines.push(``);
   }
 
-  lines.push(...buildCharacterSection(params.characters));
+  lines.push(
+    ...buildCharacterSection(params.characters, {
+      slim: params.slimCharacterSection ?? (params.characters?.length ?? 0) > 0,
+    })
+  );
 
   lines.push(params.videoScript);
 
@@ -123,7 +138,7 @@ export function buildReferenceVideoPrompt(params: {
     // Resolve dialogue format slot to extract labels
     const dialogueFormatText = resolveSlot(
       params.slotContents,
-      "ref_video_generate",
+      "video_generate",
       "dialogue_format",
       ""
     );
@@ -166,6 +181,8 @@ export function buildVideoPrompt(params: {
   visualStyleTag?: string;
   /** 场景级音效提示（来自 【音效】 标签，注入视频 prompt 引导模型生成原生 SFX）*/
   soundEffectNote?: string | null;
+  /** 首尾帧图像已附：弱化人设块与文字帧锚点 */
+  hasVisualFrameAnchors?: boolean;
 }): string {
   const lines: string[] = [];
 
@@ -174,13 +191,18 @@ export function buildVideoPrompt(params: {
     lines.push(``);
   }
 
-  // 画风硬锁前缀（注入为最高优先级约束，防止视频模型漂移到写实风格）
   if (params.visualStyleTag) {
     lines.push(`【画风硬锁】${params.visualStyleTag}严禁写实风格。严禁3D CG风格。`);
     lines.push(``);
   }
 
-  lines.push(...buildCharacterSection(params.characters));
+  const useSlimChars =
+    params.hasVisualFrameAnchors ?? false;
+  if (!useSlimChars || (params.characters?.length ?? 0) > 0) {
+    lines.push(
+      ...buildCharacterSection(params.characters, { slim: useSlimChars })
+    );
+  }
 
   // Interpolation header from slot or registry default
   const interpolationHeader = resolveSlot(
@@ -206,26 +228,27 @@ export function buildVideoPrompt(params: {
   const hasStart = !!params.startFrameDesc;
   const hasEnd = !!params.endFrameDesc;
   if (hasStart || hasEnd) {
-    // Resolve frame_anchors slot for label text
-    const frameAnchorsText = resolveSlot(
-      params.slotContents,
-      "video_generate",
-      "frame_anchors",
-      ""
-    );
-
-    // Extract anchor header and labels from slot content, or use defaults
-    const anchorHeader = extractAnchorHeader(frameAnchorsText, "[FRAME ANCHORS]");
-    const openingLabel = extractFrameLabel(frameAnchorsText, "首帧", "Opening frame:");
-    const closingLabel = extractFrameLabel(frameAnchorsText, "尾帧", "Closing frame:");
-
-    const duration = params.duration ?? 10;
-
     lines.push(``);
-    lines.push(anchorHeader);
-    // Use timeline format (0s / Xs) for better Seedance 2.0 interpolation
-    if (hasStart) lines.push(`${openingLabel} [0s] ${params.startFrameDesc}`);
-    if (hasEnd) lines.push(`${closingLabel} [${duration}s] ${params.endFrameDesc}`);
+    if (params.hasVisualFrameAnchors) {
+      lines.push(
+        `[FRAME ANCHORS] Opening and closing frames are attached as images. Interpolate motion between them; do not restate full frame descriptions in text.`
+      );
+    } else {
+      const frameAnchorsText = resolveSlot(
+        params.slotContents,
+        "video_generate",
+        "frame_anchors",
+        ""
+      );
+      const anchorHeader = extractAnchorHeader(frameAnchorsText, "[FRAME ANCHORS]");
+      const openingLabel = extractFrameLabel(frameAnchorsText, "首帧", "Opening frame:");
+      const closingLabel = extractFrameLabel(frameAnchorsText, "尾帧", "Closing frame:");
+      const duration = params.duration ?? 10;
+
+      lines.push(anchorHeader);
+      if (hasStart) lines.push(`${openingLabel} [0s] ${params.startFrameDesc}`);
+      if (hasEnd) lines.push(`${closingLabel} [${duration}s] ${params.endFrameDesc}`);
+    }
   }
 
   if (params.dialogues?.length) {

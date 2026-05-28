@@ -17,6 +17,8 @@ import { getModelMaxDuration } from "@/lib/ai/model-limits";
 
 const CATEGORIES = ["all", "script", "character", "storyboard"] as const;
 
+const FRAME_PROMPT_KEYS = new Set(["frame_generate_first", "frame_generate_last"]);
+
 // Map the UI category to actual registry categories
 const CATEGORY_MAP: Record<string, string[]> = {
   script: ["script"],
@@ -52,8 +54,10 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
     getSlotContent,
     setSlotContent,
     clearEdits,
+    resetSlot,
     isDirty,
     setServerOverrides,
+    serverOverrides,
     categoryFilter,
     setCategoryFilter,
     getCustomizedPromptKeys,
@@ -204,6 +208,26 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
     }
   };
 
+  const handleResetSlot = async () => {
+    if (!selectedPromptKey || !selectedSlotKey) return;
+    try {
+      resetSlot(selectedPromptKey, selectedSlotKey);
+      const hasServerOverride = !!serverOverrides[selectedPromptKey]?.[selectedSlotKey];
+      if (hasServerOverride) {
+        await apiFetch(
+          `${templatesBasePath}/${selectedPromptKey}?slotKey=${encodeURIComponent(selectedSlotKey)}`,
+          { method: "DELETE" }
+        );
+        const resp = await apiFetch(templatesBasePath);
+        const data = await resp.json();
+        setServerOverrides(data);
+      }
+      toast.success(t("editor.resetSlotSuccess"));
+    } catch {
+      toast.error("Reset failed");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-96 items-center justify-center text-[--text-muted]">
@@ -332,6 +356,11 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
         <div className="flex flex-1 flex-col">
           {selectedPrompt ? (
             <>
+              {selectedPromptKey && FRAME_PROMPT_KEYS.has(selectedPromptKey) && (
+                <div className="border-b border-amber-200/60 bg-amber-50/80 px-4 py-2.5 text-xs leading-relaxed text-amber-950">
+                  {t("editor.framePromptHint")}
+                </div>
+              )}
               {/* Editor header — always visible */}
               <div className="flex items-center justify-between border-b border-[--border-subtle] px-4 py-2.5">
                 <div className="flex items-center gap-2">
@@ -389,10 +418,22 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                         {t("presets.openPresets")}
                       </Button>
 
+                      {mode === "slots" && selectedSlotKey && selectedSlot?.editable && (
+                        <Button
+                          size="xs"
+                          variant="ghost"
+                          onClick={handleResetSlot}
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                          {t("editor.resetSlot")}
+                        </Button>
+                      )}
+
                       <Button
                         size="xs"
                         variant="ghost"
                         onClick={handleReset}
+                        title={t("editor.resetDefaultHint")}
                       >
                         <RotateCcw className="h-3 w-3" />
                         {t("editor.resetDefault")}

@@ -137,24 +137,26 @@ export async function PUT(
   return NextResponse.json({ error: "Invalid mode" }, { status: 400 });
 }
 
-// DELETE: remove all global templates for this promptKey + userId
+// DELETE: remove global overrides — whole promptKey, or single slot (?slotKey=)
 export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ promptKey: string }> }
 ) {
   const { promptKey } = await params;
   const userId = getUserIdFromRequest(request);
+  const slotKey = new URL(request.url).searchParams.get("slotKey");
 
-  await db
-    .delete(promptTemplates)
-    .where(
-      and(
-        eq(promptTemplates.userId, userId),
-        eq(promptTemplates.promptKey, promptKey),
-        eq(promptTemplates.scope, "global"),
-        isNull(promptTemplates.projectId)
-      )
-    );
+  const conditions = [
+    eq(promptTemplates.userId, userId),
+    eq(promptTemplates.promptKey, promptKey),
+    eq(promptTemplates.scope, "global"),
+    isNull(promptTemplates.projectId),
+  ];
+  if (slotKey) {
+    conditions.push(eq(promptTemplates.slotKey, slotKey));
+  }
+
+  await db.delete(promptTemplates).where(and(...conditions));
 
   return new NextResponse(null, { status: 204 });
 }
