@@ -13,7 +13,7 @@
 | `ref_video_prompt`、`single_shot_rewrite`、`shot_split` 等 registry 默认插槽 | `shots.prompt`、`videoScript`、导入的剧本 |
 | `buildXxxPrompt` 里写死的 **system / 规则 / 正反例** | 单次 API 请求里的 user 消息正文 |
 | UI 保存到 `prompt_templates` 表的 **全局/项目覆盖** | 用户 DB 里的真实剧本、分镜、角色库 |
-| `src/**`、`docs/**` 中的 **示例/测试/Eval/注释** | `scripts/build_libtv_volumes.py` 等用户分卷维护脚本（见 `REPO_DEPLOT_EXCLUDE_RELATIVE`） |
+| `src/**`、`docs/**` 中的 **示例/测试/Eval/注释** | 用户本地维护脚本（若含剧名，勿提交仓库；`scripts/` 现仅通用工具） |
 
 **运行时数据传递**（例如 `Scene description: ${shot.prompt}`）只传字段原文，不在代码里拼接叙事句式。
 
