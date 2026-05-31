@@ -340,6 +340,57 @@ src/
 - 国际化：`next-intl`，支持 zh/en/ja/ko。
 - 前端状态：Zustand（项目、分集、模型配置、提示词编辑状态等）。
 
+## Git 同步（GitHub + 本地 git-server）
+
+本项目配置了两个远程仓库，用途不同：
+
+| 远程名 | 地址 | 用途 |
+|--------|------|------|
+| `origin` | `https://github.com/neilalexanderlee/ai-comic-studio.git` | GitHub 公开仓库 |
+| `local` | `/Users/chenjiewen/git-server/ai-comic-studio.git` | 本机 bare 仓库备份 |
+
+### 日常推送
+
+改完代码后：
+
+```bash
+git status
+git add .
+git commit -m "描述本次改动"
+
+git push origin main   # 推送到 GitHub
+git push local main    # 推送到本地 git-server（可选备份）
+```
+
+两个都推：
+
+```bash
+git push origin main && git push local main
+```
+
+### 首次配置远程（新 clone 时参考）
+
+若仓库还没有 `local` 远程，可按下面方式配置（路径按你的本机 bare 仓库位置调整）：
+
+```bash
+# 若 origin 当前指向本地 bare 仓库，先改名为 local
+git remote rename origin local
+
+# 添加 GitHub 为主远程 origin
+git remote add origin https://github.com/neilalexanderlee/ai-comic-studio.git
+
+git remote -v
+```
+
+首次推送到 GitHub：
+
+```bash
+git push -u origin main
+```
+
+### 不会上传的敏感文件
+
+`.env`、`data/`（含数据库与 API Key）、`uploads/` 已在 `.gitignore` 中，正常 `git push` **不会**把这些文件推到 GitHub 或本地 git-server。推送前可用 `git status` 确认暂存区里没有上述路径。
 
 ## License
 
