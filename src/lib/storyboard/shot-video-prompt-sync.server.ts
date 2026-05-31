@@ -8,6 +8,7 @@ import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
   buildRefVideoPromptRequest,
   resolveRefVideoPromptSystem,
+  resolveVideoMotionAndScene,
 } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { collectVisionFramePaths } from "@/lib/storyboard/shot-video-readiness.server";
@@ -127,10 +128,11 @@ export async function generateAndPersistVisionVideoPrompt(params: {
     };
   });
 
-  const motionContext = deps.stripBgmContent(
-    shot.videoScript || shot.motionScript || shot.prompt || "",
-    shot.bgmNote
-  );
+  const { motionText, sceneDescription: sceneDescRaw } = resolveVideoMotionAndScene(shot);
+  const motionContext = deps.stripBgmContent(motionText || shot.prompt || "", shot.bgmNote);
+  const sceneDescription = sceneDescRaw
+    ? deps.stripBgmContent(sceneDescRaw, shot.bgmNote)
+    : undefined;
   const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
     .filter(Boolean)
     .join(" ");
@@ -140,6 +142,7 @@ export async function generateAndPersistVisionVideoPrompt(params: {
 
   const promptRequest = buildRefVideoPromptRequest({
     motionScript: motionContext,
+    sceneDescription,
     cameraDirection: shot.cameraDirection || "static",
     duration: effectiveDuration,
     frameCount: visionFrames.length,

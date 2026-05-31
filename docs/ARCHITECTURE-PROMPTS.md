@@ -1,6 +1,7 @@
 # Prompt 工程架构 — S 级漫剧（单一事实来源）
 
 > 帧/视频资产语义见 [ARCHITECTURE-FRAMES.md](./ARCHITECTURE-FRAMES.md)。操作见 [WORKFLOW.md](./WORKFLOW.md)。  
+> **默认模板编写规范**见 [PROMPT-TEMPLATE-AUTHORING.md](./PROMPT-TEMPLATE-AUTHORING.md)。  
 > 火山方舟文档见 [docs/APIs/](./APIs/)（Seedream 提示词指南、Seedance 提示词指南、Seedream→Seedance 最佳实践）。
 
 ---

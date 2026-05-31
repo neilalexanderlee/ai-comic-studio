@@ -60,12 +60,13 @@ ${params.characterDescriptions ? `角色参考（仅供理解叙事，帧描述�
 ${frameDescMulti}
 
 【motionScript】—— 精确时间线，总时长精确等于 ${params.duration}s
+▸ 自检：场景描述中的背景情节是否已写入第一段远景？首帧是否与「片中才发生」的事件时序一致？
 
 仅返回 JSON，无 markdown 无注释：
 {
   "startFrameDesc": "首帧静帧：景别/视角，主体+静止姿态，背景关键环境元素，主光颜色+方向+来源",
   "endFrameDesc": "尾帧静帧：景别/视角，主体+稳定落幅姿态，背景关键环境元素，与首帧有可见构图差异",
-  "motionScript": "0-Xs: [动作+镜头]. Xs-${params.duration}s: [续，总时长精确=${params.duration}s].",
+  "motionScript": "0-Xs: [远景建立+镜头；背景随后展开场景描述要点]. Xs-Ys: [续，总时长精确=${params.duration}s].",
   "videoScript": "导演意图一句话+核心动作+镜头运动，散文不超60字",
   "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]"
 }`;

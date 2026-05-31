@@ -570,7 +570,7 @@ PURPOSE: The PRIMARY input to the Seedance video generation model. This single f
 SEEDANCE PROMPT FORMULA: 主体 + 运动（必须）+ 环境（选填）+ 运镜（选填）+ 氛围/感官细节（选填）
 
 FORMAT: 30–60 words of seamless flowing prose. NO section labels. NO dialogue text.
-- Open with character name + brief visual tag in parentheses (e.g. 龙渊（黑甲）).
+- Open with character name + brief visual tag in parentheses (e.g. 角色甲（黑甲）).
   ⚠️ The video model ALREADY sees what the character looks like via the first/last frame images — the tag is for DISAMBIGUATION only (2–4 Chinese characters max). Do NOT re-describe full appearance; focus on what HAPPENS.
 - Describe ONE clear, specific physical action with a single verb — do NOT chain multiple actions
 - Specify camera movement using the formula: 起幅构图 + 运镜动作 + 运镜幅度 + 落幅构图 (e.g. "镜头从胸口中景缓慢推至下颌以上近景")
@@ -586,10 +586,10 @@ Every shot containing dialogue MUST include in the videoScript:
 ③ HOW the expression SHIFTS across the shot: not just "神情专注" but "眉头在最后一字落下时微微松开"
 ④ Camera movement with speed AND endpoint: "镜头从中景缓慢推至颈部以上近景" not just "推镜"
 
-BAD (template, will fail): "龙渊面部表情随台词情绪流动，神情专注，特写推镜。"
-BAD (no physical specificity): "灵瑶看着龙渊，眼神复杂。"
+BAD (template, will fail): "角色甲面部表情随台词情绪流动，神情专注，特写推镜。"
+BAD (no physical specificity): "角色乙看着角色甲，眼神复杂。"
 GOOD (S-grade dialogue):
-"龙渊（黑甲银纹）站于篝火左侧，低头注视灵瑶手心里攥紧的信纸——沉默两秒后缓缓抬眼，下颌微微收紧，说话时声线平稳却带着一丝沙哑；镜头从胸口中景缓慢推至他下颌以上的近景，背景篝火在焦外跳动。"
+"角色甲（黑甲银纹）站于篝火左侧，低头注视角色乙手心里攥紧的信纸——沉默两秒后缓缓抬眼，下颌微微收紧，说话时声线平稳却带着一丝沙哑；镜头从胸口中景缓慢推至他下颌以上的近景，背景篝火在焦外跳动。"
 
 ━━━ ACTION SHOT REQUIREMENTS (S-GRADE) ━━━
 Every shot containing combat or physical action MUST include in the videoScript:
@@ -598,16 +598,16 @@ Every shot containing combat or physical action MUST include in the videoScript:
 ③ Impact/result in one sharp visual: specific spark color, shockwave ripple radius, debris trajectory
 ④ Camera response to action: does it shake, snap-zoom, whip-pan, or hold deliberately still?
 
-BAD (generic): "白夜挥刀攻击炎魔。"
+BAD (generic): "角色丙挥刀攻击巨型敌对单位。"
 GOOD (S-grade action):
-"白夜（白发白和服）从萝拉护盾右侧掠出——右脚踏石地同时横臂劈出霜魂刀，银白刀气如一道凌冽冰河斜斩炎魔右臂重甲，钢铁接触的瞬间炸出白色霜花和蓝光碎星；镜头贴地低角度快速推进，随刀气落点骤然向上仰拍至全景。"
+"角色丙（白发白和服）从队友丁护盾右侧掠出——右脚踏石地同时横臂劈出铭刃，银白刀气如一道凌冽冰河斜斩对方右臂重甲，钢铁接触的瞬间炸出白色霜花和蓝光碎星；镜头贴地低角度快速推进，随刀气落点骤然向上仰拍至全景。"
 
 ━━━ ESTABLISHING / ATMOSPHERE SHOT REQUIREMENTS ━━━
 For wide shots, location reveals, and atmosphere-only shots:
 ① Describe the MOVEMENT within the environment (what is actually moving: foliage, water, smoke, crowds)
 ② Specify the lighting direction and quality (where shadows fall, what is backlit, color temperature)
 ③ Camera movement must create a sense of SCALE or REVEAL
-GOOD: "镜头从地平线高度缓慢升起——星落小镇全景自下而上展开：红灯笼连排在屋檐下微微摇曳，篝火为中心放射出橙黄暖光将木屋轮廓染成剪影，夜空蓝黑色中繁星如盐粒散落；镜头升至屋顶高度后水平向左缓慢平移。"
+GOOD: "镜头从地平线高度缓慢升起——城镇全景自下而上展开：红灯笼连排在屋檐下微微摇曳，篝火为中心放射出橙黄暖光将木屋轮廓染成剪影，夜空蓝黑色中繁星如盐粒散落；镜头升至屋顶高度后水平向左缓慢平移。"
 
 ❌ ABSOLUTELY FORBIDDEN TEMPLATE PATTERNS — generating any of these is a CRITICAL FAILURE:
 - "[场景名]场景，说话人面部表情随台词情绪流动，神情专注"
@@ -636,7 +636,7 @@ const SHOT_SPLIT_START_END_FRAME_RULES = `════════════�
   startFrame & endFrame — Image Generation Anchors
 ═══════════════════════════════════════════════════
 Each must be a SELF-SUFFICIENT image generation prompt containing:
-- SHOT TYPE (景别): use "主体+景别" syntax — e.g. "龙渊的近景" / "灵瑶的半身像" / "两人的中景"
+- SHOT TYPE (景别): use "主体+景别" syntax — e.g. "角色甲的近景" / "角色乙的半身像" / "两人的中景"
   摄影景别词: 远景/全景/中景/近景/特写/极特写
   美术景别词: 头像/胸像/半身像/全身像
 - CAMERA ANGLE (机位/视角):
@@ -662,8 +662,8 @@ Handle transitions WHILE writing each shot. For every shot, silently answer:
 STARTFRAME rules (Q1):
 ▸ Previous = CROWD/WIDE, This = CHARACTER:
   Character already established in sub-location BEFORE the wide shot ends.
-  BAD: "龙渊回头笑着" (mid-action, no environment context)
-  GOOD: "龙渊站于麦垛前，侧身对着镜头，右手尚未伸出，背景是模糊的篝火与镇子轮廓"
+  BAD: "角色甲回头笑着" (mid-action, no environment context)
+  GOOD: "角色甲站于掩体前，侧身对着镜头，右手尚未伸出，背景是模糊的环境光与建筑轮廓"
 
 ▸ Previous = SAME CHARACTERS, SAME LOCATION:
   Match previous shot's lighting direction, costume, background elements exactly.
@@ -675,7 +675,7 @@ ENDFRAME rules (Q2):
 ▸ This = CROWD/WIDE, Next = CHARACTER:
   Camera has ALREADY MOVED toward the sub-location where next shot's characters are.
   BAD: "俯拍全景，村民在篝火旁跳舞" (no spatial lead-in to next shot)
-  GOOD: "镜头从俯拍全景缓推至打谷场外侧，麦垛区居中，两道孩童模糊身影隐于其后"
+  GOOD: "镜头从俯拍全景缓推至集会空地外侧，掩体区居中，两道模糊身影隐于其后"
 
 ▸ This = CHARACTER, Next = CROWD/WIDE:
   Character's gaze or body language faces the direction of the crowd / wider world.

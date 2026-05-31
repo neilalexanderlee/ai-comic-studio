@@ -86,8 +86,27 @@ function countStages(motionScript: string): number {
   return (motionScript.match(/\[\s*\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*\]/g) ?? []).length;
 }
 
+/** 分镜字段拆分：动作主文案 vs 场景描述（shots.prompt） */
+export function resolveVideoMotionAndScene(shot: {
+  prompt?: string | null;
+  videoScript?: string | null;
+  motionScript?: string | null;
+}): { motionText: string; sceneDescription?: string } {
+  const sceneRaw = shot.prompt?.trim() ?? "";
+  const primary = (shot.videoScript || shot.motionScript || "").trim();
+  if (primary) {
+    const motionText = primary;
+    const sceneDescription =
+      sceneRaw && sceneRaw !== primary ? sceneRaw : undefined;
+    return { motionText, sceneDescription };
+  }
+  return { motionText: sceneRaw, sceneDescription: undefined };
+}
+
 export function buildRefVideoPromptRequest(params: {
   motionScript: string;
+  /** 分镜「场景描述」，原样传入供 LLM 综合（规则见 ref_video_prompt system） */
+  sceneDescription?: string;
   cameraDirection: string;
   duration: number;
   frameCount?: number; // 1 = only first frame; 2 = both frames
@@ -113,6 +132,10 @@ export function buildRefVideoPromptRequest(params: {
     lines.push(``);
   }
 
+  if (params.sceneDescription?.trim()) {
+    lines.push(`Scene description: ${params.sceneDescription.trim()}`);
+    lines.push(``);
+  }
   lines.push(`Screenplay action: ${params.motionScript}`);
   lines.push(`⚠️ LOCKED Camera direction (use 起幅+运镜+落幅 formula): ${params.cameraDirection}`);
   lines.push(`Duration: ${params.duration}s`);

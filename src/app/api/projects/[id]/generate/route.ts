@@ -68,6 +68,7 @@ import {
 } from "@/lib/storyboard/shot-video-prompt-sync.server";
 import { resolveDeprecatedGenerateAction } from "@/lib/storyboard/generate-route-deprecations";
 import { buildVideoCutPointUpdate } from "@/lib/storyboard/video-cut-point";
+import { resolveVideoMotionAndScene } from "@/lib/ai/prompts/ref-video-prompt-generate";
 
 export const maxDuration = 300;
 
@@ -1980,8 +1981,9 @@ async function handleSingleVideoGenerate(
     const videoMaxDuration = getModelMaxDuration(videoModelId);
     const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
 
+    const { motionText: videoMotionRaw } = resolveVideoMotionAndScene(shotForVideo);
     const videoScript = stripBgmContent(
-      shotForVideo.videoScript || shotForVideo.motionScript || shotForVideo.prompt || "",
+      videoMotionRaw || shotForVideo.prompt || "",
       shotForVideo.bgmNote
     );
     const videoContextForDialogue = videoScript;

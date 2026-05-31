@@ -62,7 +62,7 @@ Begin your response with ONE line in exactly this format — then write the JSON
 
 <!-- PLAN: Scene1=Ns(Xshots) | Scene2=Ns(Xshots) | ... | Total=Ns(Xshots) -->
 
-Example: <!-- PLAN: 篝火开场=30s(3shots) | 龙渊灵瑶对话=45s(4shots) | 白夜追击=50s(5shots) | 结尾=30s(3shots) | Total=155s(15shots) -->
+Example: <!-- PLAN: 开场建立=30s(3shots) | 双人对话=45s(4shots) | 追逐段落=50s(5shots) | 结尾=30s(3shots) | Total=155s(15shots) -->
 
 Commit to a shot count that reaches ≥${low}s TOTAL. Then write EXACTLY those shots.
 This planning step is MANDATORY — output without it is a protocol violation.

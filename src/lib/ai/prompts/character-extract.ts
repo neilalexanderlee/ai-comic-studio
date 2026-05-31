@@ -58,18 +58,18 @@ Human roles where any same-type person could be substituted with zero story impa
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 INCLUDE (after priority checks above):
-• Personal names: "龙渊" / "灵瑶" / "赤狮" → INCLUDE
-• Relational titles who appear in ANY scene with a named action or described appearance: "龙渊父亲" / "龙渊母亲" / "母亲" / "酒馆老板娘" → INCLUDE (even one scene, even no dialogue — they need a consistent face)
+• Personal names: "角色甲" / "角色乙" / "角色丙" → INCLUDE
+• Relational titles who appear in ANY scene with a named action or described appearance: "角色甲父亲" / "角色甲母亲" / "母亲" / "酒馆老板娘" → INCLUDE (even one scene, even no dialogue — they need a consistent face)
 • One-scene characters with high story weight (death, betrayal, key info delivery, emotional farewell) → INCLUDE
 
 EXCLUDE always (no priority override):
-• Skill/spell/technique names: 星晶护盾、霜魂斩、寒星锁
-• Named weapons/objects: 无双（剑名）、永夜（法杖名）、霜魂刀
+• Skill/spell/technique names: 晶盾术、裂风斩、寒缚锁
+• Named weapons/objects: 长剑·无名（剑名）、法杖·幽烛（法杖名）、铭刃
 
-NAME FORM: use the MOST SPECIFIC form — "龙渊父亲" not just "父亲".
+NAME FORM: use the MOST SPECIFIC form — "角色甲父亲" not just "父亲".
 
 OUTPUT: JSON array of strings only — no descriptions, no markdown, no commentary.
-Example: ["龙渊", "灵瑶", "龙渊父亲", "母亲", "火龙", "狼人领主", "酒馆老板娘"]`;
+Example: ["角色甲", "角色乙", "角色甲父亲", "母亲", "火龙", "狼人领主", "酒馆老板娘"]`;
 
 export function buildCharacterNameExtractionPrompt(screenplay: string): string {
   return `List every character who needs a visual reference sheet in this screenplay.
@@ -78,7 +78,7 @@ export function buildCharacterNameExtractionPrompt(screenplay: string): string {
 ${screenplay}
 --- END ---
 
-Output ONLY a JSON array of character names. Use the most specific name form for each character (e.g. "龙渊父亲" not just "父亲"). Match the language of the screenplay.`;
+Output ONLY a JSON array of character names. Use the most specific name form for each character (e.g. "角色甲父亲" not just "父亲"). Match the language of the screenplay.`;
 }
 
 // ─── Pass 2: Full character sheet generation ─────────────────────────────────

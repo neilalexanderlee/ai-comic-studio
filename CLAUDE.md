@@ -345,6 +345,8 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 
 ## 开发工作流
 
+**修改系统提示词默认模板时**：遵守 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)（禁止写入具体作品剧情；示例用角色甲/乙等占位符）。提交前运行 `pnpm test src/__tests__/unit/lib/ai/prompt-templates-deplot.test.ts`。
+
 ```
 # 1. 修改 DB schema
 vim src/lib/db/schema.ts
