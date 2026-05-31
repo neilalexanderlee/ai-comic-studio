@@ -20,7 +20,7 @@ import {
 } from "@/lib/storyboard/shot-video-readiness";
 
 describe("listBatchVideoBlockedShotsOnDisk", () => {
-  const characters = [{ id: "c1", name: "龙渊", description: "" }];
+  const characters = [{ id: "c1", name: "角色甲", description: "" }];
 
   beforeEach(() => {
     shotFrameFileOnDisk.mockReset();
@@ -35,7 +35,7 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
           id: "s1",
           sequence: 1,
           anchorFirst: "/uploads/missing.png",
-          prompt: "龙渊站立",
+          prompt: "角色甲站立",
           videoUrl: null,
         },
       ],
@@ -77,7 +77,7 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
           sequence: 2,
           anchorFirst: "/uploads/first-ok.png",
           anchorLastAi: "/uploads/last-missing.png",
-          prompt: "龙渊转身",
+          prompt: "角色甲转身",
           videoUrl: null,
         },
       ],
@@ -106,11 +106,11 @@ describe("getShotVideoReadiness (server)", () => {
 });
 
 describe("listBatchVideoBlockedShots (client)", () => {
-  const characters = [{ id: "c1", name: "龙渊", description: "" }];
+  const characters = [{ id: "c1", name: "角色甲", description: "" }];
 
   it("无首帧路径 → 非 eligible，不进入预检列表", () => {
     const blocked = listBatchVideoBlockedShots(
-      [{ id: "s1", sequence: 1, anchorFirst: null, prompt: "龙渊", videoUrl: null }],
+      [{ id: "s1", sequence: 1, anchorFirst: null, prompt: "角色甲", videoUrl: null }],
       characters,
       "new_only"
     );
@@ -124,7 +124,7 @@ describe("listBatchVideoBlockedShots (client)", () => {
           id: "s1",
           sequence: 1,
           anchorFirst: "/uploads/first.png",
-          prompt: "龙渊",
+          prompt: "角色甲",
           videoUrl: null,
         },
       ],

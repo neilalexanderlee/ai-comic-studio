@@ -18,7 +18,7 @@ async function decide(
       cameraDirection: "slow dolly in",
       startFrameDesc: "角色站在门口，侧身看向窗外，逆光轮廓清晰",
       endFrameDesc: "角色转身面向镜头，双手握剑，眉心紧皱",
-      prompt: "龙渊走入大殿",
+      prompt: "角色甲走入大殿",
       ...shot,
     },
     hasChars,
@@ -52,7 +52,7 @@ describe("resolveFrameMode — deterministic layer", () => {
   });
 
   it("near-identical start/end descs (Jaccard > 0.82) → first_only", async () => {
-    const desc = "龙渊（黑甲银纹）站在殿中央，剑悬于背，琥珀眼直视前方，侧光勾勒轮廓";
+    const desc = "角色甲（黑甲银纹）站在殿中央，剑悬于背，琥珀眼直视前方，侧光勾勒轮廓";
     const result = await decide(
       { startFrameDesc: desc, endFrameDesc: desc },
       true
@@ -64,8 +64,8 @@ describe("resolveFrameMode — deterministic layer", () => {
   it("clearly different start/end descs → falls through to fallback 'both'", async () => {
     const result = await decide(
       {
-        startFrameDesc: "龙渊站立，手离剑柄，目光低垂",
-        endFrameDesc: "龙渊跪地，剑插土中，仰望天空",
+        startFrameDesc: "角色甲站立，手离剑柄，目光低垂",
+        endFrameDesc: "角色甲跪地，剑插土中，仰望天空",
         duration: 10,
       },
       true

@@ -26,7 +26,7 @@ describe("pickLastFramePromptBuildParams + registry last frame", () => {
   it("uses endFrameDesc as primary and demotes scene prompt to context", () => {
     const params = pickLastFramePromptBuildParams({
       shot: {
-        prompt: "魔族涌入，村民逃散",
+        prompt: "敌军涌入，村民逃散",
         endFrameDesc: "远景小镇火光收束，满月，无前景正脸",
         cameraDirection: "起幅[远景] → 定格落幅",
       },
@@ -39,7 +39,7 @@ describe("pickLastFramePromptBuildParams + registry last frame", () => {
     expect(prompt).toContain("尾帧静止画面");
     expect(prompt).toContain("远景小镇火光收束");
     expect(prompt).toContain("镜头情节上下文");
-    expect(prompt).toContain("魔族涌入");
+    expect(prompt).toContain("敌军涌入");
     expect(prompt).not.toContain("=== 【强制】背景场景（无独立尾帧描述时的回退）");
     expect(prompt).toContain("环境/群演尾帧");
     expect(prompt).not.toContain("角色占画面40-70%");

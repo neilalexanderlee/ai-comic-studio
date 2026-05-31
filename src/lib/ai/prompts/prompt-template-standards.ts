@@ -24,6 +24,21 @@ export const BANNED_PLOT_TERMS_IN_TEMPLATES = [
   "龙渊之母",
   "龙渊之父",
   "小灵",
+  "云烟",
+  "林峰",
+  "翠蒂娜",
+  "凌瑶",
+] as const;
+
+/**
+ * 全库 deplot 扫描时排除的路径（相对仓库根）。
+ * - standards：含禁止词列表本身
+ * - scripts/*：用户分卷/定妆维护脚本，可含真实剧名
+ */
+export const REPO_DEPLOT_EXCLUDE_RELATIVE = [
+  "src/lib/ai/prompts/prompt-template-standards.ts",
+  "scripts/build_libtv_volumes.py",
+  "scripts/update-visual-hints.mjs",
 ] as const;
 
 /** 默认模板源文件 glob（相对 src/lib/ai/prompts） */

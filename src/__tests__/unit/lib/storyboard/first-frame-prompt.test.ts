@@ -25,7 +25,7 @@ describe("pickFirstFramePromptBuildParams + registry first frame", () => {
   it("uses startFrameDesc as primary and demotes scene prompt to context", () => {
     const params = pickFirstFramePromptBuildParams({
       shot: {
-        prompt: "魔族涌入，村民逃散",
+        prompt: "敌军涌入，村民逃散",
         startFrameDesc: "远景静谧小镇，满月，篝火，无入侵",
         cameraDirection: "起幅[远景] → 特写",
       },
@@ -38,7 +38,7 @@ describe("pickFirstFramePromptBuildParams + registry first frame", () => {
     expect(prompt).toContain("首帧静止画面");
     expect(prompt).toContain("远景静谧小镇");
     expect(prompt).toContain("镜头情节上下文");
-    expect(prompt).toContain("魔族涌入");
+    expect(prompt).toContain("敌军涌入");
     expect(prompt).not.toContain("=== 【强制】背景场景（最高优先级");
     expect(prompt).toContain("镜间衔接帧");
     expect(prompt).toContain("环境/群演首帧");
@@ -58,8 +58,8 @@ describe("pickFirstFramePromptBuildParams + registry first frame", () => {
     expect(envPrompt).toContain("环境/群演首帧");
 
     const charParams = pickFirstFramePromptBuildParams({
-      shot: { prompt: "场景", startFrameDesc: "龙渊特写", cameraDirection: null },
-      characterDescriptions: "龙渊: …",
+      shot: { prompt: "场景", startFrameDesc: "角色甲特写", cameraDirection: null },
+      characterDescriptions: "角色甲: …",
       namedCharacterCount: 1,
       hasContinuityReference: false,
       hasCharacterSheetRefs: true,

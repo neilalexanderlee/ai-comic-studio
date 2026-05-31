@@ -47,7 +47,7 @@ function normalizeParens(s: string): string {
  * 3. Age suffix (N岁, N≥13) → stripped (adult age is never part of canonical identity)
  * 4. 形态 suffix e.g. (人形态), (龙形态) → KEPT (these are distinct character forms)
  * 5. All other parentheticals (role, title, race, emotion) → stripped so that
- *    "白夜(魔族将军)" and "白夜" → same key,
+ *    "角色戊(敌军将领)" and "角色戊" → same key,
  *    "格朗(矮人斧手)" and "格朗" → same key,
  *    "翠缇娜(精灵公主)" and "翠缇娜" → same key.
  */

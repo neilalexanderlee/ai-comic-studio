@@ -12,7 +12,8 @@
 |-------------------|------------------------|
 | `ref_video_prompt`、`single_shot_rewrite`、`shot_split` 等 registry 默认插槽 | `shots.prompt`、`videoScript`、导入的剧本 |
 | `buildXxxPrompt` 里写死的 **system / 规则 / 正反例** | 单次 API 请求里的 user 消息正文 |
-| UI 保存到 `prompt_templates` 表的 **全局/项目覆盖** | Eval fixture、单元测试里的假数据（见下文） |
+| UI 保存到 `prompt_templates` 表的 **全局/项目覆盖** | 用户 DB 里的真实剧本、分镜、角色库 |
+| `src/**`、`docs/**` 中的 **示例/测试/Eval/注释** | `scripts/build_libtv_volumes.py` 等用户分卷维护脚本（见 `REPO_DEPLOT_EXCLUDE_RELATIVE`） |
 
 **运行时数据传递**（例如 `Scene description: ${shot.prompt}`）只传字段原文，不在代码里拼接叙事句式。
 
@@ -32,7 +33,9 @@
 
 维护列表见 `src/lib/ai/prompts/prompt-template-standards.ts` 中的 `BANNED_PLOT_TERMS_IN_TEMPLATES`。
 
-当前包括但不限于：具体主角名、本项目地名、专属武器/技能名、以及曾用于示例的复合词（如 `龙渊灵瑶`）。
+当前包括但不限于：具体主角名、本项目地名、专属武器/技能名、以及曾用于示例的复合词（见 `BANNED_PLOT_TERMS_IN_TEMPLATES`）。
+
+**CI**：`src/__tests__/unit/lib/ai/prompt-templates-deplot.test.ts` 扫描 `src/` 与 `docs/`（排除列表见 `REPO_DEPLOT_EXCLUDE_RELATIVE`）。
 
 新增默认示例前：在脑中做 **Substitution test**——换一部完全不同的剧是否仍成立；不成立则改为更抽象的写法。
 

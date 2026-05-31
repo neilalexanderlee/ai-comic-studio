@@ -82,7 +82,7 @@ export const promptEnhancementSuite: EvalSuite = {
         }
 
         // Must preserve the core subject
-        if (!enhanced.includes("龙渊") && !enhanced.includes("悬崖") && !enhanced.includes("狂风")) {
+        if (!enhanced.includes("角色甲") && !enhanced.includes("悬崖") && !enhanced.includes("狂风")) {
           throw new Error(
             `Enhancement lost core narrative content.\nRaw: ${raw}\nEnhanced: ${enhanced}`
           );
@@ -106,8 +106,8 @@ export const promptEnhancementSuite: EvalSuite = {
 
         assertMinLength(enhanced, 30);
 
-        // Core subject (云烟) must be preserved
-        if (!enhanced.includes("云烟") && !enhanced.includes("月光") && !enhanced.includes("舞")) {
+        // Core subject (角色丁) must be preserved
+        if (!enhanced.includes("角色丁") && !enhanced.includes("月光") && !enhanced.includes("舞")) {
           throw new Error(`Kling enhancement lost core narrative. Enhanced: ${enhanced}`);
         }
       },
@@ -215,7 +215,7 @@ export const promptEnhancementSuite: EvalSuite = {
           generateImage: async () => "",
         } as AIProvider;
 
-        const raw = "龙渊站在悬崖上";
+        const raw = "角色甲站在悬崖上";
         const result = await enhanceVideoPrompt(raw, "seedance", failingProvider);
         if (result !== raw) {
           throw new Error(`Expected fallback to original prompt. Got: "${result}"`);

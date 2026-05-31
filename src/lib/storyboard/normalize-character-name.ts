@@ -11,7 +11,7 @@
  * Examples:
  *   魔王(人形态·愤怒)  → 魔王(人形态)
  *   魔王(龙形态)       → 魔王(龙形态)
- *   龙渊(25岁)        → 龙渊
+ *   角色甲(25岁)      → 角色甲
  *   林小白(紧张)       → 林小白
  */
 export function normalizeCharacterName(name: string): string {

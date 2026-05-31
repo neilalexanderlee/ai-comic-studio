@@ -152,7 +152,7 @@ export async function POST(
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  // Merge & deduplicate by canonical key（合并「龙渊」与「龙渊（25岁）」等）
+  // Merge & deduplicate by canonical key（合并「角色甲」与「角色甲（25岁）」等）
   // canonicalCharacterNameKey already normalises full-width brackets, so
   // 「魔王（人形态）」and「魔王(人形态)」resolve to the same key and merge correctly.
   const charMap = new Map<string, ExtractedChar>();
@@ -190,16 +190,16 @@ export async function POST(
     try {
       await addImportLog(projectId, 2, "running", "AI语义去重中…");
       const nameList = mergedRaw.map((c) => c.name);
-      const dedupePrompt = `Below is a list of character names extracted from a screenplay. Some entries may refer to the same character using different descriptions (e.g. "酒馆老板娘" and "老板娘（矮人）" are the same person; "龙渊父亲" and "龙渊之父" are the same person).
+      const dedupePrompt = `Below is a list of character names extracted from a screenplay. Some entries may refer to the same character using different descriptions (e.g. "酒馆老板娘" and "老板娘（矮人）" are the same person; "角色甲父亲" and "角色甲之父" are the same person).
 
 STRICT RULES — read carefully before answering:
-1. NEVER merge a child version (age ≤ 12, e.g. "龙渊(10岁)", "小龙渊") with the adult version of the same character. They look completely different and must remain separate entries.
+1. NEVER merge a child version (age ≤ 12, e.g. "角色甲(10岁)", "小角色甲") with the adult version of the same character. They look completely different and must remain separate entries.
 2. Merge entries that refer to the SAME underlying entity, including:
    a. Different name variants for the same person (role prefix, title, shortened form, relational term).
    b. The same creature/entity with a CONTEXT or SETTING qualifier — e.g. "石龙" and "石龙魔兽" are the same entity; "火龙" and "魔境火龙" are the same dragon in a different realm. Context suffixes like 魔兽、魔境、(魔化) typically do NOT change visual appearance enough to warrant a separate entry.
 3. NEVER merge entries that have EXPLICIT VISUAL-FORM markers indicating completely different appearances:
    - 人形态 / 龙形态 / 兽形 / 真身 → e.g. "魔王(人形态)" and "魔王(龙形态)" look COMPLETELY different — keep them as SEPARATE entries.
-   - Child age markers (e.g. "龙渊(10岁)", "小龙渊") vs. adult → keep separate.
+   - Child age markers (e.g. "角色甲(10岁)", "小角色甲") vs. adult → keep separate.
 4. When in doubt, do NOT merge.
 
 Canonical name selection: prefer the SHORTER, more commonly used base name (e.g. "石龙" over "石龙魔兽", "火龙" over "魔境火龙").

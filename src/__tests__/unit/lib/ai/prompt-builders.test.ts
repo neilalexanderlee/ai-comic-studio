@@ -37,10 +37,10 @@ describe("buildFirstFramePrompt", () => {
   it("includes the start frame description", () => {
     const result = buildFirstFramePrompt({
       sceneDescription: "场景",
-      startFrameDesc: "特写龙渊的眼神，坚定而沉重",
+      startFrameDesc: "特写角色甲的眼神，坚定而沉重",
       characterDescriptions: "",
     });
-    expect(result).toContain("特写龙渊的眼神");
+    expect(result).toContain("特写角色甲的眼神");
   });
 
   it("includes visualStyleTag as the first significant content", () => {
@@ -71,9 +71,9 @@ describe("buildFirstFramePrompt", () => {
     const result = buildFirstFramePrompt({
       sceneDescription: "场景",
       startFrameDesc: "首帧",
-      characterDescriptions: "龙渊: 黑色长发，身着暗红色战袍",
+      characterDescriptions: "角色甲: 黑色长发，身着暗红色战袍",
     });
-    expect(result).toContain("龙渊");
+    expect(result).toContain("角色甲");
     expect(result).toContain("暗红色战袍");
   });
 
@@ -93,10 +93,10 @@ describe("buildLastFramePrompt", () => {
   it("includes the end frame description", () => {
     const result = buildLastFramePrompt({
       sceneDescription: "场景",
-      endFrameDesc: "镜头定格在龙渊转身离去的背影",
+      endFrameDesc: "镜头定格在角色甲转身离去的背影",
       characterDescriptions: "",
     });
-    expect(result).toContain("龙渊转身离去");
+    expect(result).toContain("角色甲转身离去");
   });
 
   it("references firstFramePath when provided (for continuity)", () => {
@@ -125,12 +125,12 @@ describe("buildLastFramePrompt", () => {
 describe("buildVideoPrompt slim anchors", () => {
   it("uses short frame anchor hint when visual frames attached", () => {
     const result = buildVideoPrompt({
-      videoScript: "龙渊拔剑，镜头缓推。",
+      videoScript: "角色甲拔剑，镜头缓推。",
       cameraDirection: "dolly in",
-      startFrameDesc: "龙渊握剑柄特写",
+      startFrameDesc: "角色甲握剑柄特写",
       endFrameDesc: "剑已出鞘半身",
       hasVisualFrameAnchors: true,
-      characters: [{ name: "龙渊", visualHint: "黑甲", description: "x".repeat(300) }],
+      characters: [{ name: "角色甲", visualHint: "黑甲", description: "x".repeat(300) }],
     });
     expect(result).toContain("attached as images");
     expect(result).not.toContain("剑已出鞘");

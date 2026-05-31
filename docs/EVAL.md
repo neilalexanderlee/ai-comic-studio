@@ -129,7 +129,7 @@ const mySuite: EvalSuite = {
 
 ```typescript
 assertMinLength(enhanced, 40);               // 最小长度
-assertContains(enhanced, "龙渊");            // 包含核心内容
+assertContains(enhanced, "角色甲");        // 包含核心内容
 assertNotContains(enhanced, "ERROR");        // 不含错误标记
 ```
 

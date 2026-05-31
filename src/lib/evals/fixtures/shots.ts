@@ -5,26 +5,33 @@
  * Used across multiple eval suites.
  */
 
+import {
+  FIXTURE_CHAR_A,
+  FIXTURE_CHAR_C,
+  FIXTURE_CHAR_D,
+  FIXTURE_CHAR_D_BASE,
+} from "@/lib/test-fixtures/placeholder-characters";
+
 export const CHARACTERS = {
-  longYuan: {
-    id: "char_longyuan",
-    name: "龙渊",
+  charA: {
+    id: "char_a",
+    name: FIXTURE_CHAR_A,
     description: "男性，约35岁，黑色长发束成马尾，身着暗红色战袍，表情深沉克制",
     visualHint: "黑色马尾，暗红色战袍，剑眉星目，气质沉稳",
     voiceHint: "男性，约35岁，声音低沉沙哑，语速缓慢，情绪压抑克制",
     scope: "main" as const,
   },
-  yunYan: {
-    id: "char_yunyan",
-    name: "云烟（少女形态）",
+  charD: {
+    id: "char_d",
+    name: FIXTURE_CHAR_D,
     description: "女性，约16岁，银白色长发，穿浅蓝色轻纱裙，神情清冷淡漠",
     visualHint: "银白长发，浅蓝轻纱，眼神清冷",
     voiceHint: "女性，约16岁，声音轻柔空灵，语速平稳，情绪淡然",
     scope: "main" as const,
   },
-  linFeng: {
-    id: "char_linfeng",
-    name: "林峰",
+  charC: {
+    id: "char_c",
+    name: FIXTURE_CHAR_C,
     description: "男性，约28岁，短发，便装，性格热情豪爽",
     visualHint: "短发，便装，面容阳光",
     voiceHint: "男性，约28岁，声音爽朗，语速较快，情绪活泼",
@@ -40,12 +47,12 @@ export const ALL_CHARACTERS = Object.values(CHARACTERS);
 export const SHOT_WITH_NAMED_CHARACTERS = {
   id: "shot_001",
   sequence: 1,
-  prompt: "龙渊站在竹林边缘，云烟从林中缓步走出，二人相视无言",
-  startFrameDesc: "龙渊背对镜头，远望竹林；云烟银发在风中飘散，从阴影中现身",
+  prompt: `${FIXTURE_CHAR_A}站在竹林边缘，${FIXTURE_CHAR_D_BASE}从林中缓步走出，二人相视无言`,
+  startFrameDesc: `${FIXTURE_CHAR_A}背对镜头，远望竹林；${FIXTURE_CHAR_D_BASE}银发在风中飘散，从阴影中现身`,
   endFrameDesc: "二人对视，中景正面构图，表情凝重",
   cameraDirection: "static — 固定镜头，中景正面",
   duration: 5,
-  videoScript: "龙渊转身，与云烟目光相遇，二人无言对立",
+  videoScript: `${FIXTURE_CHAR_A}转身，与${FIXTURE_CHAR_D_BASE}目光相遇，二人无言对立`,
 };
 
 /** 群演场景，无主角配角 */
@@ -53,11 +60,11 @@ export const SHOT_CROWD_SCENE = {
   id: "shot_002",
   sequence: 2,
   prompt:
-    "镜头从麦垛地面缓缓起吊，灯笼随微风轻轻摇摆，橙黄光晕在木屋墙面上来回游移；" +
-    "升至屋顶高度时篝火圈全貌展开——数十名村民手牵手转圈，脚踩稻草发出沙沙碎响，孩子的笑声穿过弦乐浮上来",
-  startFrameDesc: "仰角拍摄麦垛和灯笼，橙黄暖光",
+    "镜头从集会地面缓缓起吊，灯笼随微风轻轻摇摆，橙黄光晕在木屋墙面上来回游移；" +
+    "升至屋顶高度时篝火圈全貌展开——数十名村民手牵手转圈，脚踩干草发出沙沙碎响，孩子的笑声穿过弦乐浮上来",
+  startFrameDesc: "仰角拍摄集会场地和灯笼，橙黄暖光",
   endFrameDesc: "俯拍篝火圈全景，村民围圈的宏观视角",
-  cameraDirection: "crane up — 镜头从麦垛地面缓缓起吊",
+  cameraDirection: "crane up — 镜头从集会地面缓缓起吊",
   duration: 6,
   videoScript: "镜头起吊，篝火圈全貌呈现",
 };
@@ -78,38 +85,38 @@ export const SHOT_PURE_ACTION = {
 export const SHOT_SINGLE_CHARACTER = {
   id: "shot_004",
   sequence: 4,
-  prompt: "林峰奔跑过集市，穿越熙攘人群，神情焦急",
-  startFrameDesc: "林峰从远处跑来，中景跟随镜头",
-  endFrameDesc: "林峰停步，气喘吁吁，回望身后",
+  prompt: `${FIXTURE_CHAR_C}奔跑过集市，穿越熙攘人群，神情焦急`,
+  startFrameDesc: `${FIXTURE_CHAR_C}从远处跑来，中景跟随镜头`,
+  endFrameDesc: `${FIXTURE_CHAR_C}停步，气喘吁吁，回望身后`,
   cameraDirection: "tracking — 跟随运动",
   duration: 4,
-  videoScript: "林峰全速奔跑，镜头跟随",
+  videoScript: `${FIXTURE_CHAR_C}全速奔跑，镜头跟随`,
 };
 
 // ── Prompt enhancement fixtures ───────────────────────────────────────────────
 
 export const RAW_VIDEO_PROMPTS = {
   seedance: {
-    raw: "龙渊站在悬崖边，狂风吹动衣袍，他转身离去",
+    raw: `${FIXTURE_CHAR_A}站在悬崖边，狂风吹动衣袍，他转身离去`,
     expectedElements: ["主体", "运动", "环境", "运镜"] as string[],
   },
   kling: {
-    raw: "云烟在月光下跳舞，发丝飞扬，神情空灵",
+    raw: `${FIXTURE_CHAR_D_BASE}在月光下跳舞，发丝飞扬，神情空灵`,
     expectedElements: ["主体", "动作", "场景"] as string[],
   },
   gemini: {
-    raw: "龙渊和林峰在酒馆对峙",
+    raw: `${FIXTURE_CHAR_A}和${FIXTURE_CHAR_C}在酒馆对峙`,
     expectedElements: ["subject", "action", "camera"] as string[],
   },
 };
 
 export const RAW_IMAGE_PROMPTS = {
   doubao: {
-    raw: "龙渊站在山顶，俯瞰云海，黑发飘扬",
+    raw: `${FIXTURE_CHAR_A}站在山顶，俯瞰云海，黑发飘扬`,
     expectedElements: ["画风", "主体", "光影"] as string[],
   },
   openai: {
-    raw: "云烟在竹林中行走，光影婆娑",
+    raw: `${FIXTURE_CHAR_D_BASE}在竹林中行走，光影婆娑`,
     expectedElements: ["subject", "lighting", "composition"] as string[],
   },
 };

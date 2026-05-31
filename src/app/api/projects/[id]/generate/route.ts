@@ -121,8 +121,8 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
  * in the videoScript or startFrameDesc fields.
  *
  * Matching strategy (tolerant of age/descriptor suffixes):
- *   1. Full name match — "龙渊（10岁）" in text
- *   2. Base name match — strip （…） suffix → "龙渊" in text
+ *   1. Full name match — "角色甲（10岁）" in text
+ *   2. Base name match — strip （…） suffix → "角色甲" in text
  *   3. Fallback: assume on-screen if the text is non-empty (better than
  *      wrongly marking a named character as off-screen)
  */
@@ -135,7 +135,7 @@ function isCharacterOnScreen(
   const text = `${videoScript} ${startFrameDesc ?? ""}`;
   if (!text.trim()) return false;
   if (text.includes(characterName)) return true;
-  // Strip trailing parenthetical descriptor, e.g. "龙渊（10岁）" → "龙渊"
+  // Strip trailing parenthetical descriptor, e.g. "角色甲（10岁）" → "角色甲"
   const baseName = characterName.replace(/[（(].*/, "").trim();
   if (baseName.length >= 2 && text.includes(baseName)) return true;
   return false;

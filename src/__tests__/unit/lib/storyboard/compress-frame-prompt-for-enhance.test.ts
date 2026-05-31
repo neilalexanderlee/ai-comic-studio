@@ -14,7 +14,7 @@ describe("compressFramePromptForEnhancement", () => {
       "本图是视频起始静帧。",
       "远景静谧小镇，满月，篝火，无入侵。",
       "=== 镜头情节上下文（仅供理解地点/场次，禁止画进首帧）===",
-      "魔族涌入，村民逃散",
+      "敌军涌入，村民逃散",
       "=== 渲染标准 ===",
       "x".repeat(800),
     ].join("\n");
@@ -22,7 +22,7 @@ describe("compressFramePromptForEnhancement", () => {
     const out = compressFramePromptForEnhancement(long);
     expect(out.length).toBeLessThan(long.length);
     expect(out).toContain("远景静谧小镇");
-    expect(out).toContain("魔族涌入");
+    expect(out).toContain("敌军涌入");
     expect(out).not.toContain("x".repeat(100));
   });
 });

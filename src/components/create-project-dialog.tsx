@@ -157,7 +157,7 @@ export function CreateProjectDialog() {
                 id="proj-outline"
                 value={outline}
                 onChange={(e) => setOutline(e.target.value)}
-                placeholder={`例如：\n一个叫龙渊的少年剑客，在末世大陆上寻找失落的古剑「大剑」。\n他需要打败魔王军团，途中结识了精灵弓手翠蒂娜和神秘法师凌瑶。\n故事充满热血打斗，最终在古遗迹决战中揭开了大剑的秘密。`}
+                placeholder={`例如：\n少年剑客角色甲，在末世大陆寻找失落的古剑。\n途中结识精灵弓手角色乙与法师角色丙，历经热血对决，最终在古遗迹揭开秘密。`}
                 className="min-h-[130px] resize-none text-sm leading-relaxed"
               />
               <p className="text-[10px] text-[--text-muted]">

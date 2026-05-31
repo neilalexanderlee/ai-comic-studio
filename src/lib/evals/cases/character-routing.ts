@@ -37,12 +37,12 @@ export const characterRoutingSuite: EvalSuite = {
         const result = filterShotCharacters(shotText, ALL_CHARACTERS);
         const names = result.map((c) => c.name);
 
-        if (!names.includes("龙渊")) {
-          throw new Error(`Expected 龙渊 to be detected. Got: ${names.join(", ")}`);
+        if (!names.includes(CHARACTERS.charA.name)) {
+          throw new Error(`Expected ${CHARACTERS.charA.name} to be detected. Got: ${names.join(", ")}`);
         }
-        // 云烟（少女形态）应该通过 base name "云烟" 匹配
-        if (!names.some((n) => n.startsWith("云烟"))) {
-          throw new Error(`Expected 云烟 to be detected (via base name). Got: ${names.join(", ")}`);
+        // 角色丁（少女形态）应该通过 base name "角色丁" 匹配
+        if (!names.some((n) => n.startsWith("角色丁"))) {
+          throw new Error(`Expected 角色丁 to be detected (via base name). Got: ${names.join(", ")}`);
         }
       },
     },
@@ -95,12 +95,12 @@ export const characterRoutingSuite: EvalSuite = {
         const result = filterShotCharacters(shotText, ALL_CHARACTERS);
         const names = result.map((c) => c.name);
 
-        if (!names.includes("林峰")) {
-          throw new Error(`Expected 林峰 to be detected. Got: ${names.join(", ")}`);
+        if (!names.includes(CHARACTERS.charC.name)) {
+          throw new Error(`Expected ${CHARACTERS.charC.name} to be detected. Got: ${names.join(", ")}`);
         }
-        if (names.includes("龙渊") || names.some((n) => n.startsWith("云烟"))) {
+        if (names.includes(CHARACTERS.charA.name) || names.some((n) => n.startsWith("角色丁"))) {
           throw new Error(
-            `Single-character shot should only contain 林峰, not others. Got: ${names.join(", ")}`
+            `Single-character shot should only contain ${CHARACTERS.charC.name}, not others. Got: ${names.join(", ")}`
           );
         }
       },
@@ -110,12 +110,12 @@ export const characterRoutingSuite: EvalSuite = {
       name: "base-name-matching",
       aspect: "带括号后缀的角色名通过 base name 匹配",
       async run() {
-        // "云烟（少女形态）" should match when text contains just "云烟"
-        const shotText = "云烟缓步走出竹林，神情漠然";
-        const result = filterShotCharacters(shotText, [CHARACTERS.yunYan]);
+        // "角色丁（少女形态）" should match when text contains just "角色丁"
+        const shotText = "角色丁缓步走出竹林，神情漠然";
+        const result = filterShotCharacters(shotText, [CHARACTERS.charD]);
         if (result.length !== 1) {
           throw new Error(
-            `Expected 云烟（少女形态）to match via base name "云烟". Got ${result.length} matches.`
+            `Expected 角色丁（少女形态）to match via base name "角色丁". Got ${result.length} matches.`
           );
         }
       },
