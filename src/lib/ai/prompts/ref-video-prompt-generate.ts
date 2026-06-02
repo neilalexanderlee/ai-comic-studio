@@ -105,8 +105,12 @@ export function resolveVideoMotionAndScene(shot: {
 
 export function buildRefVideoPromptRequest(params: {
   motionScript: string;
-  /** 分镜「场景描述」，原样传入供 LLM 综合（规则见 ref_video_prompt system） */
+  /** 分镜「场景描述」，仅作补充上下文；不得覆盖首帧/尾帧图像与动作脚本 */
   sceneDescription?: string;
+  /** 当前镜头首帧静止描述。视频提示词必须从该起幅/图像开始。 */
+  startFrameDesc?: string | null;
+  /** 当前镜头尾帧静止描述；仅首尾帧模式下用于约束落幅。 */
+  endFrameDesc?: string | null;
   cameraDirection: string;
   duration: number;
   frameCount?: number; // 1 = only first frame; 2 = both frames
@@ -120,8 +124,23 @@ export function buildRefVideoPromptRequest(params: {
 
   const lines: string[] = [
     `${frameIntro} Write in the same language as the screenplay action below.`,
+    `CRITICAL: The first sentence of the final prompt must start from the provided FIRST FRAME / opening composition. Do not open with later plot beats, previous-shot content, or the closing-frame close-up.`,
     ``,
   ];
+
+  const startFrame = params.startFrameDesc?.trim();
+  const endFrame = params.endFrameDesc?.trim();
+  if (startFrame || endFrame) {
+    lines.push(`FRAME GROUND TRUTH (highest priority):`);
+    if (startFrame) {
+      lines.push(`  Opening frame at 0s: ${startFrame}`);
+    }
+    if (frameCount > 1 && endFrame) {
+      lines.push(`  Closing frame at ${params.duration}s: ${endFrame}`);
+    }
+    lines.push(`Use these only as temporal anchors: start from the opening frame, describe the motion transition, and end at the closing frame if provided.`);
+    lines.push(``);
+  }
 
   const withHints = (params.characters ?? []).filter((c) => c.visualHint);
   if (withHints.length) {
@@ -133,7 +152,7 @@ export function buildRefVideoPromptRequest(params: {
   }
 
   if (params.sceneDescription?.trim()) {
-    lines.push(`Scene description: ${params.sceneDescription.trim()}`);
+    lines.push(`Scene description (supplemental only; include only beats compatible with the frame anchors and screenplay action): ${params.sceneDescription.trim()}`);
     lines.push(``);
   }
   lines.push(`Screenplay action: ${params.motionScript}`);

@@ -38,7 +38,7 @@ function repoScanFiles(): string[] {
   for (const top of ["src", "docs"]) {
     walkFiles(join(ROOT, top), files);
   }
-  const exclude = new Set(REPO_DEPLOT_EXCLUDE_RELATIVE);
+  const exclude = new Set<string>(REPO_DEPLOT_EXCLUDE_RELATIVE);
   return files
     .map((f) => relative(ROOT, f))
     .filter((rel) => !exclude.has(rel));

@@ -143,6 +143,8 @@ export async function generateAndPersistVisionVideoPrompt(params: {
   const promptRequest = buildRefVideoPromptRequest({
     motionScript: motionContext,
     sceneDescription,
+    startFrameDesc: shot.startFrameDesc,
+    endFrameDesc: shot.endFrameDesc,
     cameraDirection: shot.cameraDirection || "static",
     duration: effectiveDuration,
     frameCount: visionFrames.length,
