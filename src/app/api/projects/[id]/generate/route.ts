@@ -2060,6 +2060,28 @@ async function handleSingleVideoGenerate(
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
+    // 参考模式下获取角色定妆图（只在首帧参考模式使用；首尾帧模式帧图已含角色外貌，无需额外传入）
+    let singleVideoCharImages: string[] = [];
+    if (useSingleVideoReferenceMode && singleVideoShotChars.length > 0) {
+      try {
+        const resolvedVideoChars = await resolveCharacterImages(
+          buildShotCharacterText(shot),
+          singleVideoShotChars,
+          modelConfig?.text,
+          userId,
+          projectId
+        );
+        singleVideoCharImages = resolvedVideoChars
+          .map((c) => c.imagePath)
+          .filter((p) => !!p && shotFrameFileOnDisk(p));
+        if (singleVideoCharImages.length > 0) {
+          console.log(`[SingleVideoGenerate] Shot ${shot.sequence}: passing ${singleVideoCharImages.length} character ref image(s) to video model`);
+        }
+      } catch (charErr) {
+        console.warn(`[SingleVideoGenerate] Shot ${shot.sequence}: failed to resolve character images, skipping:`, charErr);
+      }
+    }
+
     // 首帧模式：initialImage = anchorFirst；首尾帧模式：anchorFirst + 磁盘上存在的 AI anchorLastAi。
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
@@ -2078,6 +2100,7 @@ async function handleSingleVideoGenerate(
             duration: effectiveDuration,
             ratio,
             ...(resolution && { resolution }),
+            ...(singleVideoCharImages.length > 0 && { referenceImages: singleVideoCharImages }),
             onRemoteResult: onRemoteResultSingle,
           }
         : {

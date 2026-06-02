@@ -49,6 +49,12 @@ function toImageUrl(imagePathOrUrl: string): string {
   return toDataUrl(imagePathOrUrl);
 }
 
+export function seedanceSupportsMultimodalReference(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  // r2v（reference_image 多模态）仅 Seedance 2.0+ 支持；1.5 Pro/Lite 仅首帧 i2v
+  return id.includes("seedance-2-0") || id.includes("dreamina-seedance-2-0");
+}
+
 export class SeedanceProvider implements VideoProvider {
   private apiKey: string;
   private baseUrl: string;
@@ -233,13 +239,53 @@ export class SeedanceProvider implements VideoProvider {
     return body;
   }
 
-  /** 参考图模式：使用单张初始图片（角色参考图或上一镜头的最后帧） */
+  /**
+   * 参考图模式：
+   * - 无角色参考图：「图生视频-首帧」模式，单张初始图片不带 role（或 role=first_frame）
+   * - 有角色参考图（referenceImages）：切换为「多模态参考生视频」模式，所有图片均使用
+   *   role=reference_image（最多 9 张；首帧 + 角色图一起传入）。
+   *   注意：两种模式在 Seedance 2.0 API 中互斥，不可混用 first_frame 与 reference_image。
+   */
   private buildReferenceBody(
     params: VideoGenerateParams & { initialImage: string }
   ): Record<string, unknown> {
     const dur = this.resolveDuration(params.duration);
     const generateAudio = params.generateAudio ?? true;
     const promptText = generateAudio ? this.suppressBgmInPrompt(params.prompt) : params.prompt;
+
+    const charImages = (params.referenceImages ?? []).filter(Boolean);
+    const useMultimodalRef =
+      charImages.length > 0 && seedanceSupportsMultimodalReference(this.model);
+
+    if (charImages.length > 0 && !useMultimodalRef) {
+      console.warn(
+        `[Seedance] Model ${this.model} does not support multi-modal reference (r2v); ` +
+          `using first-frame mode only (${charImages.length} character ref image(s) omitted)`
+      );
+    }
+
+    if (useMultimodalRef) {
+      // 多模态参考生视频：首帧 + 角色定妆图，全部 role=reference_image（上限 9 张）
+      const allImages = [params.initialImage, ...charImages].slice(0, 9);
+      const imageContent = allImages.map((img) => ({
+        type: "image_url",
+        image_url: { url: toImageUrl(img) },
+        role: "reference_image",
+      }));
+      console.log(`[Seedance] Multi-modal reference mode: ${allImages.length} images (1 scene + ${allImages.length - 1} character ref)`);
+      const body: Record<string, unknown> = {
+        model: this.model,
+        content: [{ type: "text", text: promptText }, ...imageContent],
+        ratio: params.ratio || "16:9",
+        generate_audio: generateAudio,
+        return_last_frame: true,
+        watermark: false,
+      };
+      if (dur !== undefined) body.duration = dur;
+      return body;
+    }
+
+    // 图生视频-首帧：单张图片，不带 role
     const body: Record<string, unknown> = {
       model: this.model,
       content: [

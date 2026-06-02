@@ -1,7 +1,7 @@
 import fs from "fs";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { shots } from "@/lib/db/schema";
+import { shots, projects } from "@/lib/db/schema";
 import type { ModelConfigPayload } from "@/lib/provider-secrets";
 import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
@@ -10,6 +10,7 @@ import {
   resolveRefVideoPromptSystem,
   resolveVideoMotionAndScene,
 } from "@/lib/ai/prompts/ref-video-prompt-generate";
+import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { collectVisionFramePaths } from "@/lib/storyboard/shot-video-readiness.server";
 
@@ -110,6 +111,17 @@ export async function generateAndPersistVisionVideoPrompt(params: {
     projectId: params.projectId,
   });
 
+  // 查询项目风格标签，传给 LLM 以锁定视觉风格
+  const [projectRow] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, params.projectId));
+  const visualStyleTag = (() => {
+    const style = projectRow?.visualStyle;
+    if (!style) return undefined;
+    return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
+  })();
+
   const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
   const dialogueList: DialoguePromptEntry[] = shotDialogues.map((d) => {
     const char = shotCharacters.find((c) => c.id === d.characterId);
@@ -150,6 +162,7 @@ export async function generateAndPersistVisionVideoPrompt(params: {
     frameCount: visionFrames.length,
     characters: filteredCharsForPrompt,
     dialogues: dialogueList.length > 0 ? dialogueList : undefined,
+    visualStyleTag,
   });
 
   const rawPrompt = await textProvider.generateText(promptRequest, {

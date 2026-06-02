@@ -116,6 +116,8 @@ export function buildRefVideoPromptRequest(params: {
   frameCount?: number; // 1 = only first frame; 2 = both frames
   characters?: Array<{ name: string; visualHint?: string | null }>;
   dialogues?: Array<{ characterName: string; text: string; offscreen?: boolean; visualHint?: string }>;
+  /** 项目视觉风格标签，锁定生成风格（如"日本现代2D动漫风格，8K高清，赛璐珞渲染，清晰线稿——"）。无此参数时由 LLM 使用系统提示词中的默认值。 */
+  visualStyleTag?: string;
 }): string {
   const frameCount = params.frameCount ?? 2;
   const frameIntro = frameCount === 1
@@ -166,6 +168,10 @@ export function buildRefVideoPromptRequest(params: {
 
   if (params.dialogues?.length) {
     lines.push(`Dialogue: ${params.dialogues.map(d => `${d.characterName}: "${d.text}"`).join("; ")}`);
+  }
+
+  if (params.visualStyleTag?.trim()) {
+    lines.push(`⚠️ LOCKED STYLE TAG (must appear verbatim at end of prompt, before any constraint lines): ${params.visualStyleTag.trim()}`);
   }
 
   return lines.join("\n");
