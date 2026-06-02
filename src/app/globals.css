@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "./fonts.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -52,6 +53,10 @@
    ═══════════════════════════════════════════════ */
 
 :root {
+  --font-display: "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-sans: "Karla", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
   --background: #FAFAF8;
   --foreground: #1A1A1A;
   --card: #FFFFFF;
