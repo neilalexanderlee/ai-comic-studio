@@ -62,6 +62,7 @@ interface FrameReferencePickerProps {
   shots: FrameRefPickerShot[];
   currentShotId: string;
   title?: string;
+  frameTarget?: "first" | "last";
   onConfirm: (choice: FrameReferenceChoice) => void;
 }
 
@@ -70,9 +71,12 @@ export function FrameReferencePicker({
   onOpenChange,
   shots,
   currentShotId,
-  title = "选择首帧参考图",
+  title,
+  frameTarget = "first",
   onConfirm,
 }: FrameReferencePickerProps) {
+  const defaultTitle = frameTarget === "last" ? "选择尾帧参考图" : "选择首帧参考图";
+  const resolvedTitle = title ?? defaultTitle;
   const [selected, setSelected] = useState<FrameReferenceChoice | null>({ mode: "none" });
 
   const options = useMemo(
@@ -93,9 +97,11 @@ export function FrameReferencePicker({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>{resolvedTitle}</DialogTitle>
           <p className="text-sm text-[--text-secondary]">
-            将所选画面作为构图/连续性参考发给 AI 生成首帧（不是直接复制文件）。可选任意更早分镜的首帧、AI 尾帧或视频真实尾帧。
+            {frameTarget === "last"
+              ? "将所选画面作为构图/连续性参考发给 AI 生成尾帧（不是直接复制文件）。可选任意分镜的首帧、AI 尾帧或视频真实尾帧。"
+              : "将所选画面作为构图/连续性参考发给 AI 生成首帧（不是直接复制文件）。可选任意更早分镜的首帧、AI 尾帧或视频真实尾帧。"}
           </p>
         </DialogHeader>
 
@@ -111,7 +117,9 @@ export function FrameReferencePicker({
           >
             <span className="font-medium">独立生成（不参考其他分镜）</span>
             <p className="mt-1 text-xs text-[--text-muted]">
-              仅使用本镜描述与角色定妆图生成首帧，不读取上一镜尾帧。
+              {frameTarget === "last"
+                ? "仅使用本镜描述与角色定妆图生成尾帧，不读取其他分镜画面。"
+                : "仅使用本镜描述与角色定妆图生成首帧，不读取上一镜尾帧。"}
             </p>
           </button>
 

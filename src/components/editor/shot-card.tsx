@@ -1009,7 +1009,7 @@ export function ShotCard({
         onOpenChange={frameActions.setFrameRefPickerOpen}
         shots={frameRefShots}
         currentShotId={id}
-        title={t("shot.frameReferenceTitle")}
+        frameTarget={frameActions.pendingFrameTarget === "last" ? "last" : "first"}
         onConfirm={frameActions.handleFrameReferenceConfirm}
       />
     </div>

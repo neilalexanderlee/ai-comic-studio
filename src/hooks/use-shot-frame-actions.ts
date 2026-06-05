@@ -42,7 +42,7 @@ export function useShotFrameActions({
   const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
   const [adoptingPrevEpisode, setAdoptingPrevEpisode] = useState(false);
   const [frameRefPickerOpen, setFrameRefPickerOpen] = useState(false);
-  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "both" | null>(null);
+  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "last" | "both" | null>(null);
 
   const prevChainFrame = prevCutPoint ?? prevAnchorLastAi ?? null;
   const prevChainFrameSource: "video" | "ai" | null =
@@ -85,7 +85,7 @@ export function useShotFrameActions({
     onUpdate();
   }
 
-  function openFrameReferencePicker(frameTarget: "first" | "both") {
+  function openFrameReferencePicker(frameTarget: "first" | "last" | "both") {
     if (!imageGuard()) return;
     setPendingFrameTarget(frameTarget);
     setFrameRefPickerOpen(true);
@@ -96,6 +96,7 @@ export function useShotFrameActions({
     if (!target) return;
     setGeneratingFrames(true);
     if (target === "first") setGeneratingFrameTarget("first");
+    else if (target === "last") setGeneratingFrameTarget("last");
     try {
       await executeFrameGenerate(target, choice);
     } catch (err) {
@@ -113,17 +114,7 @@ export function useShotFrameActions({
 
   async function handleGenerateOneFrame(target: "first" | "last") {
     if (target === "last") {
-      if (!imageGuard()) return;
-      setGeneratingFrames(true);
-      setGeneratingFrameTarget("last");
-      try {
-        await executeFrameGenerate("last");
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-      } finally {
-        setGeneratingFrames(false);
-        setGeneratingFrameTarget(null);
-      }
+      openFrameReferencePicker("last");
       return;
     }
     openFrameReferencePicker("first");
@@ -177,6 +168,7 @@ export function useShotFrameActions({
     prevChainFrameSource,
     frameRefPickerOpen,
     setFrameRefPickerOpen,
+    pendingFrameTarget,
     frameRefShots,
     handleGenerateFrames,
     handleGenerateOneFrame,

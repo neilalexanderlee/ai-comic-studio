@@ -158,7 +158,7 @@ export function buildRefVideoPromptRequest(params: {
     lines.push(``);
   }
   lines.push(`Screenplay action: ${params.motionScript}`);
-  lines.push(`⚠️ LOCKED Camera direction (use 起幅+运镜+落幅 formula): ${params.cameraDirection}`);
+  lines.push(`⚠️ LOCKED Camera direction — translate INTENT into natural prose, NEVER copy field notation verbatim (dissolve any brackets/slashes into sentences): ${params.cameraDirection}`);
   lines.push(`Duration: ${params.duration}s`);
 
   if (hasTimeCodes(params.motionScript)) {

@@ -1615,10 +1615,25 @@ async function handleSingleFrameGenerate(
   // pass an empty list so no ref images are injected.
   const charsForFrame = shotCharacters;
 
+  // Frame-specific character subsets: only inject characters whose names appear in the
+  // opening / closing frame description. A character mentioned in the scene description
+  // (prompt) but NOT in startFrameDesc should not be drawn in the first frame, and vice-
+  // versa for the last frame. Fall back to the full shot list only when the frame
+  // description is empty so we never produce an empty character context by accident.
+  const firstFrameFilterText = [shot.startFrameDesc, shot.videoScript].filter(Boolean).join(" ");
+  const lastFrameFilterText  = [shot.endFrameDesc,   shot.videoScript].filter(Boolean).join(" ");
+  const charsForFirstFrame = firstFrameFilterText
+    ? filterShotCharacters(firstFrameFilterText, charsForFrame)
+    : charsForFrame;
+  const charsForLastFrame = lastFrameFilterText
+    ? filterShotCharacters(lastFrameFilterText, charsForFrame)
+    : charsForFrame;
+
   const characterDescriptions = charsForFrame
     .map((c) => `${c.name}: ${c.description}`)
     .join("\n");
 
+  // Load reference images for the union of all characters in this shot.
   const resolvedChars = await resolveCharacterImages(
     shot.prompt || "",
     charsForFrame,
@@ -1628,6 +1643,12 @@ async function handleSingleFrameGenerate(
   );
   await saveShotWarnings(shotId, resolvedChars);
   const charRefImages = resolvedChars.map((c) => c.imagePath);
+
+  // Frame-specific reference image subsets derived from the full resolved list.
+  const firstFrameCharNames = new Set(charsForFirstFrame.map((c) => c.name));
+  const lastFrameCharNames  = new Set(charsForLastFrame.map((c) => c.name));
+  const charRefImagesFirst = resolvedChars.filter((rc) => firstFrameCharNames.has(rc.name)).map((c) => c.imagePath);
+  const charRefImagesLast  = resolvedChars.filter((rc) => lastFrameCharNames.has(rc.name)).map((c) => c.imagePath);
 
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
@@ -1653,6 +1674,14 @@ async function handleSingleFrameGenerate(
 
   // Include visualHint in character descriptions (same as batch/chain generation)
   const characterDescriptionsWithHints = charsForFrame
+    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+    .join("\n");
+
+  // Frame-specific description strings — used to build per-frame prompts.
+  const characterDescriptionsForFirst = charsForFirstFrame
+    .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
+    .join("\n");
+  const characterDescriptionsForLast = charsForLastFrame
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
 
@@ -1690,15 +1719,15 @@ async function handleSingleFrameGenerate(
 
     const generateAnchorFirst = async (): Promise<string> => {
       const refImages = continuityRef
-        ? [continuityRef.path, ...charRefImages]
-        : charRefImages;
+        ? [continuityRef.path, ...charRefImagesFirst]
+        : charRefImagesFirst;
       const firstPromptRaw = buildFirstFramePrompt(
         pickFirstFramePromptBuildParams({
           shot,
-          characterDescriptions: characterDescriptionsWithHints,
-          namedCharacterCount: charsForFrame.length,
+          characterDescriptions: characterDescriptionsForFirst,
+          namedCharacterCount: charsForFirstFrame.length,
           hasContinuityReference: !!continuityRef,
-          hasCharacterSheetRefs: !continuityRef && charRefImages.length > 0,
+          hasCharacterSheetRefs: !continuityRef && charRefImagesFirst.length > 0,
           visualStyleTag: singleVisualStyleTag,
           cameraDirection: singleCleanedCamera,
           slotContents: frameFirstSlots,
@@ -1754,10 +1783,10 @@ async function handleSingleFrameGenerate(
       const lastPromptRaw = buildLastFramePrompt(
         pickLastFramePromptBuildParams({
           shot,
-          characterDescriptions: characterDescriptionsWithHints,
-          namedCharacterCount: charsForFrame.length,
+          characterDescriptions: characterDescriptionsForLast,
+          namedCharacterCount: charsForLastFrame.length,
           hasAnchorFirst: true,
-          hasCharacterSheetRefs: charRefImages.length > 0,
+          hasCharacterSheetRefs: charRefImagesLast.length > 0,
           visualStyleTag: singleVisualStyleTag,
           cameraDirection: singleCleanedCamera,
           slotContents: frameLastSlots,
@@ -1769,7 +1798,7 @@ async function handleSingleFrameGenerate(
       const lastFramePath = await ai.generateImage(lastPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: [existingFirstFrame, ...charRefImages],
+        referenceImages: [existingFirstFrame, ...charRefImagesLast],
       });
       await db
         .update(shots)
@@ -1817,10 +1846,10 @@ async function handleSingleFrameGenerate(
     const lastPromptRaw = buildLastFramePrompt(
       pickLastFramePromptBuildParams({
         shot,
-        characterDescriptions: characterDescriptionsWithHints,
-        namedCharacterCount: charsForFrame.length,
+        characterDescriptions: characterDescriptionsForLast,
+        namedCharacterCount: charsForLastFrame.length,
         hasAnchorFirst: true,
-        hasCharacterSheetRefs: charRefImages.length > 0,
+        hasCharacterSheetRefs: charRefImagesLast.length > 0,
         visualStyleTag: singleVisualStyleTag,
         cameraDirection: singleCleanedCamera,
         slotContents: frameLastSlots,
@@ -1832,7 +1861,7 @@ async function handleSingleFrameGenerate(
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
-      referenceImages: [firstFramePath, ...charRefImages],
+      referenceImages: [firstFramePath, ...charRefImagesLast],
     });
 
     await db

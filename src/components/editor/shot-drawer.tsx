@@ -699,7 +699,7 @@ export function ShotDrawer({
         onOpenChange={frameActions.setFrameRefPickerOpen}
         shots={frameRefShots}
         currentShotId={shot.id}
-        title={t("shot.frameReferenceTitle")}
+        frameTarget={frameActions.pendingFrameTarget === "last" ? "last" : "first"}
         onConfirm={frameActions.handleFrameReferenceConfirm}
       />
 

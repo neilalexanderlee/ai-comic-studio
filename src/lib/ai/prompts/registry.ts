@@ -766,7 +766,13 @@ const SHOT_SPLIT_CINEMATOGRAPHY_PRINCIPLES_TEMPLATE = `════════�
 - ESTABLISHING SHOTS at the start of new locations
 - REACTION SHOTS after important dialogue: cut to the listener's face, not just the speaker
 - CUT ON ACTION — end each shot at a moment that allows smooth transition to the next
-- 180-DEGREE RULE — maintain consistent screen direction between shots
+- 180-DEGREE RULE — maintain consistent screen direction between shots. If Shot A shows character moving/looking RIGHT, Shot B must not show the same subject moving/looking RIGHT from another angle — it violates spatial continuity.
+- EYELINE MATCH — if Shot A ends on a character's face looking TOWARD camera, Shot B MUST be one of: (a) what they are looking at (their POV), or (b) a reverse angle — camera behind them showing their backs and the subject ahead. NEVER cut to another shot that shows the characters from the same side/angle.
+  ❌ WRONG: Shot A = two faces looking at camera → Shot B = same two faces from a different angle still facing camera
+  ✅ CORRECT: Shot A = two faces looking toward camera (hiding, watching) → Shot B = behind them, their backs, soldiers approaching from ahead
+- NO RACK FOCUS: AI video models CANNOT execute rack focus (in-shot bokeh pull from foreground to background). NEVER design a shot that relies on focus-pulling as its primary motion. Instead, design TWO shots:
+  Shot A: close-up foreground subject (faces through grass, soldiers blurred behind)
+  Shot B: reverse angle — camera behind foreground subjects, background subject now sharp ahead
 - Duration targets: establishing shots {{MIN_DURATION}}-{{ESTABLISHING_MAX}}s; dialogue {{DIALOGUE_MAX}}-{{MAX_DURATION}}s; action {{MIN_DURATION}}-{{ACTION_MAX}}s
 - CONTINUITY: endFrame of shot N must logically connect to startFrame of shot N+1
 
