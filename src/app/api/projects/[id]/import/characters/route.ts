@@ -28,6 +28,7 @@ interface ExtractedChar {
   frequency: number;
   description: string;
   visualHint?: string;
+  voiceHint?: string;
 }
 
 export async function POST(
@@ -168,6 +169,9 @@ export async function POST(
         if ((c.visualHint?.length ?? 0) > (existing.visualHint?.length ?? 0)) {
           existing.visualHint = c.visualHint;
         }
+        if (c.voiceHint?.trim() && !existing.voiceHint?.trim()) {
+          existing.voiceHint = c.voiceHint;
+        }
         // scope is no longer auto-classified — skip merging it
         existing.name = pickShorterDisplayName(existing.name, c.name);
       } else {
@@ -246,6 +250,9 @@ Return ONLY the JSON array. No explanation.`;
               }
               if ((char.visualHint?.length ?? 0) > (target.visualHint?.length ?? 0)) {
                 target.visualHint = char.visualHint;
+              }
+              if (char.voiceHint?.trim() && !target.voiceHint?.trim()) {
+                target.voiceHint = char.voiceHint;
               }
             } else if (!toMergeInto.has(idx) || toMergeInto.get(idx) === idx) {
               result.push(char);

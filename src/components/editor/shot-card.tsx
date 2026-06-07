@@ -43,6 +43,7 @@ import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
 import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
 import { RemoteVideoRecoveryHint } from "./remote-video-recovery-hint";
 import { ShotVideoEnhanceButton } from "./shot-video-enhance-button";
+import { SceneSelector } from "./scene-selector";
 
 interface Dialogue {
   id: string;
@@ -105,6 +106,10 @@ interface ShotCardProps {
   chainSourceSequence?: number | null;
   /** 群演镜头（无命名角色）— 影响视频/尾帧校验 */
   isCrowdShot?: boolean;
+  /** Track 分组标识（Seedance 多参模式批量生成用） */
+  track?: string | null;
+  /** 关联场景 ID */
+  sceneId?: string | null;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -207,6 +212,8 @@ export function ShotCard({
   chainSourceType,
   chainSourceSequence,
   isCrowdShot = false,
+  track,
+  sceneId,
 }: ShotCardProps) {
   const t = useTranslations();
   const videoReadiness = getShotVideoReadiness(
@@ -257,14 +264,15 @@ export function ShotCard({
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
 
   // 台词编辑状态
-  type EditDialogue = { id?: string; characterName: string; text: string };
+  type DialogueType = "dialogue" | "os" | "vo";
+  type EditDialogue = { id?: string; characterName: string; text: string; type?: DialogueType };
   const [editingDialogues, setEditingDialogues] = useState(false);
   const [editDialogues, setEditDialogues] = useState<EditDialogue[]>(
-    dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text }))
+    dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text, type: (d as { type?: DialogueType }).type ?? "dialogue" }))
   );
   const [savingDialogues, setSavingDialogues] = useState(false);
   useEffect(() => {
-    setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
+    setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text, type: (d as { type?: DialogueType }).type ?? "dialogue" })));
   }, [dialogues]);
 
   async function handleSaveDialogues() {
@@ -479,13 +487,20 @@ export function ShotCard({
     <div className="overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-colors hover:border-[--border-hover]">
       {/* ── Header ── */}
       <div className="flex items-center gap-3 px-4 py-3">
-        {/* Sequence */}
-        <div
-          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary/8 font-mono text-sm font-bold text-primary cursor-pointer hover:bg-primary/15 transition-colors"
-          onClick={() => onOpenDrawer?.(id)}
-          title="Open editor"
-        >
-          {sequence}
+        {/* Sequence + Track badge */}
+        <div className="flex flex-col items-center gap-0.5">
+          <div
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-primary/8 font-mono text-sm font-bold text-primary cursor-pointer hover:bg-primary/15 transition-colors"
+            onClick={() => onOpenDrawer?.(id)}
+            title="Open editor"
+          >
+            {sequence}
+          </div>
+          {track && (
+            <span className="rounded bg-violet-100 px-1 py-0.5 text-[8px] font-bold text-violet-700 leading-none">
+              {track}
+            </span>
+          )}
         </div>
 
         {/* Media thumbnails */}
@@ -719,13 +734,20 @@ export function ShotCard({
               </div>
               {!editingDialogues ? (
                 dialogues.length > 0 ? (
-                  dialogues.map((d) => (
-                    <p key={d.id} className="text-[12px]">
-                      <span className="font-semibold text-primary">{d.characterName}</span>
-                      <span className="mx-1.5 text-[--text-muted]">—</span>
-                      <span className="text-[--text-secondary]">{d.text}</span>
-                    </p>
-                  ))
+                  dialogues.map((d) => {
+                    const dtype = (d as { type?: string }).type ?? "dialogue";
+                    const typeLabel: Record<string, string> = { dialogue: "对白", os: "OS", vo: "VO" };
+                    return (
+                      <p key={d.id} className="text-[12px]">
+                        <span className="font-semibold text-primary">{d.characterName}</span>
+                        {dtype !== "dialogue" && (
+                          <span className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">{typeLabel[dtype]}</span>
+                        )}
+                        <span className="mx-1.5 text-[--text-muted]">—</span>
+                        <span className="text-[--text-secondary]">{d.text}</span>
+                      </p>
+                    );
+                  })
                 ) : (
                   <p className="text-[11px] text-[--text-muted]">无台词，点「编辑」可添加</p>
                 )
@@ -743,6 +765,20 @@ export function ShotCard({
                         placeholder="角色名"
                         className="w-20 shrink-0 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] font-semibold text-primary outline-none focus:border-primary/50"
                       />
+                      <select
+                        value={d.type ?? "dialogue"}
+                        onChange={(e) => {
+                          const next = [...editDialogues];
+                          next[i] = { ...next[i], type: e.target.value as DialogueType };
+                          setEditDialogues(next);
+                        }}
+                        className="w-16 shrink-0 rounded border border-[--border-subtle] bg-white px-1 py-1 text-[10px] text-[--text-secondary] outline-none focus:border-primary/50"
+                        title="台词类型：对白（嘴部开合）/ OS（内心独白，嘴不动）/ VO（画外音）"
+                      >
+                        <option value="dialogue">对白</option>
+                        <option value="os">OS</option>
+                        <option value="vo">VO</option>
+                      </select>
                       <textarea
                         value={d.text}
                         onChange={(e) => {
@@ -763,7 +799,7 @@ export function ShotCard({
                     </div>
                   ))}
                   <button
-                    onClick={() => setEditDialogues([...editDialogues, { characterName: "", text: "" }])}
+                    onClick={() => setEditDialogues([...editDialogues, { characterName: "", text: "", type: "dialogue" }])}
                     className="flex items-center gap-1 text-[11px] text-[--text-muted] hover:text-primary"
                   >
                     <Plus className="h-3 w-3" />
@@ -815,7 +851,7 @@ export function ShotCard({
             onGenerateOneFrame={frameActions.handleGenerateOneFrame}
             disabled={generatingVideo}
           />
-          <div className="mt-2">
+          <div className="mt-2 space-y-1.5">
             <ShotFrameToolbar
               hasFrame={hasFrame}
               frameRefShotsCount={frameRefShots.length}
@@ -837,6 +873,15 @@ export function ShotCard({
                   disabled={frameActions.frameActionsBusy || generatingVideo}
                 />
               }
+            />
+            {/* 场景关联：紧跟生成按钮，让用户在生成画面前直观设置 */}
+            <SceneSelector
+              projectId={projectId}
+              episodeId={episodeId}
+              shotId={id}
+              currentSceneId={sceneId}
+              onUpdate={onUpdate}
+              disabled={frameActions.frameActionsBusy || generatingVideo}
             />
           </div>
         </StepRow>

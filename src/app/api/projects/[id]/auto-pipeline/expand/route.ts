@@ -50,7 +50,10 @@ export async function POST(
 
   const model = createLanguageModel(resolvedModelConfig.text);
 
-  const outlineSystem = await resolveOutlineExpandSystem({ userId, projectId });
+  const outlineSystem = await resolveOutlineExpandSystem(
+    { userId, projectId },
+    project.visualStyle || undefined
+  );
 
   const result = streamText({
     model,

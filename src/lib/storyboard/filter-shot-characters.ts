@@ -19,6 +19,25 @@ export function extractBaseName(name: string): string {
   return name.replace(/[（(][^）)]*[）)]/g, "").trim();
 }
 
+/**
+ * 检查 baseName 在文本中是否有「独立出现」——即存在至少一处位置，
+ * 其后紧跟的字符串并不构成 longerNames 中任何一个的尾缀（后缀）。
+ *
+ * 用途：防止 "角色甲" 仅因为 "角色甲父亲" 出现在文本中而被误匹配。
+ */
+function hasStandaloneOccurrence(text: string, baseName: string, longerNames: string[]): boolean {
+  let idx = text.indexOf(baseName);
+  while (idx !== -1) {
+    const isPartOfLonger = longerNames.some((longer) => {
+      const suffix = longer.slice(baseName.length);
+      return suffix && text.startsWith(suffix, idx + baseName.length);
+    });
+    if (!isPartOfLonger) return true;
+    idx = text.indexOf(baseName, idx + 1);
+  }
+  return false;
+}
+
 function extractAge(name: string): string | null {
   const match = name.match(/(\d+)\s*岁/);
   return match?.[1] ?? null;
@@ -81,6 +100,15 @@ export function filterShotCharacters<T extends { name: string }>(
     }
 
     if (!text.includes(baseName)) continue;
+
+    // 防止把 "角色甲" 匹配成 "角色甲父亲"/"角色甲母亲" 这类复合名的子串：
+    // 若此 baseName 在文本中的每处出现都紧接着另一个角色名的尾缀，则跳过。
+    const longerBaseNames = [...grouped.keys()].filter(
+      (k) => k !== baseName && k.startsWith(baseName)
+    );
+    if (longerBaseNames.length > 0 && !hasStandaloneOccurrence(text, baseName, longerBaseNames)) {
+      continue;
+    }
 
     const defaultVariants = group.filter((character) => !extractAge(character.name));
     const contextualAgeMatches = contextText

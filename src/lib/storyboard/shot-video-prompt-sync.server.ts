@@ -7,6 +7,7 @@ import { resolveAIProvider } from "@/lib/ai/provider-factory";
 import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
   buildRefVideoPromptRequest,
+  pruneSceneDescForVideoPrompt,
   resolveRefVideoPromptSystem,
   resolveVideoMotionAndScene,
 } from "@/lib/ai/prompts/ref-video-prompt-generate";
@@ -143,7 +144,7 @@ export async function generateAndPersistVisionVideoPrompt(params: {
   const { motionText, sceneDescription: sceneDescRaw } = resolveVideoMotionAndScene(shot);
   const motionContext = deps.stripBgmContent(motionText || shot.prompt || "", shot.bgmNote);
   const sceneDescription = sceneDescRaw
-    ? deps.stripBgmContent(sceneDescRaw, shot.bgmNote)
+    ? pruneSceneDescForVideoPrompt(deps.stripBgmContent(sceneDescRaw, shot.bgmNote))
     : undefined;
   const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
     .filter(Boolean)

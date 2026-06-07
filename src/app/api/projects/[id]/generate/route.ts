@@ -3,8 +3,11 @@ import { streamText, generateText } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets } from "@/lib/db/schema";
-import { eq, asc, and, lt, gt, desc, inArray } from "drizzle-orm";
+import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, scenes } from "@/lib/db/schema";
+import { eq, asc, and, lt, gt, desc, inArray, isNull } from "drizzle-orm";
+import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
+import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
+import { superviseShots } from "@/lib/storyboard/shot-supervision";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import fs from "node:fs";
 import path from "path";
@@ -14,11 +17,13 @@ import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, resolveCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
+import { buildSceneExtractPrompt, SCENE_EXTRACT_SYSTEM, type ExtractedScene } from "@/lib/ai/prompts/scene-extract";
 import {
   buildSingleShotRewriteUserPrompt,
   resolveSingleShotRewriteSystem,
 } from "@/lib/ai/prompts/single-shot-rewrite";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
+import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition } from "@/lib/ai/prompts/registry";
@@ -45,7 +50,6 @@ import { finalizeExtractedShotsForDb } from "@/lib/storyboard/complete-extracted
 import { downloadVideoWithRetry } from "@/lib/ai/providers/download-with-retry";
 import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-video";
 import { enhanceImagePrompt, enhanceVideoPrompt } from "@/lib/ai/prompt-enhancer";
-import { resolveFrameMode } from "@/lib/storyboard/frame-generation-strategy";
 import {
   frameReferenceContinuityLabel,
   resolveFrameReferenceForProject,
@@ -489,6 +493,22 @@ export async function POST(
 
   if (action === "video_assemble") {
     return handleVideoAssembleSync(projectId, payload, episodeId);
+  }
+
+  if (action === "assign_tracks") {
+    return handleAssignTracks(projectId, payload, episodeId);
+  }
+
+  if (action === "batch_video_generate") {
+    return handleBatchVideoGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, enhancePrompts);
+  }
+
+  if (action === "scene_image_generate") {
+    return handleSceneImageGenerate(projectId, payload, resolvedModelConfig);
+  }
+
+  if (action === "scene_extract") {
+    return handleSceneExtract(projectId, payload, resolvedModelConfig, episodeId);
   }
 
   // Image/video generation - keep in task queue
@@ -977,6 +997,7 @@ async function handleShotSplitStream(
     .select({ visualStyle: projects.visualStyle })
     .from(projects)
     .where(eq(projects.id, projectId));
+  const splitVisualStyle = splitProject?.visualStyle || undefined;
   const splitVisualStyleTag = (() => {
     const style = splitProject?.visualStyle;
     if (!style) return undefined;
@@ -1124,7 +1145,7 @@ async function handleShotSplitStream(
         chunkTargetDuration = Math.round(targetDurationSeconds * ratio);
         console.log(`[ShotSplit] Chunk ${idx + 1}: ${chunkSceneCount} scenes → targetDuration=${chunkTargetDuration}s`);
       }
-      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration, splitVisualStyleTag, videoMaxDuration);
+      const prompt = buildShotSplitPrompt(chunk, characterDescriptions, characterVisualHints, chunkTargetDuration, splitVisualStyleTag, videoMaxDuration, splitVisualStyle);
       try {
         const result = await generateText({
           model,
@@ -1198,14 +1219,52 @@ async function handleShotSplitStream(
       videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration,
-      dialogues: shot.dialogues,
+      emotion: (shot as Record<string, unknown>).emotion as string | null ?? null,
+      lightingAtm: (shot as Record<string, unknown>).lightingAtm as string | null ?? null,
+      framing: (shot as Record<string, unknown>).framing as string | null ?? null,
+      soundEffectNote: (shot as Record<string, unknown>).soundEffect as string | null ?? null,
+      dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string; type?: string }) => ({
+        character: d.character,
+        text: d.text,
+        type: (d.type as "dialogue" | "os" | "vo") ?? "dialogue",
+      })),
     })),
     existingVersionId: verifiedTargetVersionId,
   });
 
   console.log(`[ShotSplit] Created ${allShots.length} shots from ${sceneChunks.length} chunks, version=${persistedVersionId}${verifiedTargetVersionId ? ` (reused version ${verifiedTargetVersionId})` : ""}`);
 
-  return NextResponse.json({ shots: allShots.length, versionId: persistedVersionId });
+  // 监督层：对生成的分镜做质量校验（确定性规则，始终执行）
+  const supervisionInput = allShots.map((shot, i) => ({
+    id: `temp-${i}`,
+    sequence: shot.sequence,
+    prompt: shot.sceneDescription,
+    motionScript: shot.motionScript,
+    emotion: (shot as Record<string, unknown>).emotion as string | null ?? null,
+    lightingAtm: (shot as Record<string, unknown>).lightingAtm as string | null ?? null,
+    framing: (shot as Record<string, unknown>).framing as string | null ?? null,
+    startFrameDesc: shot.startFrame,
+    endFrameDesc: shot.endFrame,
+    dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string }) => ({
+      characterName: d.character,
+      text: d.text,
+    })),
+  }));
+
+  const supervision = superviseShots(supervisionInput);
+  console.log(`[ShotSplit] Supervision: grade=${supervision.grade}, issues=${supervision.issues.length}`);
+
+  return NextResponse.json({
+    shots: allShots.length,
+    versionId: persistedVersionId,
+    supervision: {
+      grade: supervision.grade,
+      summary: supervision.summary,
+      criticalCount: supervision.criticalCount,
+      warningCount: supervision.warningCount,
+      issues: supervision.issues.slice(0, 10), // 只返回前10条，避免响应过大
+    },
+  });
 }
 
 async function handleShotExtractPreview(projectId: string, episodeId?: string) {
@@ -1407,7 +1466,8 @@ async function handleSingleShotRewrite(
 
   const system = await resolveSingleShotRewriteSystem(
     { userId, projectId },
-    rewriteVisualStyleTag
+    rewriteVisualStyleTag,
+    rewriteProject?.visualStyle || undefined
   );
   const userPrompt = buildSingleShotRewriteUserPrompt({
     sequence: shot.sequence,
@@ -1420,6 +1480,9 @@ async function handleSingleShotRewrite(
     cameraDirection: shot.cameraDirection,
     characterDescriptions,
     hasNamedChars,
+    emotion: shot.emotion,
+    lightingAtm: shot.lightingAtm,
+    framing: shot.framing,
   });
 
   console.log(
@@ -1437,6 +1500,9 @@ async function handleSingleShotRewrite(
       motionScript: string;
       videoScript?: string;
       cameraDirection: string;
+      emotion?: string;
+      lightingAtm?: string;
+      framing?: string;
     };
 
     await db
@@ -1448,6 +1514,9 @@ async function handleSingleShotRewrite(
         motionScript: parsed.motionScript,
         videoScript: parsed.videoScript ?? null,
         cameraDirection: parsed.cameraDirection,
+        ...(parsed.emotion    ? { emotion: parsed.emotion }       : {}),
+        ...(parsed.lightingAtm ? { lightingAtm: parsed.lightingAtm } : {}),
+        ...(parsed.framing    ? { framing: parsed.framing }       : {}),
       })
       .where(eq(shots.id, shotId));
 
@@ -1561,6 +1630,25 @@ async function handleFramePromptPreview(
   });
 }
 
+/**
+ * Toonflow 参考图数量限制（API 上限约 10 张）。
+ *
+ * Toonflow 的做法：超出10张时把第10张之后的合并为一张合成图。
+ * 本项目暂无 sharp，改用优先级截断：角色参考图在前，场景图在后，
+ * continuityRef（衔接帧）永远排第一，整体截取前 MAX_REFERENCE_IMAGES 张。
+ *
+ * 实际使用中：1-4 角色 + 0-1 场景 = 2-5 张，极少超限。
+ */
+const MAX_REFERENCE_IMAGES = 10;
+
+function limitReferenceImages(images: string[]): string[] {
+  if (images.length <= MAX_REFERENCE_IMAGES) return images;
+  console.warn(
+    `[ReferenceImages] ${images.length} images exceed limit ${MAX_REFERENCE_IMAGES}, truncating to first ${MAX_REFERENCE_IMAGES}`
+  );
+  return images.slice(0, MAX_REFERENCE_IMAGES);
+}
+
 // --- single_frame_generate: synchronous frame generation for one shot ---
 
 async function handleSingleFrameGenerate(
@@ -1620,8 +1708,11 @@ async function handleSingleFrameGenerate(
   // (prompt) but NOT in startFrameDesc should not be drawn in the first frame, and vice-
   // versa for the last frame. Fall back to the full shot list only when the frame
   // description is empty so we never produce an empty character context by accident.
-  const firstFrameFilterText = [shot.startFrameDesc, shot.videoScript].filter(Boolean).join(" ");
-  const lastFrameFilterText  = [shot.endFrameDesc,   shot.videoScript].filter(Boolean).join(" ");
+  // Use only the per-frame description for character filtering — videoScript covers the
+  // entire shot timeline and would import characters that only appear mid-clip or at the
+  // end, incorrectly pulling their reference images into the first (or last) frame prompt.
+  const firstFrameFilterText = shot.startFrameDesc ?? "";
+  const lastFrameFilterText  = shot.endFrameDesc ?? "";
   const charsForFirstFrame = firstFrameFilterText
     ? filterShotCharacters(firstFrameFilterText, charsForFrame)
     : charsForFrame;
@@ -1650,6 +1741,19 @@ async function handleSingleFrameGenerate(
   const charRefImagesFirst = resolvedChars.filter((rc) => firstFrameCharNames.has(rc.name)).map((c) => c.imagePath);
   const charRefImagesLast  = resolvedChars.filter((rc) => lastFrameCharNames.has(rc.name)).map((c) => c.imagePath);
 
+  // Resolve scene reference image (Toonflow: scene asset injected after character assets).
+  // Only used when scene has an imagePath that exists on disk.
+  let sceneAsset: { id: string; name: string; imagePath: string } | null = null;
+  if (shot.sceneId) {
+    const [shotScene] = await db
+      .select({ id: scenes.id, name: scenes.name, imagePath: scenes.imagePath })
+      .from(scenes)
+      .where(eq(scenes.id, shot.sceneId));
+    if (shotScene?.imagePath && shotFrameFileOnDisk(shotScene.imagePath)) {
+      sceneAsset = { id: shotScene.id, name: shotScene.name, imagePath: shotScene.imagePath };
+    }
+  }
+
   const ai = resolveImageProvider(modelConfig, versionedUploadDir);
   const imageOpts = ratioToImageOpts(payload?.ratio as string | undefined);
   const singleTextProvider = enhancePrompts ? resolveAIProvider(modelConfig) : null;
@@ -1663,6 +1767,7 @@ async function handleSingleFrameGenerate(
     .select({ visualStyle: projects.visualStyle })
     .from(projects)
     .where(eq(projects.id, projectId));
+  const singleVisualStyle = singleProject?.visualStyle || undefined;
   const singleVisualStyleTag = (() => {
     const style = singleProject?.visualStyle;
     if (!style) return undefined;
@@ -1718,19 +1823,26 @@ async function handleSingleFrameGenerate(
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
     const generateAnchorFirst = async (): Promise<string> => {
+      // Scene image appended after character refs (Toonflow priority: role > scene)
       const refImages = continuityRef
-        ? [continuityRef.path, ...charRefImagesFirst]
-        : charRefImagesFirst;
+        ? [continuityRef.path, ...charRefImagesFirst, ...(sceneAsset ? [sceneAsset.imagePath] : [])]
+        : [...charRefImagesFirst, ...(sceneAsset ? [sceneAsset.imagePath] : [])];
+      const firstFrameAssets = [
+        ...charsForFirstFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
+        ...(sceneAsset ? [{ id: sceneAsset.id, name: sceneAsset.name, type: "scene" as const }] : []),
+      ];
       const firstPromptRaw = buildFirstFramePrompt(
         pickFirstFramePromptBuildParams({
           shot,
           characterDescriptions: characterDescriptionsForFirst,
           namedCharacterCount: charsForFirstFrame.length,
           hasContinuityReference: !!continuityRef,
-          hasCharacterSheetRefs: !continuityRef && charRefImagesFirst.length > 0,
+          hasCharacterSheetRefs: !continuityRef && (charRefImagesFirst.length > 0 || !!sceneAsset),
           visualStyleTag: singleVisualStyleTag,
+          visualStyle: singleVisualStyle,
           cameraDirection: singleCleanedCamera,
           slotContents: frameFirstSlots,
+          assets: firstFrameAssets,
         })
       );
       const firstPrompt = enhancePrompts && singleTextProvider
@@ -1751,7 +1863,7 @@ async function handleSingleFrameGenerate(
       return ai.generateImage(firstPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: refImages,
+        referenceImages: limitReferenceImages(refImages),
       });
     };
 
@@ -1780,16 +1892,22 @@ async function handleSingleFrameGenerate(
         await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
         return NextResponse.json({ error: "首帧不存在，请先生成首帧" }, { status: 400 });
       }
+      const lastFrameAssets = [
+        ...charsForLastFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
+        ...(sceneAsset ? [{ id: sceneAsset.id, name: sceneAsset.name, type: "scene" as const }] : []),
+      ];
       const lastPromptRaw = buildLastFramePrompt(
         pickLastFramePromptBuildParams({
           shot,
           characterDescriptions: characterDescriptionsForLast,
           namedCharacterCount: charsForLastFrame.length,
           hasAnchorFirst: true,
-          hasCharacterSheetRefs: charRefImagesLast.length > 0,
+          hasCharacterSheetRefs: charRefImagesLast.length > 0 || !!sceneAsset,
           visualStyleTag: singleVisualStyleTag,
+          visualStyle: singleVisualStyle,
           cameraDirection: singleCleanedCamera,
           slotContents: frameLastSlots,
+          assets: lastFrameAssets,
         })
       );
       const lastPrompt = enhancePrompts && singleTextProvider
@@ -1798,7 +1916,7 @@ async function handleSingleFrameGenerate(
       const lastFramePath = await ai.generateImage(lastPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: [existingFirstFrame, ...charRefImagesLast],
+        referenceImages: limitReferenceImages([existingFirstFrame, ...charRefImagesLast, ...(sceneAsset ? [sceneAsset.imagePath] : [])]),
       });
       await db
         .update(shots)
@@ -1807,52 +1925,27 @@ async function handleSingleFrameGenerate(
       return NextResponse.json({ shotId, anchorLastAi: lastFramePath, status: "ok" });
     }
 
-    // frameTarget === "both" (default) — 首帧仅 Seedream 生成；参考图仅来自 payload.frameReference
+    // frameTarget === "both" — user explicitly chose keyframe-interpolation mode;
+    // always generate anchorFirst + anchorLastAi with no heuristic.
     const firstFramePath = await generateAnchorFirst();
 
-    // Intelligent frame strategy: decide whether to generate the last frame.
-    // When frameTarget is "both" (user clicked "重新生成帧"), base the decision on
-    // how many frames the shot already has:
-    //   - both anchorFirst + anchorLastAi exist → regenerate both
-    //   - only anchorFirst exists (anchorLastAi was never generated) → regenerate first only
-    //   - neither exists yet → fall back to resolveFrameMode heuristic
-    const singleFrameDecision: { mode: "both" | "first_only"; source: string; reason: string } =
-      shot.anchorLastAi
-        ? { mode: "both", source: "existing_frames", reason: "both frames existed — regenerate both" }
-        : shot.anchorFirst
-          ? { mode: "first_only", source: "existing_frames", reason: "only first frame existed — skip last frame" }
-          : await resolveFrameMode(
-              {
-                duration: shot.duration,
-                cameraDirection: singleCleanedCamera ?? null,
-                startFrameDesc: shot.startFrameDesc,
-                endFrameDesc: shot.endFrameDesc,
-                prompt: shot.prompt,
-              },
-              charsForFrame.length > 0,
-              enhancePrompts ? modelConfig?.text ?? null : null
-            );
-
-    if (singleFrameDecision.mode === "first_only") {
-      console.log(
-        `[SingleFrameGenerate] Shot ${shot.sequence}: first_only` +
-        ` (${singleFrameDecision.source}: ${singleFrameDecision.reason})`
-      );
-      await persistAnchorFirst(firstFramePath);
-      return NextResponse.json({ shotId, anchorFirst: firstFramePath, status: "ok" });
-    }
-
     // Both frames: generate anchorLastAi
+    const bothLastFrameAssets = [
+      ...charsForLastFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
+      ...(sceneAsset ? [{ id: sceneAsset.id, name: sceneAsset.name, type: "scene" as const }] : []),
+    ];
     const lastPromptRaw = buildLastFramePrompt(
       pickLastFramePromptBuildParams({
         shot,
         characterDescriptions: characterDescriptionsForLast,
         namedCharacterCount: charsForLastFrame.length,
         hasAnchorFirst: true,
-        hasCharacterSheetRefs: charRefImagesLast.length > 0,
+        hasCharacterSheetRefs: charRefImagesLast.length > 0 || !!sceneAsset,
         visualStyleTag: singleVisualStyleTag,
+        visualStyle: singleVisualStyle,
         cameraDirection: singleCleanedCamera,
         slotContents: frameLastSlots,
+        assets: bothLastFrameAssets,
       })
     );
     const lastPrompt = enhancePrompts && singleTextProvider
@@ -1861,7 +1954,7 @@ async function handleSingleFrameGenerate(
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
-      referenceImages: [firstFramePath, ...charRefImagesLast],
+      referenceImages: limitReferenceImages([firstFramePath, ...charRefImagesLast, ...(sceneAsset ? [sceneAsset.imagePath] : [])]),
     });
 
     await db
@@ -1943,7 +2036,7 @@ async function handleSingleVideoGenerate(
   const useSingleVideoReferenceMode = shouldUseFirstFrameVideoMode(shot, isSingleVideoCrowdShot);
 
   const shotDialogues = await db
-    .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
+    .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence, type: dialogues.type })
     .from(dialogues)
     .where(eq(dialogues.shotId, shotId))
     .orderBy(asc(dialogues.sequence));
@@ -1956,11 +2049,16 @@ async function handleSingleVideoGenerate(
     .select({ visualStyle: projects.visualStyle })
     .from(projects)
     .where(eq(projects.id, projectId));
+  const singleVideoVisualStyle = singleVideoProject?.visualStyle || undefined;
   const singleVideoStyleTag = (() => {
     const style = singleVideoProject?.visualStyle;
     if (!style) return undefined;
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
+
+  // 检测是否为 Seedance 协议（走新版多参提示词）
+  const videoProtocol = modelConfig?.video?.protocol ?? "";
+  const isSeedanceProtocol = videoProtocol === "seedance" || videoProtocol === "doubao";
 
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
@@ -2036,46 +2134,93 @@ async function handleSingleVideoGenerate(
         text: d.text,
         offscreen: !onScreen,
         visualHint,
+        type: (d.type as "dialogue" | "os" | "vo") ?? "dialogue",
       };
     });
-    // If the user already ran "generate video prompt" (Step 7), shot.videoPrompt is a
-    // vision-informed, model-specific prompt — but we still need to:
-    //   1. Strip any BGM language the LLM may have included (was based on old motionScript w/ BGM)
-    //   2. Inject fresh dialogues from DB (pre-generated prompt may be stale or LLM may have omitted them)
+
     const hasPreGeneratedPrompt = !!shotForVideo.videoPrompt;
     const hasVisualFrameAnchors =
       !useSingleVideoReferenceMode &&
       !!shotForVideo.anchorLastAi &&
       shotFrameFileOnDisk(shotForVideo.anchorLastAi);
-    const videoPromptBase = stripBgmContent(
-      shotForVideo.videoPrompt ||
-        (useSingleVideoReferenceMode
-          ? buildReferenceVideoPrompt({
-              videoScript,
-              cameraDirection: shotForVideo.cameraDirection || "static",
-              duration: effectiveDuration,
-              characters: singleVideoShotChars,
-              dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-              slotContents: videoSlots,
-              visualStyleTag: singleVideoStyleTag,
-              soundEffectNote: shotForVideo.soundEffectNote,
-              slimCharacterSection: true,
-            })
-          : buildVideoPrompt({
-              videoScript,
-              cameraDirection: shotForVideo.cameraDirection || "static",
-              startFrameDesc: shotForVideo.startFrameDesc ?? undefined,
-              endFrameDesc: shotForVideo.endFrameDesc ?? undefined,
-              duration: effectiveDuration,
-              characters: singleVideoShotChars,
-              dialogues: dialogueList.length > 0 ? dialogueList : undefined,
-              slotContents: videoSlots,
-              visualStyleTag: singleVideoStyleTag,
-              soundEffectNote: shotForVideo.soundEffectNote,
-              hasVisualFrameAnchors,
-            })),
-      shotForVideo.bgmNote
-    );
+
+    // ── Seedance 新格式：@参考N + 音色 + 台词类型 ──────────────────────────────
+    let videoPromptBase: string;
+    if (!shotForVideo.videoPrompt && isSeedanceProtocol) {
+      // 构建角色资产列表（检查是否有音频参考）
+      const seedanceSingleAssets: SeedanceAsset[] = [];
+      for (const char of singleVideoShotChars) {
+        const charAssets = await db
+          .select({ audioPath: characterAssets.audioPath })
+          .from(characterAssets)
+          .where(eq(characterAssets.characterId, char.id));
+        const hasAudio = charAssets.some((a) => !!a.audioPath);
+        seedanceSingleAssets.push({
+          id: char.id,
+          name: char.name,
+          type: "role",
+          voiceHint: char.voiceHint || null,
+          hasAudio,
+        });
+      }
+
+      const seedanceSingleShot: SeedanceShot = {
+        hasStoryboardImage: !!shotForVideo.anchorFirst,
+        duration: effectiveDuration,
+        sceneDescription: shotForVideo.prompt || "",
+        framing: shotForVideo.framing || null,
+        cameraDirection: shotForVideo.cameraDirection || null,
+        motionScript: videoScript,
+        emotion: shotForVideo.emotion || null,
+        lightingAtm: shotForVideo.lightingAtm || null,
+        soundEffect: shotForVideo.soundEffectNote || null,
+        dialogues: dialogueList.map((d) => ({
+          characterName: d.characterName,
+          text: d.text,
+          type: d.type,
+        })),
+      };
+
+      videoPromptBase = stripBgmContent(
+        buildSeedanceMultiParamVideoPrompt({
+          visualStyle: singleVideoVisualStyle,
+          assets: seedanceSingleAssets,
+          shots: [seedanceSingleShot],
+        }),
+        shotForVideo.bgmNote
+      );
+    } else {
+      // 非 Seedance 或已有预生成 prompt → 沿用原有逻辑
+      videoPromptBase = stripBgmContent(
+        shotForVideo.videoPrompt ||
+          (useSingleVideoReferenceMode
+            ? buildReferenceVideoPrompt({
+                videoScript,
+                cameraDirection: shotForVideo.cameraDirection || "static",
+                duration: effectiveDuration,
+                characters: singleVideoShotChars,
+                dialogues: dialogueList.length > 0 ? dialogueList : undefined,
+                slotContents: videoSlots,
+                visualStyleTag: singleVideoStyleTag,
+                soundEffectNote: shotForVideo.soundEffectNote,
+                slimCharacterSection: true,
+              })
+            : buildVideoPrompt({
+                videoScript,
+                cameraDirection: shotForVideo.cameraDirection || "static",
+                startFrameDesc: shotForVideo.startFrameDesc ?? undefined,
+                endFrameDesc: shotForVideo.endFrameDesc ?? undefined,
+                duration: effectiveDuration,
+                characters: singleVideoShotChars,
+                dialogues: dialogueList.length > 0 ? dialogueList : undefined,
+                slotContents: videoSlots,
+                visualStyleTag: singleVideoStyleTag,
+                soundEffectNote: shotForVideo.soundEffectNote,
+                hasVisualFrameAnchors,
+              })),
+        shotForVideo.bgmNote
+      );
+    }
     const singleVideoTextProvider = (enhancePrompts && !hasPreGeneratedPrompt) ? resolveAIProvider(modelConfig) : null;
     const videoPromptEnhanced = enhancePrompts && !hasPreGeneratedPrompt && singleVideoTextProvider
       ? await enhanceVideoPrompt(videoPromptBase, modelConfig?.video?.protocol ?? "", singleVideoTextProvider)
@@ -2426,4 +2571,440 @@ ${instruction}
   });
 
   return NextResponse.json({ optimizedText: text.trim() });
+}
+
+// ── assign_tracks：为当前版本/剧集的分镜自动分配 Track ──────
+
+async function handleAssignTracks(
+  projectId: string,
+  payload?: Record<string, unknown>,
+  episodeId?: string
+) {
+  const versionId = payload?.versionId as string | undefined;
+
+  // 查询目标分镜（按 sequence 升序）
+  const conditions = [eq(shots.projectId, projectId)];
+  if (versionId) conditions.push(eq(shots.versionId, versionId));
+  if (episodeId) conditions.push(eq(shots.episodeId, episodeId));
+
+  const targetShots = await db
+    .select({ id: shots.id, sequence: shots.sequence, duration: shots.duration })
+    .from(shots)
+    .where(and(...conditions))
+    .orderBy(asc(shots.sequence));
+
+  if (targetShots.length === 0) {
+    return NextResponse.json({ error: "没有找到分镜" }, { status: 404 });
+  }
+
+  // 分组
+  const groups = groupShotsIntoTracks(targetShots);
+  const trackMap = buildShotTrackMap(groups);
+
+  // 批量更新 track 字段
+  for (const [shotId, trackId] of trackMap.entries()) {
+    await db.update(shots).set({ track: trackId }).where(eq(shots.id, shotId));
+  }
+
+  return NextResponse.json({
+    totalShots: targetShots.length,
+    totalTracks: groups.length,
+    groups: groups.map((g) => ({
+      trackId: g.trackId,
+      shotCount: g.shots.length,
+      totalDuration: g.totalDuration,
+    })),
+  });
+}
+
+// ── batch_video_generate：按 Track 分组批量生成 Seedance 多参视频 ──
+
+async function handleBatchVideoGenerate(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string,
+  enhancePrompts?: boolean
+) {
+  const trackId = payload?.trackId as string | undefined;
+  const versionId = payload?.versionId as string | undefined;
+
+  if (!modelConfig?.video) {
+    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
+  }
+
+  // 查询当前 track 的所有分镜
+  const conditions = [eq(shots.projectId, projectId)];
+  if (trackId) conditions.push(eq(shots.track, trackId));
+  if (versionId) conditions.push(eq(shots.versionId, versionId));
+  if (episodeId) conditions.push(eq(shots.episodeId, episodeId));
+
+  const trackShots = await db
+    .select()
+    .from(shots)
+    .where(and(...conditions))
+    .orderBy(asc(shots.sequence));
+
+  if (trackShots.length === 0) {
+    return NextResponse.json({ error: "Track 内没有分镜" }, { status: 404 });
+  }
+
+  // 查询项目信息（风格）
+  const [project] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+
+  // 查询台词（含 type 字段）
+  const shotIds = trackShots.map((s) => s.id);
+  const allDialogues = await db
+    .select()
+    .from(dialogues)
+    .where(inArray(dialogues.shotId, shotIds))
+    .orderBy(asc(dialogues.sequence));
+
+  // 构建分镜台词 Map
+  const dialoguesByShotId = new Map<string, typeof allDialogues>();
+  for (const d of allDialogues) {
+    if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
+    dialoguesByShotId.get(d.shotId)!.push(d);
+  }
+
+  // 查询出现在这些分镜中的角色（通过台词或 filterShotCharacters）
+  const projectCharacters = await db
+    .select()
+    .from(characters)
+    .where(eq(characters.projectId, projectId));
+
+  const charById = new Map(projectCharacters.map((c) => [c.id, c]));
+
+  // 收集所有涉及的角色（去重）
+  const involvedCharIds = new Set<string>();
+  for (const d of allDialogues) involvedCharIds.add(d.characterId);
+
+  // 构建 SeedanceAsset 列表（角色部分）
+  // 查询每个角色是否有默认定妆图的音频参考（audioPath）
+  const seedanceAssets: SeedanceAsset[] = [];
+  for (const charId of involvedCharIds) {
+    const char = charById.get(charId);
+    if (!char) continue;
+    // 查询该角色的默认资产（或任意有 audioPath 的资产）
+    const charAssetsWithAudio = await db
+      .select({ audioPath: characterAssets.audioPath, isDefault: characterAssets.isDefault })
+      .from(characterAssets)
+      .where(eq(characterAssets.characterId, charId));
+    const hasRealAudio = charAssetsWithAudio.some((a) => !!a.audioPath);
+    seedanceAssets.push({
+      id: char.id,
+      name: char.name,
+      type: "role",
+      voiceHint: char.voiceHint || null,
+      hasAudio: hasRealAudio, // true → 生成 @参考N 音频编号，Seedance 音色克隆
+    });
+  }
+
+  // 查询 track 内各分镜的关联场景，去重后追加到 seedanceAssets（role > scene 优先级）
+  // 只注入有参考图且文件在磁盘上的场景（Toonflow 规范：scene type asset）
+  const seenSceneIds = new Set<string>();
+  const batchSceneImages: string[] = []; // 对应追加的场景资产图，顺序与 seedanceAssets 中 scene 条目一致
+  for (const shot of trackShots) {
+    if (!shot.sceneId || seenSceneIds.has(shot.sceneId)) continue;
+    seenSceneIds.add(shot.sceneId);
+    const [sc] = await db
+      .select({ id: scenes.id, name: scenes.name, imagePath: scenes.imagePath })
+      .from(scenes)
+      .where(eq(scenes.id, shot.sceneId));
+    if (!sc?.imagePath || !shotFrameFileOnDisk(sc.imagePath)) continue;
+    seedanceAssets.push({ id: sc.id, name: sc.name, type: "scene" });
+    batchSceneImages.push(sc.imagePath);
+  }
+
+  // 构建 SeedanceShot 列表
+  const seedanceShots: SeedanceShot[] = trackShots.map((shot) => {
+    const shotDialogues = dialoguesByShotId.get(shot.id) ?? [];
+    return {
+      hasStoryboardImage: !!shot.anchorFirst,
+      duration: shot.duration,
+      sceneDescription: shot.prompt || "",
+      sceneName: null,
+      framing: shot.framing || null,
+      cameraDirection: shot.cameraDirection || null,
+      motionScript: shot.motionScript || null,
+      emotion: shot.emotion || null,
+      lightingAtm: shot.lightingAtm || null,
+      soundEffect: shot.soundEffectNote || null,
+      storyboardImagePath: shot.anchorFirst || null,
+      dialogues: shotDialogues.map((d) => {
+        const char = charById.get(d.characterId);
+        return {
+          characterName: char?.name ?? "未知角色",
+          text: d.text,
+          type: (d.type as "dialogue" | "os" | "vo") ?? "dialogue",
+        };
+      }),
+    };
+  });
+
+  // 生成多参提示词
+  const videoPrompt = buildSeedanceMultiParamVideoPrompt({
+    visualStyle: project?.visualStyle || undefined,
+    assets: seedanceAssets,
+    shots: seedanceShots,
+  });
+
+  // 收集所有帧图文件（首帧 + 尾帧 + 角色参考图）
+  const videoProvider = resolveVideoProvider(modelConfig);
+
+  // 按 @参考N 编号的真实顺序收集文件：
+  // 对每个角色 asset：先图片，紧跟音频（如有），然后下一个角色。
+  // 最后追加场景图、分镜首帧。
+  // 此顺序必须与 buildRefEntries() 的分配逻辑完全一致，否则 Seedance 音色克隆会错位。
+  const orderedRefFiles: string[] = [];
+  let firstCharImage: string | null = null; // 用于 initialImage fallback
+
+  for (const asset of seedanceAssets) {
+    if (asset.type === "role") {
+      const char = charById.get(asset.id);
+      if (!char) continue;
+      // 默认定妆图
+      const [defaultAsset] = await db
+        .select()
+        .from(characterAssets)
+        .where(and(eq(characterAssets.characterId, char.id), eq(characterAssets.isDefault, 1)))
+        .limit(1);
+      if (defaultAsset?.imagePath) {
+        orderedRefFiles.push(defaultAsset.imagePath);
+        if (!firstCharImage) firstCharImage = defaultAsset.imagePath;
+      }
+      // 音频参考紧跟在角色图后（与 buildRefEntries 一致）
+      if (asset.hasAudio) {
+        const audioAsset = await db
+          .select({ audioPath: characterAssets.audioPath })
+          .from(characterAssets)
+          .where(and(eq(characterAssets.characterId, char.id)))
+          .then((rows) => rows.find((r) => !!r.audioPath));
+        if (audioAsset?.audioPath) orderedRefFiles.push(audioAsset.audioPath);
+      }
+    } else if (asset.type === "scene") {
+      // 场景图紧跟在所有角色之后（batchSceneImages 已按相同顺序收集）
+      const sceneImg = batchSceneImages[
+        seedanceAssets.filter((a) => a.type === "scene").findIndex((a) => a.id === asset.id)
+      ];
+      if (sceneImg) orderedRefFiles.push(sceneImg);
+    }
+  }
+
+  // 各分镜首帧（接续在所有资产之后）
+  const storyboardImages: string[] = [];
+  for (const shot of trackShots) {
+    if (shot.anchorFirst) storyboardImages.push(shot.anchorFirst);
+  }
+  orderedRefFiles.push(...storyboardImages);
+
+  const allRefImages = orderedRefFiles;
+
+  // 提交给视频模型（Seedance 多参模式：首帧作为 initialImage）
+  const totalDuration = trackShots.reduce((sum, s) => sum + s.duration, 0);
+  const firstFramePath = trackShots[0]?.anchorFirst || null;
+
+  // 需要 initialImage：优先首帧，其次第一张角色参考图，否则报错
+  const initialImage = firstFramePath || firstCharImage || null;
+  if (!initialImage) {
+    return NextResponse.json(
+      { error: "批量生成需要至少一张首帧或角色参考图" },
+      { status: 400 }
+    );
+  }
+
+  const videoResult = await videoProvider.generateVideo({
+    prompt: videoPrompt,
+    duration: Math.min(totalDuration, 15),
+    ratio: (payload?.ratio as string) || "16:9",
+    referenceImages: limitReferenceImages(allRefImages),
+    initialImage,
+  });
+
+  const localVideoPath = videoResult.filePath;
+
+  // 更新所有分镜的 videoUrl（共享同一视频；后续可按时间轴切割）
+  for (const shot of trackShots) {
+    await db.update(shots).set({ videoUrl: localVideoPath }).where(eq(shots.id, shot.id));
+  }
+
+  return NextResponse.json({
+    trackId,
+    shotCount: trackShots.length,
+    totalDuration,
+    videoUrl: localVideoPath,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 场景参考图生成
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 为指定场景生成参考图并存入 scenes.image_path。
+ * 用场景描述 + 项目画风生成一张用于后续分镜首帧注入的场景锚定图。
+ */
+async function handleSceneImageGenerate(
+  projectId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig
+) {
+  const sceneId = payload?.sceneId as string | undefined;
+  if (!sceneId) {
+    return NextResponse.json({ error: "No sceneId provided" }, { status: 400 });
+  }
+  if (!modelConfig?.image) {
+    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
+  }
+
+  const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId));
+  if (!scene) {
+    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+  }
+
+  const [project] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+
+  const visualStyle = project?.visualStyle || "anime_2d";
+
+  // 从 scene.md 的「提示词模板」段提取画风锚定词（去掉 {变量} 占位符）
+  const sceneMdContent = getArtStylePrompt(visualStyle, "scene");
+  let sceneStyleBase = "";
+  if (sceneMdContent) {
+    const templateMatch = sceneMdContent.match(/##\s*[六6][\s\S]*?提示词模板[\s\S]*?\n+([\s\S]+?)(?=\n---|\n##|$)/);
+    if (templateMatch) {
+      sceneStyleBase = templateMatch[1]
+        .replace(/\{[^}]+\}/g, "")   // 删除 {变量} 占位符
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#"))
+        .join("，");
+    }
+  }
+
+  // fallback：用 visualStyleTag + 通用无人场景锚定
+  const fallbackStyle = [
+    VISUAL_STYLE_PRESETS[visualStyle]?.tag ?? "高清画质，线条清晰",
+    "scene design sheet，environment concept art，no people，no characters，no human figures",
+    "画面中无任何人物",
+  ].join("，");
+
+  const styleSection = sceneStyleBase || fallbackStyle;
+
+  // 三段式场景 prompt：画面 + 光影 + 风格，无角色 @图N
+  const scenePrompt = [
+    `【画面】${scene.description || scene.name}，单画面主视图，画面中无任何人物。`,
+    `【光影】${scene.description.includes("光") ? "" : "自然光照，"}光影层次清晰，电影感光效。`,
+    `【风格】${styleSection}，禁止画外字幕、水印、UI 文字。`,
+  ].join("\n\n");
+
+  // 场景图存到项目专属目录（与角色图同级）
+  const sceneUploadDir = path.join(
+    process.env.UPLOAD_DIR || "./uploads",
+    "projects",
+    projectId,
+    "scenes"
+  );
+  const ai = resolveImageProvider(modelConfig, sceneUploadDir);
+
+  try {
+    const imagePath = await ai.generateImage(scenePrompt, {
+      quality: "hd",
+    });
+
+    await db.update(scenes).set({ imagePath }).where(eq(scenes.id, sceneId));
+
+    return NextResponse.json({ sceneId, imagePath, status: "ok" });
+  } catch (err) {
+    console.error(`[SceneImageGenerate] Error for scene ${sceneId}:`, err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Generation failed" },
+      { status: 500 }
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 场景自动提取（从本集分镜推导独立场景地点）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 扫描本集所有分镜的 prompt + lightingAtm，调 LLM 识别独立场景地点并生成标准化描述。
+ * 返回候选场景列表（不自动创建，由前端让用户勾选后再批量 POST）。
+ */
+async function handleSceneExtract(
+  projectId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+  episodeId?: string
+) {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  // 查询本集所有分镜
+  const conditions = [eq(shots.projectId, projectId)];
+  if (episodeId) conditions.push(eq(shots.episodeId, episodeId));
+
+  const episodeShots = await db
+    .select({
+      sequence: shots.sequence,
+      prompt: shots.prompt,
+      lightingAtm: shots.lightingAtm,
+      framing: shots.framing,
+    })
+    .from(shots)
+    .where(and(...conditions))
+    .orderBy(asc(shots.sequence));
+
+  if (episodeShots.length === 0) {
+    return NextResponse.json({ error: "本集暂无分镜，请先解析分镜" }, { status: 400 });
+  }
+
+  const model = createLanguageModel(modelConfig.text);
+  const userPrompt = buildSceneExtractPrompt(episodeShots);
+
+  try {
+    const { text } = await generateText({
+      model,
+      system: SCENE_EXTRACT_SYSTEM,
+      prompt: userPrompt,
+    });
+
+    const parsed = JSON.parse(extractJSON(text)) as ExtractedScene[];
+    if (!Array.isArray(parsed)) {
+      throw new Error("LLM returned non-array response");
+    }
+
+    // 过滤非法条目，确保字段完整
+    const scenes: ExtractedScene[] = parsed
+      .filter(
+        (s): s is ExtractedScene =>
+          typeof s.name === "string" &&
+          s.name.trim().length > 0 &&
+          typeof s.description === "string" &&
+          Array.isArray(s.shotSequences)
+      )
+      .map((s) => ({
+        name: s.name.trim(),
+        description: s.description.trim(),
+        shotSequences: s.shotSequences.filter((n) => typeof n === "number"),
+      }));
+
+    console.log(`[SceneExtract] projectId=${projectId} episodeId=${episodeId} → ${scenes.length} scenes extracted`);
+
+    return NextResponse.json({ scenes });
+  } catch (err) {
+    console.error("[SceneExtract] Error:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "场景提取失败" },
+      { status: 500 }
+    );
+  }
 }

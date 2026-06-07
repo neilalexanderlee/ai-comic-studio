@@ -3,6 +3,7 @@ import {
   SINGLE_SHOT_REWRITE_DEFAULT_SLOTS,
   assembleSingleShotRewriteSystem,
 } from "./single-shot-rewrite-defaults";
+import { getArtStylePrompt } from "./art-styles/index";
 
 export const SINGLE_SHOT_REWRITE_SYSTEM = assembleSingleShotRewriteSystem(
   SINGLE_SHOT_REWRITE_DEFAULT_SLOTS
@@ -10,7 +11,8 @@ export const SINGLE_SHOT_REWRITE_SYSTEM = assembleSingleShotRewriteSystem(
 
 export async function resolveSingleShotRewriteSystem(
   options: { userId: string; projectId?: string },
-  visualStyleTag?: string
+  visualStyleTag?: string,
+  visualStyle?: string
 ): Promise<string> {
   let system = await resolvePrompt("single_shot_rewrite", options);
   if (visualStyleTag) {
@@ -21,6 +23,26 @@ export async function resolveSingleShotRewriteSystem(
   } else {
     system = system.replace("{VISUAL_STYLE_LOCK}", "").replace(/\n\n\n+/g, "\n\n");
   }
+
+  // 注入风格专属分镜表约束（来自 table.md：运镜禁忌/动作节奏/情绪节奏）
+  if (visualStyle) {
+    const tableConstraints = getArtStylePrompt(visualStyle, "table");
+    if (tableConstraints) {
+      // 提取关键段落（运镜禁忌/动作节奏/光影氛围），避免注入过多内容
+      const sections: string[] = [];
+      const sectionMatches = tableConstraints.match(/## [^\n]+\n([\s\S]*?)(?=\n##|$)/g) ?? [];
+      for (const sec of sectionMatches) {
+        if (/运镜禁忌|动作节奏|光影|情绪|环境动态/.test(sec)) {
+          // 截取前300字避免过长
+          sections.push(sec.slice(0, 300).trimEnd());
+        }
+      }
+      if (sections.length > 0) {
+        system += `\n\n━━━ 当前画风专属约束 ━━━\n${sections.join("\n\n")}`;
+      }
+    }
+  }
+
   return system.trim();
 }
 
@@ -35,6 +57,9 @@ export type SingleShotRewriteUserParams = {
   cameraDirection: string | null;
   characterDescriptions: string;
   hasNamedChars: boolean;
+  emotion?: string | null;
+  lightingAtm?: string | null;
+  framing?: string | null;
 };
 
 export function buildSingleShotRewriteUserPrompt(params: SingleShotRewriteUserParams): string {
@@ -52,6 +77,9 @@ export function buildSingleShotRewriteUserPrompt(params: SingleShotRewriteUserPa
 现有动作脚本：${params.motionScript || "（空）"}
 现有视频脚本：${params.videoScript || "（空）"}
 现有运镜：${params.cameraDirection || "static"}
+现有情绪：${params.emotion || "（空，需补全）"}
+现有光影氛围：${params.lightingAtm || "（空，需补全）"}
+现有景别：${params.framing || "（空，需补全）"}
 
 ${params.characterDescriptions ? `角色参考（仅供理解叙事，帧描述里只写名字不写外貌）：\n${params.characterDescriptions}` : ""}
 
@@ -60,14 +88,23 @@ ${params.characterDescriptions ? `角色参考（仅供理解叙事，帧描述�
 ${frameDescMulti}
 
 【motionScript】—— 精确时间线，总时长精确等于 ${params.duration}s
+▸ 开头必须写"(承接上镜: [衔接动作说明])"，首镜写"(开篇)"
+▸ 末尾必须写 ｜朝向：[角色名-朝向方位]（有命名角色时必填）
 ▸ 自检：场景描述中的背景情节是否已写入第一段远景？首帧是否与「片中才发生」的事件时序一致？
+
+【emotion】—— 2-4字情绪关键词（如：坚定决绝/温柔深情/紧张不安）
+【framing】—— 景别（大远景/远景/全景/中景/近景/半身/特写/大特写/过肩 选其一）
+【lightingAtm】—— 光影氛围（光源方向+色温+氛围，如：黄昏冷调侧逆光，轮廓光勾勒边缘）
 
 仅返回 JSON，无 markdown 无注释：
 {
   "startFrameDesc": "首帧静帧：景别/视角，主体+静止姿态，背景关键环境元素，主光颜色+方向+来源",
   "endFrameDesc": "尾帧静帧：景别/视角，主体+稳定落幅姿态，背景关键环境元素，与首帧有可见构图差异",
-  "motionScript": "0-Xs: [远景建立+镜头；背景随后展开场景描述要点]. Xs-Ys: [续，总时长精确=${params.duration}s].",
+  "motionScript": "(承接上镜: 衔接说明)0-Xs: [...]. Xs-Ys: [...].｜朝向：角色名-朝向方位",
   "videoScript": "导演意图一句话+核心动作+镜头运动，散文不超60字",
-  "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]"
+  "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]",
+  "emotion": "2-4字情绪关键词",
+  "framing": "景别词",
+  "lightingAtm": "光影氛围描述"
 }`;
 }

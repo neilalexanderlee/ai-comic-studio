@@ -36,12 +36,14 @@
 
 ## 2. 数据模型
 
-### 核心实体关系
+### 核心实体关系（v0.4）
+
+> ★ = v0.4 新增字段（Toonflow 质量升级）
 
 ```
 Project (1)
-  ├── visualStyle: string              # 锁定全项目画风
-  ├── enhancePrompts: 0|1              # AI prompt 增强开关
+  ├── visualStyle: string              # 锁定全项目画风（映射到 art-styles/ 目录）
+  ├── enhancePrompts: 0|1              # AI prompt 增强开关（也控制帧策略 LLM judge）
   ├── linkShotsViaCutPoint: 0|1        # 视频尾帧自动衔接下一镜（默认关）
   ├── useProjectPrompts: 0|1           # 是否用项目级 prompt 模板
   │
@@ -53,28 +55,38 @@ Project (1)
   │     │           ├── prompt: string          # 场景描述
   │     │           ├── startFrameDesc          # 首帧描述
   │     │           ├── endFrameDesc            # 尾帧描述
-  │     │           ├── videoScript             # 视频脚本
-  │     │           ├── motionScript            # 运动描述
+  │     │           ├── videoScript             # 视频脚本（Seedance 散文）
+  │     │           ├── motionScript            # 时间线动作（含 ｜朝向：标注）★
   │     │           ├── cameraDirection         # 运镜
   │     │           ├── duration: int           # 秒
-  │     │           ├── anchorFirst: path       # Seedream 首帧（anchor_first）
+  │     │           ├── emotion: string         # 情绪（videoDesc 第8维）★
+  │     │           ├── framing: string         # 景别（videoDesc 第5维）★
+  │     │           ├── lightingAtm: string     # 光影氛围（videoDesc 第9维）★
+  │     │           ├── track: string           # Seedance 多参分组（T1/T2...）★
+  │     │           ├── anchorFirst: path       # Seedream 首帧
   │     │           ├── anchorLastAi: path       # Seedream AI 尾帧（可选）
-  │     │           ├── cutPoint: path           # 视频真实尾帧（Seedance return_last_frame）
+  │     │           ├── cutPoint: path           # 视频真实尾帧（return_last_frame）
   │     │           ├── videoUrl: path
+  │     │           ├── soundEffectNote: string  # 音效（注入视频 prompt）
+  │     │           ├── bgmNote: string          # BGM 情绪注记（不传给视频模型）
   │     │           ├── chainSourceShotId / chainSourceType  # 首帧参考追溯
-  │     │           ├── remoteVideoUrl          # 远程视频 URL（有效期 48h）
+  │     │           ├── remoteVideoUrl           # 远程视频 URL（有效期 48h）
   │     │           └──< Dialogue (N)
+  │     │                 ├── text: string
+  │     │                 ├── type: dialogue|os|vo  # 台词类型 ★
+  │     │                 └── voiceHint: string     # 声音属性
   │     │
   │     └──< EpisodeCharacter >── Character
   │
   └──< Character (N)
         ├── visualHint: string   # 服装/外貌描述，注入 prompt
-        ├── voiceHint: string    # 声音属性（Seedance 1.5-pro）
+        ├── voiceHint: string    # 9维度声音属性（Seedance 情况1/3）
         ├── scope: main|guest
         └──< CharacterAsset (N)
               ├── assetType: morph|blueprint
               ├── tag: string    # 状态标签，如"日常"/"战斗"
-              └── imagePath: string
+              ├── imagePath: string
+              └── audioPath: string   # 音色参考音频（Seedance 情况2，音色克隆）★
 ```
 
 ### Shot 状态机
@@ -94,7 +106,7 @@ pending → generating → completed
 ### 3.1 单镜生成（当前帧方案）
 
 ```
-Shot prompt / startFrameDesc / endFrameDesc
+Shot prompt / startFrameDesc / endFrameDesc / emotion / framing / lightingAtm
     │
     ├── filterShotCharacters(shotText, episodeChars)
     │       └── 无匹配 → []，不 fallback 全量角色
@@ -102,8 +114,12 @@ Shot prompt / startFrameDesc / endFrameDesc
     ├── resolveFrameMode (确定性 + 可选 LLM judge) → first_only | both
     │
     ├── single_frame_generate
+    │       ├── buildStoryboardImagePrompt()   ← v0.4 三段式【画面/光影/风格】+ @图N
+    │       │     ├── getArtStylePrompt(visualStyle, 'storyboard') → 风格词库
+    │       │     ├── 按 associateAssetsIds 分配 @图1..N（角色/场景资产）
+    │       │     └── 从 motionScript 提取 ｜朝向：标注
     │       ├── 可选 payload.frameReference → Seedream 参考图重绘 → anchor_first
-    │       ├── resolveFrameMode=both → 再生成 anchor_last_ai
+    │       ├── resolveFrameMode=both → buildLastFramePrompt() → anchor_last_ai
     │       └── 无自动读上一镜尾帧
     │
     ├── single_video_generate
@@ -112,6 +128,23 @@ Shot prompt / startFrameDesc / endFrameDesc
     │       └── Seedance return_last_frame → 下载写入 cut_point（不写 anchor_last_ai）
     │
     └── 可选 link_shots_via_cut_point → cut_point[i] 直拷 anchor_first[i+1]
+```
+
+### 3.1b 批量多参生成（Seedance 新路径，v0.4）
+
+```
+assign_tracks action
+    → groupShotsIntoTracks(shots, maxDuration=15s)  ← track-grouping.ts
+    → 写入 shots.track 字段
+
+batch_video_generate action（按 track 分组提交）
+    → buildVideoDesc(shot)            ← video-desc.ts（12维）
+    → buildSeedanceMultiParamVideoPrompt()  ← seedance-multi-param.ts
+    │   ├── 参考定义段：@参考N 编号（资产图→音频→分镜图）
+    │   ├── 台词处理：对白/内心OS/画外音VO + 9维音色
+    │   └── 分镜正文用角色名（禁用 @参考N）
+    → videoProvider.generateVideo({ initialImage, referenceImages })
+    → 写入 shots.videoUrl（同组共享同一视频 URL）
 ```
 
 **客户端 UI：** 列表 `ShotCard` 与看板→`ShotDrawer` 共用 `useShotFrameActions`、`ShotFrameAssets`、`ShotFrameToolbar`（`src/hooks/`、`src/components/editor/`）。

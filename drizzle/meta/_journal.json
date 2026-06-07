@@ -246,6 +246,34 @@
       "when": 1779000010000,
       "tag": "0034_video_prompt_frame_fingerprint",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1779000011000,
+      "tag": "0035_shot_structured_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1779000012000,
+      "tag": "0036_dialogue_type",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1779000013000,
+      "tag": "0037_character_asset_audio",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1779000014000,
+      "tag": "0038_scenes",
+      "breakpoints": true
     }
   ]
 }

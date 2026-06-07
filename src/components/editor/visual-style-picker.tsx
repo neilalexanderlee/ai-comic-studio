@@ -66,9 +66,9 @@ export function VisualStylePicker() {
               >
                 <div>
                   <div className="font-medium text-[13px]">{preset.label}</div>
-                  {preset.tag && (
+                  {preset.description && (
                     <div className="text-[10px] text-[--text-muted] truncate max-w-[160px]">
-                      {preset.tag.slice(0, 20)}…
+                      {preset.description}
                     </div>
                   )}
                 </div>

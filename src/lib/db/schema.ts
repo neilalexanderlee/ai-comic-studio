@@ -51,6 +51,32 @@ export const episodes = sqliteTable("episodes", {
     .$defaultFn(() => new Date()),
 });
 
+/**
+ * 场景资产表（对标 Toonflow t_assets type=场景）。
+ * 每个场景持久化存储一张参考图（image_path），在生成分镜首帧和 Seedance 多参视频时
+ * 作为 @图N / @参考N 注入 prompt，保证同一场景所有分镜视觉一致。
+ *
+ * 作用域：
+ *   - episode_id = null  → 项目级场景（跨集复用，如主角家）
+ *   - episode_id = xxx   → 剧集级场景（仅在该集使用）
+ */
+export const scenes = sqliteTable("scenes", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  episodeId: text("episode_id").references(() => episodes.id, {
+    onDelete: "cascade",
+  }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  /** 场景参考图本地路径（生成或上传后存储） */
+  imagePath: text("image_path"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const characters = sqliteTable("characters", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -96,6 +122,12 @@ export const characterAssets = sqliteTable("character_assets", {
   assetType: text("asset_type", { enum: ["morph", "blueprint"] })
     .notNull()
     .default("morph"),
+  /**
+   * 角色参考音频路径（MP3 / WAV / M4A）。
+   * 用于 Seedance 2.0 多参模式的音色克隆（@参考N 音频类型）。
+   * 有值时对应 SeedanceAsset.hasAudio = true，生成视频时角色说话声音克隆自该音频。
+   */
+  audioPath: text("audio_path"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -181,6 +213,38 @@ export const shots = sqliteTable("shots", {
    * 在视频生成 prompt 中作为 SFX 提示注入，引导 Seedance/Kling 生成对应的原生音效。
    */
   soundEffectNote: text("sound_effect_note"),
+  /**
+   * 情绪字段（videoDesc 第8维）。
+   * 示例："坚定决绝" / "温柔深情" / "惊讶震惊"
+   */
+  emotion: text("emotion"),
+  /**
+   * 光影氛围（videoDesc 第9维）。
+   * 示例："黄昏冷调侧逆光" / "清晨柔和漫射暖光"
+   * 与 soundEffectNote 独立，soundEffectNote 是音效，lightingAtm 是光线/色调描述。
+   */
+  lightingAtm: text("lighting_atm"),
+  /**
+   * 景别（videoDesc 第5维）。
+   * 标准值：大远景 / 远景 / 全景 / 中景 / 近景 / 半身 / 特写 / 大特写 / 过肩
+   * 独立于 cameraDirection（运镜），景别描述的是构图范围而非镜头运动。
+   */
+  framing: text("framing"),
+  /**
+   * 视频分组标识（Seedance 多参模式）。
+   * 同 track 的连续分镜会被合并为一次多分镜视频生成请求（累计时长 ≤ 15s 为一组）。
+   * 示例："T1" / "T2"。null 表示未分配，按单镜独立生成。
+   */
+  track: text("track"),
+  /**
+   * 关联场景 ID（外键 → scenes.id）。
+   * 生成首帧时将场景参考图作为 @图N 注入 prompt；
+   * Seedance 多参批量生成时同 track 内去重注入场景资产。
+   * null = 未关联场景。
+   */
+  sceneId: text("scene_id").references(() => scenes.id, {
+    onDelete: "set null",
+  }),
 });
 
 /** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */
@@ -206,6 +270,13 @@ export const dialogues = sqliteTable("dialogues", {
   text: text("text").notNull(),
   audioUrl: text("audio_url"),
   sequence: integer("sequence").notNull().default(0),
+  /**
+   * 台词类型，对应 Toonflow videoDesc 第10维台词格式：
+   * - 'dialogue'（默认）：普通对白，角色嘴部开合说话，prompt 中写「说：」
+   * - 'os'：内心独白（Off-Screen OS），角色嘴部紧闭不动，prompt 中写「内心OS：」
+   * - 'vo'：画外音（Voice Over VO），角色不在画面中或嘴部紧闭，prompt 中写「画外音VO：」
+   */
+  type: text("type", { enum: ["dialogue", "os", "vo"] }).notNull().default("dialogue"),
   /**
    * 声音属性描述，用于 Seedance 1.5-pro 声音生成（官方公式）：
    * 性别 + 年龄区间 + 声音属性 + 语速 + 情绪基线

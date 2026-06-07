@@ -1,13 +1,40 @@
 import { resolvePrompt } from "./resolver";
 import { OUTLINE_EXPAND_SYSTEM_DEFAULT } from "./outline-expand-defaults";
+import { getArtStylePrompt } from "./art-styles/index";
 
 export const OUTLINE_EXPAND_SYSTEM = OUTLINE_EXPAND_SYSTEM_DEFAULT;
 
-export async function resolveOutlineExpandSystem(options: {
-  userId: string;
-  projectId?: string;
-}): Promise<string> {
-  return resolvePrompt("outline_expand", options);
+export async function resolveOutlineExpandSystem(
+  options: { userId: string; projectId?: string },
+  visualStyle?: string
+): Promise<string> {
+  let system = await resolvePrompt("outline_expand", options);
+
+  // 注入风格导演规划（planning.md）+ 分镜表约束（table.md）
+  if (visualStyle && visualStyle !== "auto") {
+    const planning = getArtStylePrompt(visualStyle, "planning");
+    const table = getArtStylePrompt(visualStyle, "table");
+
+    const stylePrefix: string[] = [];
+
+    if (planning) {
+      // 提取色调/光影方案核心段落（前 600 字），作为全片规划基准
+      const planningCore = planning.slice(0, 600).trimEnd();
+      stylePrefix.push(`═══ 本项目导演规划（全片色调/光影基准，必须贯穿所有集） ═══\n${planningCore}\n═══ END 导演规划 ═══`);
+    }
+
+    if (table) {
+      // 提取运镜禁忌 + 动作节奏段落
+      const tableCore = table.slice(0, 400).trimEnd();
+      stylePrefix.push(`═══ 本项目风格分镜约束 ═══\n${tableCore}\n═══ END 风格约束 ═══`);
+    }
+
+    if (stylePrefix.length > 0) {
+      system = stylePrefix.join("\n\n") + "\n\n" + system;
+    }
+  }
+
+  return system;
 }
 
 export function buildOutlineExpandPrompt(outline: string): string {

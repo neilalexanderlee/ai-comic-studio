@@ -24,6 +24,7 @@ interface ExtractedCharacter {
   frequency: number;
   description: string;
   visualHint?: string;
+  voiceHint?: string;
   scope?: string;
 }
 

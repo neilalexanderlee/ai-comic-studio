@@ -3,12 +3,9 @@
  *
  * The SYSTEM prompt is now fully owned by the registry (registry.ts → shotSplitDef).
  * This file only builds the USER prompt that wraps the screenplay + character data.
- *
- * Usage in route.ts:
- *   const slots   = await resolveSlotContents("shot_split", { userId, projectId });
- *   const system  = getPromptDefinition("shot_split")!.buildFullPrompt(slots, { maxDuration });
- *   const prompt  = buildShotSplitPrompt(screenplay, characters, ...);
  */
+
+import { getArtStylePrompt } from "./art-styles/index";
 
 export function buildShotSplitPrompt(
   screenplay: string,
@@ -17,31 +14,32 @@ export function buildShotSplitPrompt(
   targetDurationSeconds?: number | null,
   visualStyleTag?: string,
   /** Max shot duration in seconds — used for duration-budget calculations */
-  maxShotDuration: number = 15
+  maxShotDuration: number = 15,
+  /** visualStyle key (e.g. "anime_2d") — used to load style-specific table constraints */
+  visualStyle?: string
 ): string {
   const styleBlock = visualStyleTag
     ? `\n⚠️ ART STYLE LOCK — HIGHEST PRIORITY:\nThis project's visual style is LOCKED to: ${visualStyleTag}\nEvery startFrame and endFrame description MUST explicitly state this style. NEVER describe photorealistic or 3D-render appearances. Character and environment descriptions must match this art style exactly.\n`
+    : "";
+
+  // 风格专属分镜表约束（来自 art-styles/{style}/table.md）
+  const tableStyle = visualStyle ? getArtStylePrompt(visualStyle, "table") : "";
+  const tableBlock = tableStyle
+    ? `\n═══ 风格专属分镜约束（优先级高于通用规则） ═══\n${tableStyle}\n═══ END 风格专属分镜约束 ═══\n`
     : "";
 
   const hintBlock = characterVisualHints?.length
     ? `\n--- CHARACTER VISUAL IDENTIFIERS (MANDATORY) ---\n${characterVisualHints.map((c) => `${c.name}：${c.visualHint}`).join("\n")}\n--- END ---\n\nCRITICAL: Whenever a character appears in videoScript, motionScript, startFrame, or endFrame, you MUST write their name followed by their visual identifier in parentheses using EXACTLY the text above. Example: 天枢真君（银发金瞳）. Never invent alternative descriptions — always reuse the exact identifier string provided.`
     : "";
 
-  // Inject a narrative-coverage constraint when target duration is known.
-  // Placed BEFORE the screenplay so the LLM internalises the budget first.
-  // DESIGN NOTE: Post-hoc "SUM after writing" instructions don't work — LLMs generate
-  // tokens sequentially and cannot go back. Instead, we use a PLAN-FIRST approach:
-  // the model must commit to a per-scene shot distribution BEFORE writing any JSON.
   const coverageRule = targetDurationSeconds
     ? (() => {
         const targetMin = Math.floor(targetDurationSeconds / 60);
         const targetSec = targetDurationSeconds % 60;
         const targetLabel = targetSec > 0 ? `${targetMin}分${targetSec}秒` : `${targetMin}分钟`;
-        // Only enforce a minimum (no cap) — overage is fine, underage is not.
         const low = Math.round(targetDurationSeconds * 0.9);
         const high = targetDurationSeconds + Math.round(targetDurationSeconds * 0.2);
         const minShots = Math.ceil(low / maxShotDuration);
-        // Plan at 9s/shot average (LLMs tend to generate 8-9s; planning at 10s leaves a structural gap)
         const typicalShots = Math.ceil(targetDurationSeconds / 9);
         return `
 🎬 DURATION BUDGET — PLAN FIRST, THEN WRITE
@@ -101,7 +99,7 @@ EVERY SHOT (including inserted ones) MUST MEET S-GRADE STANDARDS:
     : "";
 
   return `Adapt this screenplay into an S-grade shot list following the system instructions above. Elevate every description — fix physical impossibilities, insert missing beats, smooth broken transitions. NO template phrases. NO literal copying of source text.
-${styleBlock}${coverageRule}
+${styleBlock}${tableBlock}${coverageRule}
 --- SCREENPLAY ---
 ${screenplay}
 --- END ---

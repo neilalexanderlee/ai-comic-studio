@@ -35,7 +35,13 @@ export interface PersistableShot {
   bgmNote?: string | null;
   /** 场景级音效提示（注入视频 prompt 供 Seedance/Kling 生成原生 SFX） */
   soundEffectNote?: string | null;
-  dialogues: Array<{ character: string; text: string; sequence?: number }>;
+  /** 情绪字段（videoDesc 第8维），如"坚定决绝"/"温柔深情" */
+  emotion?: string | null;
+  /** 光影氛围（videoDesc 第9维），如"黄昏冷调侧逆光" */
+  lightingAtm?: string | null;
+  /** 景别（videoDesc 第5维），如"中景"/"近景"/"远景" */
+  framing?: string | null;
+  dialogues: Array<{ character: string; text: string; sequence?: number; type?: "dialogue" | "os" | "vo" }>;
   warnings?: string[];
 }
 
@@ -170,6 +176,9 @@ export async function persistStoryboardVersion(params: {
       duration: shot.duration ?? 10,
       bgmNote: shot.bgmNote ?? null,
       soundEffectNote: shot.soundEffectNote ?? null,
+      emotion: shot.emotion ?? null,
+      lightingAtm: shot.lightingAtm ?? null,
+      framing: shot.framing ?? null,
       episodeId: episodeId ?? null,
       warnings: shot.warnings?.join("; ") || null,
     });
@@ -189,6 +198,7 @@ export async function persistStoryboardVersion(params: {
         characterId: matchedChar.id,
         text: dialogue.text,
         sequence: dialogue.sequence ?? i,
+        type: (dialogue.type as "dialogue" | "os" | "vo") ?? "dialogue",
       });
     }
   }

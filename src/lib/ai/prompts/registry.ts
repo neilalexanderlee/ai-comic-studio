@@ -542,25 +542,46 @@ YOU MUST SILENTLY OVERRIDE the screenplay whenever it contains:
 
 OVERRIDE EXECUTION RULE: Fix problems silently — output the corrected S-grade version as if it was always correct. Goal: COHERENT, PHYSICALLY CORRECT, CINEMATICALLY FLUID — not a faithful transcription of imperfect source material.`;
 
-const SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE = `Output a JSON array:
+const SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE = `Output a JSON array. Each shot object MUST contain all of the following fields:
 [
   {
     "sequence": 1,
     "sceneDescription": "Scene/environment description — setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood",
     "startFrame": "Detailed FIRST FRAME description for AI image generation (see requirements below)",
     "endFrame": "Detailed LAST FRAME description for AI image generation (see requirements below)",
-    "motionScript": "Complete time-segmented action script (see requirements below)",
+    "motionScript": "Complete time-segmented action script ending with ｜朝向：[face direction] annotation (see requirements below)",
     "videoScript": "MANDATORY 30-60 word Seedance-style prose (see requirements below)",
     "duration": {{MIN_DURATION}}-{{MAX_DURATION}},
+    "framing": "One of: 大远景/远景/全景/中景/近景/半身/特写/大特写/过肩",
+    "emotion": "Single emotional keyword describing the dominant mood, e.g. 坚定决绝/温柔深情/紧张不安/悲伤失落",
+    "lightingAtm": "Lighting & atmosphere description, e.g. 黄昏冷调侧逆光/清晨柔和漫射暖光/夜晚月光冷调局部暖光",
+    "soundEffect": "Diegetic sound events only (no music/BGM), e.g. 风声衣袂声/脚步声金属碰撞/火焰噼啪声",
     "dialogues": [
       {
         "character": "Exact character name",
-        "text": "Dialogue line spoken during this shot"
+        "text": "Dialogue line spoken during this shot",
+        "type": "dialogue|os|vo"
       }
     ],
     "cameraDirection": "Specific camera movement instruction"
   }
-]`;
+]
+
+FIELD RULES:
+- framing: REQUIRED. Pick the single most appropriate shot size from the 9 options above. For compound camera moves (远景→中景), use the STARTING framing.
+- emotion: REQUIRED. One 2-4 character Chinese keyword (e.g. 坚定/温柔/惊讶/孤独/紧张). No adjective phrases.
+- lightingAtm: REQUIRED. Include light direction + color temperature + mood, e.g. "黄昏冷调侧逆光，轮廓光勾勒人物边缘" or "清晨柔和散射暖光，空气透明感强"
+- soundEffect: REQUIRED. Diegetic/environmental sounds only. Write "无音效" if truly silent. NEVER include music or BGM here.
+- dialogues[].type: REQUIRED for all dialogue entries.
+  - "dialogue": normal on-screen speech (mouth moving)
+  - "os": off-screen inner monologue (mouth closed/not shown)
+  - "vo": voiceover narration (character not in frame or mouth closed)
+
+ORIENTATION RULE (｜朝向：annotation in motionScript):
+Every motionScript for a shot containing named characters MUST end with: ｜朝向：[direction]
+Direction must be one of: 正面面朝镜头 / 3/4侧面朝右 / 3/4侧面朝左 / 正侧面朝右 / 正侧面朝左 / 背对镜头 / 3/4背面朝右 / 3/4背面朝左
+For dialogue scenes with two characters: specify both, e.g. ｜朝向：角色甲3/4侧面朝右，角色乙3/4侧面朝左
+For environment/crowd shots without named characters: omit the ｜朝向：annotation.`;
 
 const SHOT_SPLIT_VIDEO_SCRIPT_RULES = `═══════════════════════════════════════════════════
   videoScript — THE MOST CRITICAL FIELD
@@ -787,6 +808,98 @@ Outputting duration={{MAX_DURATION_PLUS_ONE}} or higher is a CRITICAL ERROR.
 COVERAGE: Generate AT LEAST one shot per SCENE in the screenplay. Do NOT skip or merge scenes.
 When a DURATION BUDGET is provided in the user prompt, follow those expansion rules — each scene requires MULTIPLE shots. One shot per scene is the bare minimum only when there is no duration target.`;
 
+const SHOT_SPLIT_VISUAL_CONTINUITY = `═══════════════════════════════════════════════════
+  视觉连续性铁律（全程强制，违反 = 分镜失败）
+═══════════════════════════════════════════════════
+
+以下 7 条铁律在生成每一条分镜时必须全程遵守，任何违反都会导致最终视频出现割裂感、穿帮或视觉疲劳。
+
+① 动作连续性
+相邻镜头间角色的位置、动作进度、朝向必须物理逻辑一致。
+- 上一镜手伸到半空 → 下一镜必须从半空状态接续，不能突然收回
+- motionScript 开头必须写"(承接上镜: [衔接动作说明])"，首镜写"(开篇)"
+- 例：(承接上镜: 手臂半抬状态→继续上扬握拳)
+
+② 景别递进法则
+景别切换遵循渐进聚焦或渐进释放——禁止无叙事理由的跳变
+- 渐进聚焦：远景→全景→中景→近景→特写（情绪收紧）
+- 渐进释放：特写→近景→中景→远景（情绪释放）
+- ❌ 禁止连续 3 镜以上同景别（= 视觉疲劳）
+- ❌ 禁止：对话近景 → 直接跳切到大远景（没有叙事理由时）
+
+③ 视轴守恒（180°线原则）
+对话/对峙场景中，角色在画面内的左右位置全片固定，不得跳轴。
+- 对话场景：角色A 在画面左侧全程不变；角色B 在画面右侧全程不变
+- 切轴需要明确的"越轴镜头"过渡（如正面拍、或插入主观视角）
+
+④ 朝向空间逻辑
+- 对话双方面朝彼此：左侧角色面朝右，右侧角色面朝左
+- 操作物品的角色面朝物品；注视远方的角色面朝远方
+- motionScript 末尾必须有 ｜朝向：标注（有命名角色时必填）
+- ❌ 禁止无差别让所有角色正面朝镜头
+
+⑤ 信息控制意识
+每镜须意识到"观众此刻知道什么、不知道什么"——
+- 给手不给脸 = 悬念；先声后画 = 期待；只给背影 = 疏离；全貌揭示 = 高潮兑现
+- 不要在同一组场景里重复揭示观众已知信息
+
+⑥ 节拍密度约束
+单镜头动作/事件数量须与时长匹配，防止塞入过多内容——
+- 1 个物理动作 = 1 拍；1 次运镜 = 1 拍；1 句短台词（≤10 字）= 1 拍
+- 2~3s 镜头：最多 1 拍
+- 4~6s 镜头：最多 2 拍
+- 7s+ 镜头：最多 3 拍
+- ❌ 违反此规则会导致视频里角色动作看起来像在走马灯
+
+⑦ 头尾安全区（每镜前后 0.5s）
+- 前 0.5s：用于环境建立或主体静态亮相，不放关键动作或台词起始
+- 后 0.5s：用于动作自然收住，不放关键台词结尾
+- 作用：给 AI 视频模型留出过渡空间，避免首尾帧撞入运动中的帧
+
+━━━ 黄金 6 秒规则 ━━━
+无台词镜头累计超过 6s 未出现新信息（台词/动作/主体变化）= 观众注意力断裂
+- 定场+过渡类镜头尤其注意，宁可合并压缩也不要拖沓
+- 一镜到底可突破（≤12s），但须在 cameraDirection 标注"一镜到底"且信息量持续更新
+
+━━━ 定场与镜头合并规则 ━━━
+每个新场景/段落的定场最多 1~2 个镜头完成：
+- ✅ 推荐：1 个带缓推的远景（定场+主体引入一镜完成）
+- ❌ 禁止：先拍环境空镜→再拍局部细节→再拍人物到达的冗余三段式
+- 导演思维自检：如果一个真人导演会把相邻 2~3 个镜头合成 1 个拍，就应该合并
+
+━━━ 环境动态要求 ━━━
+每 3~4 个镜头至少安排 1 个有环境动态的镜头（防止画面"死掉"）：
+- 优先：窗帘轻摆、咖啡热气蒸腾、雨滴滑过玻璃、车流光影、树叶飘落
+- 在 motionScript 和 videoScript 中描述这些环境动态`;
+
+const SHOT_SPLIT_DIALOGUE_DURATION = `═══════════════════════════════════════════════════
+  含台词镜头时长计算（MANDATORY — 必须精确计算）
+═══════════════════════════════════════════════════
+
+有台词的镜头，duration 必须足够念完全部台词。禁止直觉估算——必须按以下公式计算：
+
+【语速参考】
+- 愤怒/急促/争吵：约 4 字/秒（怒斥、催促、惊慌）
+- 正常对话/叙述：约 3 字/秒（日常交谈、冷静陈述）
+- 悲伤/深情/沉思：约 2 字/秒（告白、哀悼、回忆）
+- 低语/虚弱/临终：约 2 字/秒（气若游丝、耳边呢喃）
+
+【计算步骤】
+1. 基础秒数 = 台词总字数 ÷ 对应语速（向上取整）
+2. 停顿余量：每个标点（逗号/句号/省略号/破折号）+0.3~0.5s
+3. 情绪转折处（语气变化明显）+0.5s
+4. 最终 duration = 基础秒数 + 停顿累计 + 1s 安全余量（向上取整）
+
+【示例】
+台词"我……我知道了。放心，这次不会再出错。"（悲伤语气，15字）
+- 基础：15 ÷ 2 = 7.5s → 8s
+- 停顿："……" +0.5s，"。" +0.3s，"，" +0.3s = +1.1s
+- 安全余量：+1s
+- 最终 duration = 8 + 1.1 + 1 = 10.1s → 取整 11s
+
+❌ 禁止把有长台词的镜头 duration 设为 3~5s（台词根本念不完）
+❌ 一句台词对应一个镜头，禁止在单镜头内塞多角色多轮对白`;
+
 const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, videoScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
 
 OUTPUT FORMAT: If a DURATION BUDGET planning step is requested in the user prompt, output the <!-- PLAN: ... --> comment on its own line FIRST, then output the JSON array with no other text. If no planning step is requested, output ONLY the JSON array. No markdown fences. No other commentary.`;
@@ -802,6 +915,8 @@ const shotSplitDef: PromptDefinition = {
     slot("video_script_rules", SHOT_SPLIT_VIDEO_SCRIPT_RULES, true),
     slot("start_end_frame_rules", SHOT_SPLIT_START_END_FRAME_RULES, true),
     slot("motion_script_rules", SHOT_SPLIT_MOTION_SCRIPT_RULES, true),
+    slot("visual_continuity", SHOT_SPLIT_VISUAL_CONTINUITY, true),
+    slot("dialogue_duration", SHOT_SPLIT_DIALOGUE_DURATION, true),
     slot("proportional_tiers", SHOT_SPLIT_PROPORTIONAL_TIERS_TEMPLATE, true),
     slot("camera_directions", SHOT_SPLIT_CAMERA_DIRECTIONS, true),
     slot("cinematography_principles", SHOT_SPLIT_CINEMATOGRAPHY_PRINCIPLES_TEMPLATE, true),
@@ -850,6 +965,10 @@ const shotSplitDef: PromptDefinition = {
       r("start_end_frame_rules"),
       "",
       r("motion_script_rules"),
+      "",
+      r("visual_continuity"),
+      "",
+      r("dialogue_duration"),
       "",
       replaceDynamic(r("proportional_tiers")),
       "",

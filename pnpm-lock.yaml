@@ -35,6 +35,12 @@ importers:
       '@volcengine/openapi':
         specifier: ^1.36.1
         version: 1.36.1(buffer@6.0.3)
+      '@webav/av-canvas':
+        specifier: ^1.2.8
+        version: 1.2.8
+      '@webav/av-cliper':
+        specifier: ^1.2.8
+        version: 1.2.8
       ai:
         specifier: ^6.0.116
         version: 6.0.116(zod@4.3.6)
@@ -2181,6 +2187,18 @@ packages:
     resolution: {integrity: sha512-liJp1Qjsf3xDrJY7hVgwCOw71aaSD3rkk2zjNTx3a5GCt4+0tHrF+7lzn3dyKz1pW2wD4xxh8rXdcwhr8jMaLQ==}
     engines: {node: '>=12'}
 
+  '@webav/av-canvas@1.2.8':
+    resolution: {integrity: sha512-j7wvlmdQcwSeMDPiOjfnw2LR/+F/yqYScs9dzwh8SHQre6nnnxS/eOPBghhgVx/RlqFk6VR4UYtnXlhfgnhWtA==}
+
+  '@webav/av-cliper@1.2.8':
+    resolution: {integrity: sha512-lxCXgP5AJsl+6xRo1puU5lTv7rAsxX9StQVK8xYdbg02p9FswCt76iTPqNxmlJ0ZfV1g+lmyNufLXu/qBAnJnA==}
+
+  '@webav/internal-utils@1.2.8':
+    resolution: {integrity: sha512-ZiEXl4U6PRqotkux0eTUdVn5zxbzXYm4Xfjt+HvH5bowwGSJVho/mmbPrdPf3ZRtfIu0aWCWa04LUDBQuY5ltA==}
+
+  '@webav/mp4box.js@0.5.7':
+    resolution: {integrity: sha512-KgScEtDpiLnWvj1Rj8Ri9fDWxTjfdNr7cmY/PT88EmttHh6cLxMAeyD/W8Vydes4z7qV/c5VDAaP4cTlaO0E9g==}
+
   '@xmldom/xmldom@0.8.11':
     resolution: {integrity: sha512-cQzWCtO6C8TQiYl1ruKNn2U6Ao4o4WBBcbL61yJl84x+j5sOWWFU9X7DpND8XZG3daDppSsigMdfAIl2upQBRw==}
     engines: {node: '>=10.0.0'}
@@ -4173,6 +4191,9 @@ packages:
       zod:
         optional: true
 
+  opfs-tools@0.7.4:
+    resolution: {integrity: sha512-DJgQnXyPcCj3q8pKa8SjP4HfNBPffj8kO6W1nc2zQydTqu5G/AxOuIjmWnRxZ84nE1EOpzZzhj8MYCZP1jRR9A==}
+
   option@0.2.4:
     resolution: {integrity: sha512-pkEqbDyl8ou5cpq+VsnQbe/WlEy5qS7xPzMS1U55OCG9KPvwFD46zDbxQIj3egJSFc3D+XhYOPUzz49zQAVy7A==}
 
@@ -5023,6 +5044,10 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  wave-resampler@1.0.0:
+    resolution: {integrity: sha512-bE3rbpZXuKAV52Cd8/BeJvy82ZqEHK8pPWHrZ9JioaVVTBlmWbDC+u4p9blhFcf0Skepb4hlOAHc25XfqLC48g==}
+    engines: {node: '>=8'}
 
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
@@ -6787,6 +6812,24 @@ snapshots:
     transitivePeerDependencies:
       - buffer
       - supports-color
+
+  '@webav/av-canvas@1.2.8':
+    dependencies:
+      '@webav/av-cliper': 1.2.8
+      '@webav/internal-utils': 1.2.8
+
+  '@webav/av-cliper@1.2.8':
+    dependencies:
+      '@webav/internal-utils': 1.2.8
+      '@webav/mp4box.js': 0.5.7
+      opfs-tools: 0.7.4
+      wave-resampler: 1.0.0
+
+  '@webav/internal-utils@1.2.8':
+    dependencies:
+      '@webav/mp4box.js': 0.5.7
+
+  '@webav/mp4box.js@0.5.7': {}
 
   '@xmldom/xmldom@0.8.11': {}
 
@@ -8911,6 +8954,8 @@ snapshots:
       ws: 8.19.0
       zod: 4.3.6
 
+  opfs-tools@0.7.4: {}
+
   option@0.2.4: {}
 
   optionator@0.9.4:
@@ -9983,6 +10028,8 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  wave-resampler@1.0.0: {}
 
   web-streams-polyfill@3.3.3: {}
 

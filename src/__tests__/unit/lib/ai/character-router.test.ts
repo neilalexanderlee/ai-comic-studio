@@ -104,6 +104,32 @@ describe("filterShotCharacters", () => {
     expect(result.map((c) => c.name)).toEqual([FIXTURE_CHAR_A]);
   });
 
+  it("does not match a short base name when it appears only as a prefix of a longer character name", () => {
+    // "角色甲" base name must NOT match within "角色甲父亲" or "角色甲母亲".
+    // Guards the compound-name false-positive regression: "角色甲" must not match within "角色甲父亲".
+    const cast = [
+      { id: "1", name: "角色甲（10岁）" },
+      { id: "2", name: "角色甲父亲" },
+      { id: "3", name: "角色甲母亲" },
+    ];
+    const text = "角色甲父亲背对镜头，角色甲母亲立于左后方半步";
+    const result = filterShotCharacters(text, cast);
+    expect(result.map((c) => c.name)).toEqual(["角色甲父亲", "角色甲母亲"]);
+    expect(result.some((c) => c.name === "角色甲（10岁）")).toBe(false);
+  });
+
+  it("does match short base name when it appears standalone alongside longer compound names", () => {
+    const cast = [
+      { id: "1", name: "角色甲（10岁）" },
+      { id: "2", name: "角色甲父亲" },
+    ];
+    // "角色甲" appears standalone at end, so 角色甲（10岁）should be included.
+    const text = "角色甲父亲保护着角色甲";
+    const result = filterShotCharacters(text, cast);
+    expect(result.some((c) => c.name === "角色甲父亲")).toBe(true);
+    expect(result.some((c) => c.name === "角色甲（10岁）")).toBe(true);
+  });
+
   it("uses episode context to keep an age-specific variant for later unqualified mentions", () => {
     const cast = [
       { id: "1", name: FIXTURE_CHAR_A },

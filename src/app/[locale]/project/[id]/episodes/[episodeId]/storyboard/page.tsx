@@ -11,6 +11,7 @@ import type { StoryboardVersion } from "@/stores/project-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import {
   Film,
+  Layers,
   Sparkles,
   ImageIcon,
   VideoIcon,
@@ -248,7 +249,32 @@ export default function EpisodeStoryboardPage() {
         }),
       });
 
-      if (response.body) {
+      if (response.ok) {
+        const data = await response.json() as {
+          shots?: number;
+          versionId?: string;
+          supervision?: {
+            grade: string;
+            summary: string;
+            criticalCount: number;
+            warningCount: number;
+            issues: Array<{ ruleId: string; severity: string; description: string }>;
+          };
+        };
+        // 监督层质量反馈 toast
+        if (data.supervision) {
+          const s = data.supervision;
+          if (s.grade === "A" || s.grade === "B") {
+            toast.success(`分镜生成完成 · 质量 ${s.grade} 级 — ${s.summary}`);
+          } else {
+            const issueHints = s.issues.slice(0, 3).map((i) => i.description).join("；");
+            toast.warning(
+              `分镜生成完成 · 质量 ${s.grade} 级 — ${s.summary}${issueHints ? `\n问题：${issueHints}` : ""}`,
+              { duration: 8000 }
+            );
+          }
+        }
+      } else if (response.body) {
         const reader = response.body.getReader();
         while (true) {
           const { done } = await reader.read();
@@ -292,6 +318,28 @@ export default function EpisodeStoryboardPage() {
     } finally {
       setPreviewLoading(false);
     }
+  }
+
+  async function handleAssignTracks() {
+    if (!project) return;
+    setGenerating(true);
+    try {
+      const res = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "assign_tracks",
+          payload: { versionId: selectedVersionId },
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+      const data = await res.json() as { totalTracks?: number; totalShots?: number; groups?: Array<{ trackId: string; shotCount: number; totalDuration: number }> };
+      toast.success(`已分配 ${data.totalTracks} 个 Track（共 ${data.totalShots} 镜）`);
+      await fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Track 分配失败");
+    }
+    setGenerating(false);
   }
 
   async function handleBatchGenerateVideoPrompts() {
@@ -375,6 +423,15 @@ export default function EpisodeStoryboardPage() {
             >
               <Film className="h-3.5 w-3.5" />
               {t("project.preview")}
+            </Link>
+          )}
+          {totalShots > 0 && (
+            <Link
+              href={`/${locale}/project/${project!.id}/episodes/${urlEpisodeId || useProjectStore.getState().currentEpisodeId}/editor`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary shadow-xs hover:bg-primary/10"
+            >
+              <Layers className="h-3.5 w-3.5" />
+              视频编辑器
             </Link>
           )}
           {totalShots > 0 && (
@@ -660,6 +717,20 @@ export default function EpisodeStoryboardPage() {
               )}
               {generatingVideoPrompts ? t("common.generating") : t("project.batchGenerateVideoPrompts")}
             </Button>
+            <Button
+              onClick={handleAssignTracks}
+              disabled={generating || totalShots === 0}
+              variant="outline"
+              size="sm"
+              title="按累计时长 ≤15s 自动将分镜分组，每组将作为 Seedance 多参视频一次生成"
+            >
+              {generating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <span className="text-[11px] font-bold">T</span>
+              )}
+              自动分配 Track
+            </Button>
           </div>
 
         </div>
@@ -753,6 +824,8 @@ export default function EpisodeStoryboardPage() {
               }))}
               enhancePrompts={enhancePrompts}
               versionId={selectedVersionId}
+              track={(shot as { track?: string | null }).track ?? null}
+              sceneId={(shot as { sceneId?: string | null }).sceneId ?? null}
             />
             );
           })}

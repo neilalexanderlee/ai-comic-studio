@@ -25,6 +25,7 @@ interface CharacterData {
   scope?: "main" | "guest"; // optional — defaults to "main" regardless
   description: string;
   visualHint?: string;
+  voiceHint?: string;
 }
 
 export async function POST(
@@ -108,6 +109,7 @@ export async function POST(
         name: char.name,
         description: char.description,
         visualHint: char.visualHint ?? "",
+        voiceHint: char.voiceHint ?? "",
         scope: "main",
         episodeId: null,
       });

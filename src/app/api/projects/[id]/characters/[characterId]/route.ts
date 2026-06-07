@@ -13,6 +13,7 @@ export async function PATCH(
     name: string;
     description: string;
     visualHint: string;
+    voiceHint: string;
     scope: string;
     episodeId: string | null;
     /** Replace all episode associations for this character */
@@ -41,6 +42,7 @@ export async function PATCH(
   if (body.name !== undefined) updateData.name = body.name;
   if (body.description !== undefined) updateData.description = body.description;
   if (body.visualHint !== undefined) updateData.visualHint = body.visualHint;
+  if (body.voiceHint !== undefined) updateData.voiceHint = body.voiceHint;
   if (body.scope !== undefined) {
     updateData.scope = body.scope;
     if (body.scope === "main") {

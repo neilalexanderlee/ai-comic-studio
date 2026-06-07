@@ -8,11 +8,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
+
+/** 音色快捷预设（与 seedance-multi-param.ts DEFAULT_VOICE_PROFILES 保持同步） */
+const VOICE_PRESETS = [
+  { label: "男青年", text: "男声，青年音色，音调中等，音色干净，声音厚度适中，发音清晰，气息平稳，语速适中" },
+  { label: "女温柔", text: "女声，青年音色，音调中等偏高，音色质感明亮清脆，声音清亮柔和，气息充沛平稳，带温婉真诚感" },
+  { label: "男权威", text: "男声，中年音色，音调低沉，音色浑厚有力，声音厚重，发音标准，气息极其沉稳，语速偏慢" },
+  { label: "女活泼", text: "女声，青年音色，音调偏高，音色清脆活泼，声音轻盈，气息充沛，语速偏快，带笑意和感染力" },
+  { label: "男反派", text: "男声，中年音色，音调低沉，音色质感干燥偏暗，声音带沙砾感，气息平稳，语速极慢，有威胁感" },
+] as const;
 
 export interface CharacterAsset {
   id: string;
@@ -20,6 +29,8 @@ export interface CharacterAsset {
   tag: string;
   assetType: "morph" | "blueprint";
   isDefault: number;
+  /** 参考音频路径（MP3/WAV/M4A），用于 Seedance 多参模式音色克隆 */
+  audioPath?: string | null;
 }
 
 export interface EpisodeRef {
@@ -34,6 +45,8 @@ interface CharacterCardProps {
   name: string;
   description: string;
   visualHint: string | null;
+  /** 9维度文字音色描述（性别/年龄音色/音调/音色质感/声音厚度/发音方式/气息/语速/特殊质感） */
+  voiceHint?: string | null;
   assets?: CharacterAsset[];
   onUpdate: () => void;
   batchGenerating?: boolean;
@@ -50,6 +63,7 @@ export function CharacterCard({
   name,
   description,
   visualHint,
+  voiceHint,
   assets = [],
   onUpdate,
   batchGenerating,
@@ -65,6 +79,10 @@ export function CharacterCard({
   const [editName, setEditName] = useState(name);
   const [editDesc, setEditDesc] = useState(description);
   const [editVisualHint, setEditVisualHint] = useState(visualHint ?? "");
+  const [editVoiceHint, setEditVoiceHint] = useState(voiceHint ?? "");
+  const [uploadingAudio, setUploadingAudio] = useState(false);
+  // 角色级别：任意 asset 有 audioPath 即视为已设置
+  const audioAsset = assets.find((a) => !!a.audioPath) ?? null;
 
   // Sync local state when props change (e.g. after re-extraction)
   useEffect(() => { setEditName(name); }, [name]);
@@ -155,7 +173,7 @@ export function CharacterCard({
     await apiFetch(`/api/projects/${projectId}/characters/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName, description: editDesc, visualHint: editVisualHint }),
+      body: JSON.stringify({ name: editName, description: editDesc, visualHint: editVisualHint, voiceHint: editVoiceHint }),
     });
     onUpdate();
   }
@@ -179,6 +197,43 @@ export function CharacterCard({
       toast.error(t("common.saveFailed"));
     } finally {
       setUploadingField(null);
+    }
+  }
+
+  /** 角色级别音频上传（不需要指定 assetId，后端自动绑到默认定妆图） */
+  async function handleUploadAudio(file: File) {
+    setUploadingAudio(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/characters/${id}/upload-audio`,
+        { method: "POST", body: formData }
+      );
+      if (!response.ok) {
+        const data = (await response.json()) as { error?: string };
+        throw new Error(data.error || "上传失败");
+      }
+      toast.success("音色参考已上传，Seedance 将克隆此音色");
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "音频上传失败");
+    } finally {
+      setUploadingAudio(false);
+    }
+  }
+
+  /** 角色级别音频清除 */
+  async function handleClearAudio() {
+    try {
+      await apiFetch(
+        `/api/projects/${projectId}/characters/${id}/upload-audio`,
+        { method: "DELETE" }
+      );
+      toast.success("音色参考已清除");
+      onUpdate();
+    } catch (err) {
+      toast.error("清除失败");
     }
   }
 
@@ -378,8 +433,8 @@ export function CharacterCard({
 
           {/* Upload Overlay */}
           <label className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
-            asset.imagePath 
-              ? 'bg-black/40 text-white opacity-0 group-hover/slot:opacity-100' 
+            asset.imagePath
+              ? 'bg-black/40 text-white opacity-0 group-hover/slot:opacity-100'
               : 'bg-transparent text-[--text-muted] opacity-0 group-hover/slot:opacity-100 group-hover/slot:bg-black/5 hover:!text-[--text-primary]'
           }`}>
             <Upload className="h-5 w-5 mb-1" />
@@ -391,6 +446,7 @@ export function CharacterCard({
             }} />
           </label>
         </div>
+
       </div>
     );
   }
@@ -505,6 +561,134 @@ export function CharacterCard({
         />
         <div className="space-y-2">
             <InlineModelPicker capability="image" value={imageModelRef} onChange={setImageModelRef} />
+        </div>
+      </div>
+
+      {/* 音色设置区域（参考 Toonflow 音频资产设计） */}
+      <div className="border-t border-[--border-subtle] px-4 py-3 space-y-3">
+        {/* 区域标题 + 当前使用优先级 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[--text-secondary]">
+            <Mic className="h-3.5 w-3.5" />
+            音色设置
+          </div>
+          <span className={`text-[10px] rounded-full px-2 py-0.5 font-medium ${
+            editVoiceHint.trim()
+              ? "bg-blue-50 text-blue-600 border border-blue-200"
+              : audioAsset
+              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+              : "bg-gray-50 text-gray-400 border border-gray-200"
+          }`}>
+            {editVoiceHint.trim() ? "文字描述优先" : audioAsset ? "音频克隆" : "自动生成"}
+          </span>
+        </div>
+
+        {/* 文字音色描述（9维度） */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] text-[--text-muted] font-medium">
+            文字音色描述
+            <span className="ml-1 font-normal opacity-60">（有值时优先于音频克隆）</span>
+          </label>
+          {/* 快捷预设 chips */}
+          <div className="flex flex-wrap gap-1">
+            {VOICE_PRESETS.map((preset) => {
+              const isSelected = editVoiceHint.trim() === preset.text;
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => {
+                    const next = isSelected ? "" : preset.text;
+                    setEditVoiceHint(next);
+                    // 立即保存
+                    apiFetch(`/api/projects/${projectId}/characters/${id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ voiceHint: next }),
+                    }).then(() => onUpdate()).catch(() => {});
+                  }}
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                    isSelected
+                      ? "border-blue-400 bg-blue-100 text-blue-700"
+                      : "border-[--border-subtle] bg-white text-[--text-secondary] hover:border-blue-300 hover:text-blue-600"
+                  }`}
+                  title={preset.text}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
+          <Textarea
+            value={editVoiceHint}
+            onChange={(e) => setEditVoiceHint(e.target.value)}
+            onBlur={handleSave}
+            placeholder={"例：女声，青年音色，音调中等偏高，音色明亮清脆，声音轻盈，气息充沛，语速适中"}
+            className="h-16 resize-none text-xs text-muted-foreground"
+          />
+        </div>
+
+        {/* 参考音频上传（音色克隆） */}
+        <div className="space-y-1">
+          <label className="text-[10px] text-[--text-muted] font-medium">
+            参考音频
+            <span className="ml-1 font-normal opacity-60">（MP3 / WAV / M4A，用于 Seedance 音色克隆）</span>
+          </label>
+          {uploadingAudio ? (
+            <div className="flex items-center justify-center gap-2 rounded-lg border border-[--border-subtle] bg-[--surface] py-2 text-xs text-[--text-muted]">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              上传中…
+            </div>
+          ) : audioAsset ? (
+            <div className="flex items-center gap-2">
+              <div className="flex flex-1 items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                <Music className="h-3 w-3 shrink-0" />
+                <span className="truncate">音色参考已设置</span>
+              </div>
+              <label
+                className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[--border-subtle] bg-white px-2 text-xs text-[--text-muted] hover:border-primary/40 hover:text-primary transition-colors"
+                title="替换音频参考"
+              >
+                <Upload className="h-3 w-3" />
+                替换
+                <input
+                  type="file"
+                  accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,audio/flac,audio/ogg,audio/aiff"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadAudio(file);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              <button
+                onClick={handleClearAudio}
+                title="清除音频参考"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-red-200 bg-white text-red-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+              >
+                <MicOff className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : (
+            <label
+              className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[--border-subtle] bg-[--surface] py-2.5 text-xs text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary"
+              title="上传音频参考（MP3/WAV/M4A），用于 Seedance 音色克隆"
+            >
+              <Mic className="h-3.5 w-3.5" />
+              点击上传音色参考音频
+              <input
+                type="file"
+                accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,audio/flac,audio/ogg,audio/aiff"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleUploadAudio(file);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          )}
         </div>
       </div>
 

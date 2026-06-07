@@ -76,6 +76,36 @@ export async function resolveRefVideoPromptSystem(
 /** @deprecated Use resolveRefVideoPromptSystem / getRefVideoPromptSystem instead */
 export const REF_VIDEO_PROMPT_SYSTEM = SEEDANCE_SYSTEM;
 
+/**
+ * Strip character-action / combat narrative sentences from a scene description,
+ * keeping only location, environment, and atmospheric context.
+ *
+ * When the AI sees both real frame images and a motion script, the scene
+ * description is purely supplemental background context. Sentences that describe
+ * what characters are doing ("对抗魔族", "走到父亲身边") overlap with the motion
+ * script and—worse—can push the model to invent environmental elements like
+ * fire walls when it sees combat verbs next to an ambiguous light source.
+ */
+export function pruneSceneDescForVideoPrompt(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+
+  // Action verbs that indicate character motion / conflict / narrative beats
+  const ACTION_RE =
+    /对抗|战斗|攻击|拼杀|冲向|奔向|扑向|冲去|冲上|冲入|追赶|逃跑|搏斗|格挡|抵挡|砍|刺|射击|踢|格斗|举起|挥动|挥舞|走到|走向|站到|坐到|跑向|跳向|转向|面对|应对|拿着|手持|手握|持着|举着|抱着|拉着|推着|指向|看向|望向|朝向|盯着|凝视着/;
+
+  const parts = trimmed.split(/[。；！？\n]+/).map((s) => s.trim()).filter(Boolean);
+
+  // Single sentence: drop it entirely if action-heavy, otherwise keep as-is
+  if (parts.length <= 1) {
+    return ACTION_RE.test(trimmed) ? undefined : trimmed || undefined;
+  }
+
+  const kept = parts.filter((s) => !ACTION_RE.test(s));
+  if (!kept.length) return undefined;
+  return kept.join("。") + "。";
+}
+
 /** Detect if a motion script contains time-coded stage markers like [0-3s] or [0s-5.5s] */
 function hasTimeCodes(motionScript: string): boolean {
   return /\[\s*\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*\]/.test(motionScript);
@@ -144,11 +174,27 @@ export function buildRefVideoPromptRequest(params: {
     lines.push(``);
   }
 
+  // Compute lip-sync state per character from dialogues
+  const onScreenSpeakers = new Set(
+    (params.dialogues ?? []).filter((d) => !d.offscreen).map((d) => d.characterName)
+  );
+  const offscreenSpeakers = new Set(
+    (params.dialogues ?? []).filter((d) => d.offscreen).map((d) => d.characterName)
+  );
+
   const withHints = (params.characters ?? []).filter((c) => c.visualHint);
   if (withHints.length) {
     lines.push(`CHARACTER VISUAL IDs (advisory baseline — if frame clearly shows different age/attire, describe the frame instead):`);
     for (const c of withHints) {
-      lines.push(`  ${c.name}：${c.visualHint}`);
+      let lipState: string;
+      if (onScreenSpeakers.has(c.name)) {
+        lipState = " — speaking · lip-sync active";
+      } else if (offscreenSpeakers.has(c.name)) {
+        lipState = " — OS/VO · silent lips";
+      } else {
+        lipState = " — silent · silent lips";
+      }
+      lines.push(`  ${c.name}：${c.visualHint}${lipState}`);
     }
     lines.push(``);
   }
@@ -167,7 +213,11 @@ export function buildRefVideoPromptRequest(params: {
   }
 
   if (params.dialogues?.length) {
-    lines.push(`Dialogue: ${params.dialogues.map(d => `${d.characterName}: "${d.text}"`).join("; ")}`);
+    const dialogueLines = params.dialogues.map((d) => {
+      const type = d.offscreen ? "OS/VO · silent lips" : "dialogue · lip-sync active";
+      return `${d.characterName}: "${d.text}" (${type})`;
+    });
+    lines.push(`Dialogue: ${dialogueLines.join("; ")}`);
   }
 
   if (params.visualStyleTag?.trim()) {

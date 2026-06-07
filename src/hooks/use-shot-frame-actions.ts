@@ -109,7 +109,7 @@ export function useShotFrameActions({
   }
 
   function handleGenerateFrames() {
-    openFrameReferencePicker("both");
+    openFrameReferencePicker("first");
   }
 
   async function handleGenerateOneFrame(target: "first" | "last") {

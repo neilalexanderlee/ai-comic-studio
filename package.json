@@ -26,6 +26,8 @@
     "@google/genai": "^1.44.0",
     "@types/archiver": "^7.0.0",
     "@volcengine/openapi": "^1.36.1",
+    "@webav/av-canvas": "^1.2.8",
+    "@webav/av-cliper": "^1.2.8",
     "ai": "^6.0.116",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.6.2",

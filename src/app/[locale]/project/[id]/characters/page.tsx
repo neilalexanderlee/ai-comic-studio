@@ -18,12 +18,14 @@ interface Character {
   name: string;
   description: string;
   visualHint: string | null;
+  voiceHint: string | null;
   assets: {
     id: string;
     imagePath: string | null;
     tag: string;
     assetType: "morph" | "blueprint";
     isDefault: number;
+    audioPath?: string | null;
   }[];
   scope: string;
   episodeId: string | null;
@@ -169,6 +171,7 @@ export default function CharactersPage({
               name={char.name}
               description={char.description}
               visualHint={char.visualHint}
+              voiceHint={char.voiceHint}
               assets={char.assets}
               episodeIds={char.episodeIds ?? []}
               allEpisodes={episodes}

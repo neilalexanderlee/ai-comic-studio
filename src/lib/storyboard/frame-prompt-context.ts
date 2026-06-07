@@ -3,7 +3,10 @@
  * 对齐 Seedream「视频静帧」与 shot_split 的 start/end 静止态定义。
  */
 
-export type FrameShotKind = "character" | "environment";
+import type { AssetRef } from "@/lib/ai/prompts/storyboard-image";
+export type { AssetRef };
+
+export type FrameShotKind = "character" | "environment" | "crowd";
 
 /** @deprecated 使用 FrameShotKind */
 export type FirstFrameShotKind = FrameShotKind;
@@ -76,6 +79,10 @@ type ShotFrameFields = {
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
   cameraDirection?: string | null;
+  motionScript?: string | null;
+  emotion?: string | null;
+  lightingAtm?: string | null;
+  framing?: string | null;
 };
 
 type PickFramePromptOpts = {
@@ -83,8 +90,12 @@ type PickFramePromptOpts = {
   characterDescriptions: string;
   namedCharacterCount: number;
   visualStyleTag?: string;
+  /** 项目视觉风格 key（对应 art-styles/ 目录），优先于 visualStyleTag */
+  visualStyle?: string;
   cameraDirection?: string;
   slotContents?: Record<string, string>;
+  /** 关联资产列表（按 associateAssetsIds 顺序），用于 @图N 编号 */
+  assets?: AssetRef[];
 };
 
 /** 供 buildFirstFramePrompt（生成 / 预览） */
@@ -109,9 +120,15 @@ export function pickFirstFramePromptBuildParams(
       hasCharacterSheetRefs: opts.hasCharacterSheetRefs,
     }),
     visualStyleTag: opts.visualStyleTag,
+    visualStyle: opts.visualStyle,
     cameraDirection: extractOpeningCameraDirection(cleanedCamera),
     slotContents: opts.slotContents,
     previousLastFrame: opts.previousLastFrame,
+    assets: opts.assets,
+    emotion: opts.shot.emotion,
+    lightingAtm: opts.shot.lightingAtm,
+    framing: opts.shot.framing,
+    motionScript: opts.shot.motionScript,
   };
 }
 
@@ -134,7 +151,13 @@ export function pickLastFramePromptBuildParams(
     hasAnchorFirst: opts.hasAnchorFirst,
     hasCharacterSheetRefs: opts.hasCharacterSheetRefs,
     visualStyleTag: opts.visualStyleTag,
+    visualStyle: opts.visualStyle,
     cameraDirection: extractClosingCameraDirection(cleanedCamera),
     slotContents: opts.slotContents,
+    assets: opts.assets,
+    emotion: opts.shot.emotion,
+    lightingAtm: opts.shot.lightingAtm,
+    framing: opts.shot.framing,
+    motionScript: opts.shot.motionScript,
   };
 }

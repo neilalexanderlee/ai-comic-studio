@@ -15,10 +15,11 @@
 
 AI漫剧工坊（英文 **AI Comic Studio**，仓库名 `ai-comic-studio`）是一个基于 AI 的漫剧/短剧分镜生成工具。用户可以：
 1. 创建项目 → 编写剧情大纲和剧本
-2. 将剧本解析为分镜版本（storyboard versions）
-3. 为每个分镜生成首帧/尾帧（keyframe 模式）或参考帧（reference 模式）
-4. 用帧驱动视频生成（Seedance / Kling / Jimeng / Veo 等）
-5. 将视频合并为完整剧集
+2. 将剧本解析为分镜版本（storyboard versions），含 12 维结构化字段（emotion / framing / lightingAtm / 朝向 / 台词类型等）
+3. 为每个分镜生成首帧/尾帧（三段式 Toonflow 提示词 + @图N 角色绑定）
+4. Seedance 多参模式批量生成连贯视频（@参考N 编号 + 音色克隆 + Track 分组）
+5. 浏览器端视频编辑器（时间线 + 字幕 + BGM + 转场 + 导出 WebM）
+6. 将视频合并为完整剧集（ffmpeg 拼接）
 
 ---
 
@@ -64,20 +65,41 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │   │   │   ├── provider-factory.ts    # 按 protocol 字符串创建 provider 实例
 │   │   │   ├── character-router.ts    # 角色图片路由（智能状态选择）
 │   │   │   ├── prompt-enhancer.ts     # 模型感知 prompt 增强
-│   │   │   ├── prompts/               # Prompt 构建函数 + 注册表
-│   │   │   │   ├── outline-expand.ts  # AI 自动生成（大纲→S级剧本）
-│   │   │   │   ├── frame-strategy-judge.ts  # 帧生成策略 LLM judge prompt
-│   │   │   │   └── ...
-│   │   │   └── providers/             # 各模型实现（openai/gemini/kling/seedance/jimeng/...）
+│   │   │   └── prompts/               # Prompt 构建函数 + 注册表
+│   │   │       ├── art-styles/        # ★ 美术风格约束库（Toonflow 移植）
+│   │   │       │   ├── index.ts       #   getArtStylePrompt(style, type) 加载器
+│   │   │       │   ├── anime_2d/      #   prefix / character / scene / storyboard / video
+│   │   │       │   ├── realistic/
+│   │   │       │   ├── cg_3d/
+│   │   │       │   ├── chinese_ink/
+│   │   │       │   ├── western_cartoon/
+│   │   │       │   └── storyboard-techniques.md  # 通用分镜技法（Toonflow 移植）
+│   │   │       ├── storyboard-image.ts  # ★ buildStoryboardImagePrompt()（三段式 + @图N）
+│   │   │       ├── seedance-multi-param.ts  # ★ buildSeedanceMultiParamVideoPrompt()
+│   │   │       ├── frame-generate.ts    # buildFirstFramePrompt / buildLastFramePrompt
+│   │   │       ├── outline-expand-defaults.ts  # 大纲扩写（含12维 videoDesc 输出规范）
+│   │   │       ├── single-shot-rewrite-defaults.ts  # 单镜重写（含6重校验 + 朝向）
+│   │   │       └── ...
 │   │   ├── db/
-│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源）
+│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=37）
 │   │   │   └── index.ts               # DB 实例 + idempotent migration runner
 │   │   ├── storyboard/                # 分镜工具函数
 │   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
+│   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（12维 videoDesc 组装）
+│   │   │   ├── track-grouping.ts      # ★ groupShotsIntoTracks()（≤15s 分组）
+│   │   │   ├── shot-supervision.ts    # ★ superviseShots()（6红线校验 + LLM judge）
 │   │   │   ├── detect-structured-storyboard.ts
 │   │   │   ├── extract-shot-script.ts
 │   │   │   └── complete-extracted-shots.ts
 │   │   └── bootstrap.ts              # 启动序列（migrations → providers → worker）
+│   ├── components/editor/
+│   │   └── video-editor/              # ★ 浏览器端视频编辑器
+│   │       ├── hooks/useEditorStore.ts  # Zustand 轨道/Clip/播放状态
+│   │       ├── Timeline.tsx           # 时间线组件（拖拽 + 刻度尺 + 播放头）
+│   │       ├── MediaLibrary.tsx       # 左侧素材库
+│   │       ├── VideoPreview.tsx       # Canvas 预览 + 导出
+│   │       ├── PropertyPanel.tsx      # 右侧属性编辑
+│   │       └── utils/                 # 转场/滤镜/轨道工具（Toonflow 移植）
 │   ├── stores/                # Zustand 客户端状态
 │   │   ├── project-store.ts
 │   │   ├── episode-store.ts
@@ -131,18 +153,19 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 32` — `0032_drop_shot_reference_columns`
+**当前最新迁移索引**：`idx 37` — `0037_character_asset_audio`
 
 ### 关键表
 
 | 表 | 说明 |
 |---|---|
-| `projects` | 顶层实体，含 `visualStyle`、`generationMode`（legacy）、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
-| `episodes` | 分属 project 的剧集，含 `generationMode`（可覆盖 project 级） |
+| `projects` | 顶层实体，含 `visualStyle`、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
+| `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`、`chainSourceShotId`、`chainSourceType`（语义见 `docs/ARCHITECTURE-FRAMES.md` §0「Plan B」） |
-| `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint` |
-| `character_assets` | 角色图片（morph/blueprint 类型，带 tag 状态标签） |
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；**v0.4 新增**：`emotion`、`framing`、`lightingAtm`、`track`（语义见 `docs/ARCHITECTURE-FRAMES.md` §0） |
+| `dialogues` | 台词；**v0.4 新增**：`type`（'dialogue'\|'os'\|'vo'）|
+| `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
+| `character_assets` | 角色图片/音频；**v0.4 新增**：`audioPath`（音色参考，用于 Seedance 音色克隆）|
 | `episode_characters` | 多对多：角色参与哪些剧集 |
 
 ---
@@ -340,6 +363,10 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
 | PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧 |
+| shot_split 输出字段不完整（emotion 等为空）| LLM 未按新 schema 输出 | 重新点「解析分镜」；单镜「重新生成文本」|
+| Seedance 多参音色错位 | audioPath 有值但 hasAudio 未传入 | `handleBatchVideoGenerate` 查询 `character_assets.audioPath` |
+| Track 分组后视频混乱 | 分镜不连续（有跳号 sequence）| 重新「自动分配 Track」重计算分组 |
+| 视频编辑器字幕未显示 | Canvas 字幕轨道 clip 时间范围不覆盖当前播放头 | 调整字幕 clip 的 startTime / endTime |
 
 ---
 

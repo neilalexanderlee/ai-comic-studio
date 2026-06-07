@@ -3,6 +3,10 @@ import type {
   FrameReferenceMode,
   FrameShotKind,
 } from "@/lib/storyboard/frame-prompt-context";
+import {
+  buildStoryboardImagePrompt,
+  type AssetRef,
+} from "./storyboard-image";
 
 export function buildFirstFramePrompt(params: {
   sceneDescription: string;
@@ -20,6 +24,11 @@ export function buildFirstFramePrompt(params: {
    */
   visualStyleTag?: string;
   /**
+   * 项目视觉风格 key（对应 art-styles/ 目录）。
+   * 优先于 visualStyleTag，用于加载风格约束文件。
+   */
+  visualStyle?: string;
+  /**
    * 运镜方向（来自 shot.cameraDirection，已去除 ** 前缀）。
    * 例如："crane up — 镜头从地面麦秸缓缓升起"
    * 指定首帧应采用的构图视角，确保帧与视频运动逻辑一致。
@@ -28,7 +37,33 @@ export function buildFirstFramePrompt(params: {
   /** 分镜段标题（来自 shot.sceneTitle），提供构图语义。 */
   sceneTitle?: string;
   slotContents?: Record<string, string>;
+  /** 关联资产列表（按 associateAssetsIds 顺序），用于 @图N 编号。 */
+  assets?: AssetRef[];
+  /** 情绪字段 */
+  emotion?: string | null;
+  /** 光影氛围字段 */
+  lightingAtm?: string | null;
+  /** 景别字段 */
+  framing?: string | null;
+  /** 角色动作（含 ｜朝向：标注） */
+  motionScript?: string | null;
 }): string {
+  // 优先使用三段式新系统（有 visualStyle 或 assets 时启用）
+  if (params.visualStyle || (params.assets && params.assets.length > 0)) {
+    return buildStoryboardImagePrompt({
+      sceneDescription: params.sceneDescription,
+      startFrameDesc: params.startFrameDesc,
+      emotion: params.emotion,
+      lightingAtm: params.lightingAtm,
+      framing: params.framing,
+      motionScript: params.motionScript,
+      assets: params.assets ?? [],
+      visualStyle: params.visualStyle ?? "",
+      visualStyleTag: params.visualStyleTag ?? "",
+      isCrowdOrEmpty: params.shotKind === "crowd" || params.shotKind === "environment",
+    });
+  }
+
   const def = getPromptDefinition("frame_generate_first");
   if (def) {
     return def.buildFullPrompt(params.slotContents ?? {}, {
@@ -126,12 +161,47 @@ export function buildLastFramePrompt(params: {
   hasCharacterSheetRefs?: boolean;
   /** 项目画风标签（同 buildFirstFramePrompt），锁定尾帧画风一致性。 */
   visualStyleTag?: string;
+  /** 项目视觉风格 key（对应 art-styles/ 目录）。 */
+  visualStyle?: string;
   /** 运镜方向，用于指定尾帧构图视角。 */
   cameraDirection?: string;
   /** 分镜段标题，提供语义上下文。 */
   sceneTitle?: string;
   slotContents?: Record<string, string>;
+  /** 关联资产列表，用于 @图N 编号。 */
+  assets?: AssetRef[];
+  /** 情绪字段 */
+  emotion?: string | null;
+  /** 光影氛围字段 */
+  lightingAtm?: string | null;
+  /** 景别字段 */
+  framing?: string | null;
+  /** 角色动作（含 ｜朝向：标注） */
+  motionScript?: string | null;
 }): string {
+  // 尾帧使用同一三段式系统，但画面主干是 endFrameDesc
+  if (params.visualStyle || (params.assets && params.assets.length > 0)) {
+    const endPrompt = buildStoryboardImagePrompt({
+      sceneDescription: params.sceneDescription,
+      startFrameDesc: params.endFrameDesc,   // 尾帧描述传入 startFrameDesc 位置
+      emotion: params.emotion,
+      lightingAtm: params.lightingAtm,
+      framing: params.framing,
+      motionScript: params.motionScript,
+      assets: params.assets ?? [],
+      visualStyle: params.visualStyle ?? "",
+      visualStyleTag: params.visualStyleTag ?? "",
+      isCrowdOrEmpty: params.shotKind === "crowd" || params.shotKind === "environment",
+    });
+    // 尾帧追加首帧一致性说明
+    const lines = [endPrompt, ""];
+    lines.push("【尾帧约束】本帧为镜头动作完成后的稳定状态（非过渡中间帧）：");
+    lines.push("- 与首帧同一环境、同一光照方向、同一画风");
+    lines.push("- 角色服装、发型、配饰与首帧/参考图完全一致，仅姿态/位置/表情可变");
+    lines.push("- 构图完整，可作为下一镜头的首帧参考");
+    return lines.join("\n");
+  }
+
   const def = getPromptDefinition("frame_generate_last");
   if (def) {
     return def.buildFullPrompt(params.slotContents ?? {}, {

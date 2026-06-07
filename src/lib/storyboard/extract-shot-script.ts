@@ -23,6 +23,12 @@ export interface ExtractedShot {
   bgmNote?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
+  /** 情绪字段（videoDesc 第8维） */
+  emotion?: string | null;
+  /** 光影氛围（videoDesc 第9维） */
+  lightingAtm?: string | null;
+  /** 景别（videoDesc 第5维） */
+  framing?: string | null;
   dialogues: ExtractedDialogue[];
   source: "extracted";
   completeness: {
