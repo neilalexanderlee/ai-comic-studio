@@ -19,7 +19,7 @@
  *   - 参考图模式（initialImage）
  */
 import { ensureArkApiV3BaseUrl } from "../ark-base-url";
-import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
+import type { VideoProvider, VideoGenerateParams, VideoGenerateResult, MultimodalRefItem } from "../types";
 import fs from "node:fs";
 import path from "node:path";
 import { downloadVideoWithRetry } from "./download-with-retry";
@@ -38,7 +38,7 @@ function toDataUrl(filePath: string): string {
   return `data:${mime};base64,${base64}`;
 }
 
-// 支持本地路径或 http(s) URL
+// 支持本地路径或 http(s) URL（图片）
 function toImageUrl(imagePathOrUrl: string): string {
   if (
     imagePathOrUrl.startsWith("http://") ||
@@ -49,11 +49,20 @@ function toImageUrl(imagePathOrUrl: string): string {
   return toDataUrl(imagePathOrUrl);
 }
 
-export function seedanceSupportsMultimodalReference(modelId: string): boolean {
-  const id = modelId.toLowerCase();
-  // r2v（reference_image 多模态）仅 Seedance 2.0+ 支持；1.5 Pro/Lite 仅首帧 i2v
-  return id.includes("seedance-2-0") || id.includes("dreamina-seedance-2-0");
+// 音频文件转 data URI（仅本地路径）
+function toAudioDataUrl(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase().replace(".", "");
+  const mime =
+    ext === "mp3" ? "audio/mpeg" :
+    ext === "wav" ? "audio/wav" :
+    ext === "m4a" ? "audio/mp4" :
+    ext === "ogg" ? "audio/ogg" :
+    ext === "flac" ? "audio/flac" :
+    "audio/mpeg"; // fallback
+  const base64 = fs.readFileSync(filePath, { encoding: "base64" });
+  return `data:${mime};base64,${base64}`;
 }
+
 
 export class SeedanceProvider implements VideoProvider {
   private apiKey: string;
@@ -93,8 +102,17 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   async generateVideo(params: VideoGenerateParams): Promise<VideoGenerateResult> {
-    const isKeyframe = "anchorFirst" in params;
+    const isKeyframe = "anchorFirst" in params && !!params.anchorFirst;
+    const isMultimodal = "multimodalRefs" in params && !!params.multimodalRefs;
     const buildBody = (useRemoteUrls: boolean) => {
+      if (isMultimodal) {
+        // 多模态参考模式不依赖远端 URL，始终用本地文件
+        const body = this.buildMultimodalBody(params as VideoGenerateParams & { multimodalRefs: MultimodalRefItem[] });
+        if (params.resolution) (body as Record<string, unknown>).resolution = params.resolution;
+        const serviceTier = this.resolveServiceTier(params.serviceTier);
+        if (serviceTier) (body as Record<string, unknown>).service_tier = serviceTier;
+        return body;
+      }
       const body = isKeyframe
         ? this.buildKeyframeBody(
             useRemoteUrls
@@ -114,11 +132,12 @@ export class SeedanceProvider implements VideoProvider {
     const hasRemoteUrls = isKeyframe && !!(kfParams.anchorFirstRemoteUrl || kfParams.anchorLastAiRemoteUrl);
 
     const body = buildBody(true /* useRemoteUrls */);
+    const mmRefs = isMultimodal ? (params as VideoGenerateParams & { multimodalRefs: MultimodalRefItem[] }).multimodalRefs : [];
     console.log(
       `[Seedance] Submitting task: model=${body.model}, ` +
         `duration=${body.duration}, ratio=${body.ratio}` +
         (params.resolution ? `, resolution=${params.resolution}` : "") +
-        (hasRemoteUrls ? ", frames=remoteUrl" : ", frames=base64")
+        (isMultimodal ? `, multimodal refs=${mmRefs.filter(r => r.type === "image").length}img+${mmRefs.filter(r => r.type === "audio").length}audio` : hasRemoteUrls ? ", frames=remoteUrl" : ", frames=base64")
     );
 
     let taskId: string;
@@ -240,11 +259,12 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   /**
-   * 参考图模式：
-   * - 无角色参考图：「图生视频-首帧」模式，单张初始图片不带 role（或 role=first_frame）
-   * - 有角色参考图（referenceImages）：切换为「多模态参考生视频」模式，所有图片均使用
-   *   role=reference_image（最多 9 张；首帧 + 角色图一起传入）。
-   *   注意：两种模式在 Seedance 2.0 API 中互斥，不可混用 first_frame 与 reference_image。
+   * 参考图模式：「图生视频-首帧」，单张初始图片作为严格起始帧。
+   *
+   * API 说明（火山方舟）：图生视频-首帧、图生视频-首尾帧、多模态参考生视频为互斥场景，不可混用。
+   * 若同时传入角色定妆图会切换为多模态参考模式，initialImage 会从首帧锚点降级为普通参考图，
+   * 导致视频不从指定首帧开始。因此参考图模式始终只传 initialImage，角色定妆图在首帧已有
+   * 视觉锚定，无需额外传入。
    */
   private buildReferenceBody(
     params: VideoGenerateParams & { initialImage: string }
@@ -253,45 +273,63 @@ export class SeedanceProvider implements VideoProvider {
     const generateAudio = params.generateAudio ?? true;
     const promptText = generateAudio ? this.suppressBgmInPrompt(params.prompt) : params.prompt;
 
-    const charImages = (params.referenceImages ?? []).filter(Boolean);
-    const useMultimodalRef =
-      charImages.length > 0 && seedanceSupportsMultimodalReference(this.model);
-
-    if (charImages.length > 0 && !useMultimodalRef) {
-      console.warn(
-        `[Seedance] Model ${this.model} does not support multi-modal reference (r2v); ` +
-          `using first-frame mode only (${charImages.length} character ref image(s) omitted)`
-      );
-    }
-
-    if (useMultimodalRef) {
-      // 多模态参考生视频：首帧 + 角色定妆图，全部 role=reference_image（上限 9 张）
-      const allImages = [params.initialImage, ...charImages].slice(0, 9);
-      const imageContent = allImages.map((img) => ({
-        type: "image_url",
-        image_url: { url: toImageUrl(img) },
-        role: "reference_image",
-      }));
-      console.log(`[Seedance] Multi-modal reference mode: ${allImages.length} images (1 scene + ${allImages.length - 1} character ref)`);
-      const body: Record<string, unknown> = {
-        model: this.model,
-        content: [{ type: "text", text: promptText }, ...imageContent],
-        ratio: params.ratio || "16:9",
-        generate_audio: generateAudio,
-        return_last_frame: true,
-        watermark: false,
-      };
-      if (dur !== undefined) body.duration = dur;
-      return body;
-    }
-
-    // 图生视频-首帧：单张图片，不带 role
+    // 图生视频-首帧：单张图片，不带 role（等效 first_frame），严格约束起始画面
     const body: Record<string, unknown> = {
       model: this.model,
       content: [
         { type: "text", text: promptText },
         { type: "image_url", image_url: { url: toImageUrl(params.initialImage) } },
       ],
+      ratio: params.ratio || "16:9",
+      generate_audio: generateAudio,
+      return_last_frame: true,
+      watermark: false,
+    };
+    if (dur !== undefined) body.duration = dur;
+    return body;
+  }
+
+  /**
+   * 多模态参考模式：「多模态参考生视频」，对应 Toonflow 的 imageReference 数组模式。
+   *
+   * 用于 Track 级批量生成（多镜合一视频），将角色定妆图、场景图、分镜首帧一并作为视觉参考。
+   * 与单镜首帧模式互斥：此模式无严格首帧约束，内容由 prompt 的 @参考N 系统驱动。
+   *
+   * API content 顺序（与 @参考N 编号完全对应）：
+   *   text → image_url × N（reference_image）→ audio_url × M（reference_audio）
+   */
+  private buildMultimodalBody(
+    params: VideoGenerateParams & { multimodalRefs: MultimodalRefItem[] }
+  ): Record<string, unknown> {
+    const dur = this.resolveDuration(params.duration);
+    const generateAudio = params.generateAudio ?? true;
+    const promptText = generateAudio ? this.suppressBgmInPrompt(params.prompt) : params.prompt;
+
+    const content: unknown[] = [{ type: "text", text: promptText }];
+
+    // 图片先行（reference_image），顺序与 buildRefEntries 第1+2轮一致
+    const imageRefs = params.multimodalRefs.filter((r) => r.type === "image");
+    for (const ref of imageRefs) {
+      content.push({
+        type: "image_url",
+        image_url: { url: toImageUrl(ref.path) },
+        role: "reference_image",
+      });
+    }
+
+    // 音频殿后（reference_audio），顺序与 buildRefEntries 第3轮一致
+    const audioRefs = params.multimodalRefs.filter((r) => r.type === "audio");
+    for (const ref of audioRefs) {
+      content.push({
+        type: "audio_url",
+        audio_url: { url: toAudioDataUrl(ref.path) },
+        role: "reference_audio",
+      });
+    }
+
+    const body: Record<string, unknown> = {
+      model: this.model,
+      content,
       ratio: params.ratio || "16:9",
       generate_audio: generateAudio,
       return_last_frame: true,

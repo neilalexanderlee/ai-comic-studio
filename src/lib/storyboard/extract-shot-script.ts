@@ -15,7 +15,6 @@ export interface ExtractedShot {
   prompt: string;
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
-  videoScript?: string | null;
   motionScript?: string | null;
   /** 场景级音效提示（用于视频生成 prompt，如"火焰噼啪、金属碰撞"）*/
   soundEffectNote?: string | null;
@@ -23,12 +22,6 @@ export interface ExtractedShot {
   bgmNote?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
-  /** 情绪字段（videoDesc 第8维） */
-  emotion?: string | null;
-  /** 光影氛围（videoDesc 第9维） */
-  lightingAtm?: string | null;
-  /** 景别（videoDesc 第5维） */
-  framing?: string | null;
   dialogues: ExtractedDialogue[];
   source: "extracted";
   completeness: {
@@ -36,7 +29,6 @@ export interface ExtractedShot {
     hasStartFrame: boolean;
     hasEndFrame: boolean;
     hasMotionScript: boolean;
-    hasVideoScript: boolean;
     hasCameraDirection: boolean;
     hasDuration: boolean;
   };
@@ -104,7 +96,6 @@ function buildShot(
     promptParts: string[];
     startFrameParts: string[];
     endFrameParts: string[];
-    videoScriptParts: string[];
     motionParts: string[];
     combatParts: string[];
     cameraParts: string[];
@@ -117,7 +108,6 @@ function buildShot(
   const prompt = fields.promptParts.join("\n").trim();
   const startFrameDesc = fields.startFrameParts.join("\n").trim() || null;
   const endFrameDesc = fields.endFrameParts.join("\n").trim() || null;
-  const videoScript = fields.videoScriptParts.join("\n").trim() || null;
   const motionSegments = [...fields.motionParts];
   if (fields.combatParts.length > 0) {
     motionSegments.push(...fields.combatParts);
@@ -139,7 +129,6 @@ function buildShot(
     prompt: prompt || motionScript || "",
     startFrameDesc,
     endFrameDesc,
-    videoScript,
     motionScript,
     soundEffectNote,
     bgmNote,
@@ -152,7 +141,6 @@ function buildShot(
       hasStartFrame: !!startFrameDesc,
       hasEndFrame: !!endFrameDesc,
       hasMotionScript: !!motionScript,
-      hasVideoScript: !!videoScript,
       hasCameraDirection: !!cameraDirection,
       hasDuration: fields.duration !== null,
     },
@@ -182,7 +170,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     promptParts: [] as string[],
     startFrameParts: [] as string[],
     endFrameParts: [] as string[],
-    videoScriptParts: [] as string[],
     motionParts: [] as string[],
     combatParts: [] as string[],
     cameraParts: [] as string[],
@@ -197,7 +184,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     | "prompt"
     | "start"
     | "end"
-    | "videoScript"
     | "motion"
     | "combat"
     | "camera"
@@ -217,7 +203,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
       promptParts: [],
       startFrameParts: [],
       endFrameParts: [],
-      videoScriptParts: [],
       motionParts: [],
       combatParts: [],
       cameraParts: [],
@@ -282,7 +267,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const bracketInline = line.match(
-      /^【(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)】\s*(.*)$/i
+      /^【(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|motionScript|motion)】\s*(.*)$/i
     );
     if (bracketInline) {
       const [, rawLabel, rawValue] = bracketInline;
@@ -295,9 +280,15 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "prompt";
           if (value) currentShotFields.promptParts.push(value);
           break;
-        case "videoScript":
-          currentSection = "videoScript";
-          if (value) currentShotFields.videoScriptParts.push(value);
+        case "motionScript":
+        case "动作":
+        case "表演":
+        case "过程":
+        case "镜头":
+        case "特效":
+        case "motion":
+          currentSection = "motion";
+          if (value) currentShotFields.motionParts.push(value);
           break;
         case "首帧":
         case "开镜":
@@ -312,15 +303,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "endFrame":
           currentSection = "end";
           if (value) currentShotFields.endFrameParts.push(value);
-          break;
-        case "动作":
-        case "表演":
-        case "过程":
-        case "镜头":
-        case "特效":
-        case "motion":
-          currentSection = "motion";
-          if (value) currentShotFields.motionParts.push(value);
           break;
         case "运镜":
         case "镜头运动":
@@ -370,7 +352,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const bareFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?$/i
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|motionScript|motion)(?:】)?$/i
     );
     if (bareFieldMatch) {
       const [, rawLabel] = bareFieldMatch;
@@ -381,8 +363,14 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "镜头画面":
           currentSection = "prompt";
           break;
-        case "videoScript":
-          currentSection = "videoScript";
+        case "motionScript":
+        case "动作":
+        case "表演":
+        case "过程":
+        case "镜头":
+        case "特效":
+        case "motion":
+          currentSection = "motion";
           break;
         case "首帧":
         case "开镜":
@@ -395,14 +383,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "结尾特写":
         case "endFrame":
           currentSection = "end";
-          break;
-        case "动作":
-        case "表演":
-        case "过程":
-        case "镜头":
-        case "特效":
-        case "motion":
-          currentSection = "motion";
           break;
         case "打戏分镜":
           currentSection = "combat";
@@ -433,7 +413,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     }
 
     const labeledFieldMatch = line.match(
-      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|videoScript|motion)(?:】)?\s*[：:]\s*(.*)$/i
+      /^(?:【)?(画面|场景|环境|镜头画面|首帧|开镜|尾帧|结尾画面|结尾镜头|结尾特写|动作|表演|过程|镜头|打戏分镜|运镜|镜头运动|音效|背景音|字幕|特效|时长|台词|对白|对话|startFrame|endFrame|motionScript|motion)(?:】)?\s*[：:]\s*(.*)$/i
     );
     if (labeledFieldMatch) {
       const [, rawLabel, rawValue] = labeledFieldMatch;
@@ -446,9 +426,15 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
           currentSection = "prompt";
           if (value) currentShotFields.promptParts.push(value);
           break;
-        case "videoScript":
-          currentSection = "videoScript";
-          if (value) currentShotFields.videoScriptParts.push(value);
+        case "motionScript":
+        case "动作":
+        case "表演":
+        case "过程":
+        case "镜头":
+        case "特效":
+        case "motion":
+          currentSection = "motion";
+          if (value) currentShotFields.motionParts.push(value);
           break;
         case "首帧":
         case "开镜":
@@ -461,15 +447,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         case "endFrame":
           currentSection = "end";
           if (value) currentShotFields.endFrameParts.push(value);
-          break;
-        case "动作":
-        case "表演":
-        case "过程":
-        case "镜头":
-        case "特效":
-        case "motion":
-          currentSection = "motion";
-          if (value) currentShotFields.motionParts.push(value);
           break;
         case "打戏分镜":
           currentSection = "combat";
@@ -530,7 +507,7 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
     const dialogueParsed = tryParseDialogueLine(line);
     if (
       dialogueParsed &&
-      !["prompt", "start", "end", "videoScript", "motion", "combat", "camera", "soundEffect", "bgm", "ignore"].includes(
+      !["prompt", "start", "end", "motion", "combat", "camera", "soundEffect", "bgm", "ignore"].includes(
         currentSection ?? ""
       )
     ) {
@@ -551,9 +528,6 @@ export function extractShotsFromScript(script: string): ShotExtractionResult {
         break;
       case "end":
         currentShotFields.endFrameParts.push(line);
-        break;
-      case "videoScript":
-        currentShotFields.videoScriptParts.push(line);
         break;
       case "motion":
         currentShotFields.motionParts.push(line);

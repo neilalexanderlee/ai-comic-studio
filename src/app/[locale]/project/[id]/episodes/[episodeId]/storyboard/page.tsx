@@ -49,10 +49,9 @@ function buildShotCharacterText(shot: {
   prompt?: string | null;
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
-  videoScript?: string | null;
   motionScript?: string | null;
 }): string {
-  return [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+  return [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.motionScript]
     .filter(Boolean)
     .join(" ");
 }
@@ -98,6 +97,8 @@ export default function EpisodeStoryboardPage() {
   const [deletingVersion, setDeletingVersion] = useState(false);
   const [enhancePrompts, setEnhancePrompts] = useState(true); // AI prompt 增强，默认开
   const [linkShotsViaCutPoint, setLinkShotsViaCutPoint] = useState(false);
+  const [trackVideoMap, setTrackVideoMap] = useState<Record<string, { videoUrl: string; totalDuration: number; shotCount: number }>>({});
+  const [trackVideoPreviewUrl, setTrackVideoPreviewUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
@@ -185,6 +186,25 @@ export default function EpisodeStoryboardPage() {
     });
   }, [project?.versions]);
 
+  // 加载 Track 合并视频列表
+  useEffect(() => {
+    const eid = urlEpisodeId || currentEpisodeId;
+    if (!project?.id || !eid) return;
+    apiFetch(`/api/projects/${project.id}/episodes/${eid}/track-videos`)
+      .then((res) => res.json())
+      .then((data: { trackVideos: Array<{ trackId: string; videoUrl: string; totalDuration: number; shotCount: number }> }) => {
+        const map: Record<string, { videoUrl: string; totalDuration: number; shotCount: number }> = {};
+        for (const tv of (data.trackVideos ?? [])) {
+          // 相同 trackId 只保留最新一条（已按 createdAt desc 排序）
+          if (!map[tv.trackId]) {
+            map[tv.trackId] = { videoUrl: tv.videoUrl, totalDuration: tv.totalDuration, shotCount: tv.shotCount };
+          }
+        }
+        setTrackVideoMap(map);
+      })
+      .catch(() => {/* 静默忽略 */});
+  }, [project?.id, urlEpisodeId, currentEpisodeId]);
+
   if (!project) return null;
 
   const totalShots = project.shots.length;
@@ -202,7 +222,6 @@ export default function EpisodeStoryboardPage() {
     prompt: shot.prompt,
     startFrameDesc: shot.startFrameDesc,
     endFrameDesc: shot.endFrameDesc,
-    videoScript: shot.videoScript,
     motionScript: shot.motionScript,
     cameraDirection: shot.cameraDirection,
     duration: shot.duration,
@@ -770,21 +789,45 @@ export default function EpisodeStoryboardPage() {
       ) : (
         <div className="space-y-3">
           {project.shots.map((shot, index) => {
-            const isCrowdShot =
-              filterShotCharacters(buildShotCharacterText(shot), project.characters).length === 0;
+            const shotNamedCharacters = filterShotCharacters(buildShotCharacterText(shot), project.characters);
+            const isCrowdShot = shotNamedCharacters.length === 0;
             const chainSourceSequence = shot.chainSourceShotId
               ? project.shots.find((s) => s.id === shot.chainSourceShotId)?.sequence
               : null;
+            const shotTrack = (shot as { track?: string | null }).track ?? null;
+            const prevTrack = index > 0 ? ((project.shots[index - 1] as { track?: string | null }).track ?? null) : null;
+            const isTrackStart = shotTrack !== null && shotTrack !== prevTrack;
+            const trackVideoInfo = shotTrack ? trackVideoMap[shotTrack] : null;
             return (
+            <div key={`wrapper-${shot.id}`}>
+              {/* Track 分组标题 + 合并视频入口 */}
+              {isTrackStart && (
+                <div className="flex items-center gap-2 mt-4 mb-1 px-1">
+                  <div className="flex items-center gap-1.5 rounded-full bg-violet-100 px-2.5 py-0.5 text-[11px] font-bold text-violet-700 border border-violet-200">
+                    <VideoIcon className="h-3 w-3" />
+                    {shotTrack}
+                  </div>
+                  {trackVideoInfo ? (
+                    <button
+                      onClick={() => setTrackVideoPreviewUrl(trackVideoInfo.videoUrl)}
+                      className="flex items-center gap-1 rounded-full bg-violet-600 px-2.5 py-0.5 text-[11px] font-medium text-white hover:bg-violet-700 transition-colors shadow-sm"
+                    >
+                      <Play className="h-2.5 w-2.5" />
+                      合并视频 {trackVideoInfo.totalDuration}s · {trackVideoInfo.shotCount}镜
+                    </button>
+                  ) : (
+                    <span className="text-[10px] text-[--text-muted]">（未生成合并视频）</span>
+                  )}
+                  <div className="flex-1 h-px bg-violet-100" />
+                </div>
+              )}
             <ShotCard
-              key={shot.id}
               id={shot.id}
               projectId={project.id}
               sequence={shot.sequence}
               prompt={shot.prompt}
               startFrameDesc={shot.startFrameDesc}
               endFrameDesc={shot.endFrameDesc}
-              videoScript={shot.videoScript}
               motionScript={shot.motionScript}
               cameraDirection={shot.cameraDirection}
               duration={shot.duration}
@@ -826,7 +869,9 @@ export default function EpisodeStoryboardPage() {
               versionId={selectedVersionId}
               track={(shot as { track?: string | null }).track ?? null}
               sceneId={(shot as { sceneId?: string | null }).sceneId ?? null}
+              namedCharacterCount={shotNamedCharacters.length}
             />
+            </div>
             );
           })}
         </div>
@@ -838,6 +883,9 @@ export default function EpisodeStoryboardPage() {
         const chainSourceSequence = drawerShot?.chainSourceShotId
           ? project.shots.find((s) => s.id === drawerShot.chainSourceShotId)?.sequence ?? null
           : null;
+        const drawerNamedCharacterCount = drawerShot
+          ? filterShotCharacters(buildShotCharacterText(drawerShot), project.characters).length
+          : 0;
         return (
           <ShotDrawer
             shots={drawerShots}
@@ -866,9 +914,33 @@ export default function EpisodeStoryboardPage() {
             }))}
             chainSourceSequence={chainSourceSequence}
             chainSourceType={drawerShot?.chainSourceType ?? null}
+            namedCharacterCount={drawerNamedCharacterCount}
           />
         );
       })()}
+
+      {/* Track 合并视频预览 Dialog */}
+      <Dialog open={trackVideoPreviewUrl !== null} onOpenChange={(open) => { if (!open) setTrackVideoPreviewUrl(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-violet-700">
+              <VideoIcon className="h-4 w-4" />
+              Track 合并视频
+            </DialogTitle>
+          </DialogHeader>
+          {trackVideoPreviewUrl && (
+            <video
+              src={(() => {
+                const normalized = trackVideoPreviewUrl.replace(/\\/g, "/");
+                return `/api/uploads/${normalized.replace(/^.*uploads\//, "")}`;
+              })()}
+              controls
+              autoPlay
+              className="w-full rounded-lg max-h-[70vh] bg-black"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
 
       <NewVersionDialog
         open={newVersionDialogOpen}

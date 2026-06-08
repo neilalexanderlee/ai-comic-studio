@@ -54,7 +54,6 @@ export const characterRoutingSuite: EvalSuite = {
         const shotText = [
           SHOT_CROWD_SCENE.prompt,
           SHOT_CROWD_SCENE.startFrameDesc,
-          SHOT_CROWD_SCENE.videoScript,
         ]
           .filter(Boolean)
           .join(" ");
@@ -74,7 +73,7 @@ export const characterRoutingSuite: EvalSuite = {
       name: "pure-action-shot-returns-empty",
       aspect: "纯动作/环境镜头（无角色名）返回空列表",
       async run() {
-        const shotText = [SHOT_PURE_ACTION.prompt, SHOT_PURE_ACTION.videoScript].join(" ");
+        const shotText = [SHOT_PURE_ACTION.prompt].join(" ");
         const result = filterShotCharacters(shotText, ALL_CHARACTERS);
         if (result.length !== 0) {
           throw new Error(
@@ -90,7 +89,6 @@ export const characterRoutingSuite: EvalSuite = {
       async run() {
         const shotText = [
           SHOT_SINGLE_CHARACTER.prompt,
-          SHOT_SINGLE_CHARACTER.videoScript,
         ].join(" ");
         const result = filterShotCharacters(shotText, ALL_CHARACTERS);
         const names = result.map((c) => c.name);

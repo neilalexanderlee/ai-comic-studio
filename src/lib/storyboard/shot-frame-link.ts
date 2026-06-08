@@ -15,14 +15,12 @@ function buildShotCharacterText(shot: {
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
   motionScript?: string | null;
-  videoScript?: string | null;
 }): string {
   return [
     shot.prompt,
     shot.startFrameDesc,
     shot.endFrameDesc,
     shot.motionScript,
-    shot.videoScript,
   ]
     .filter(Boolean)
     .join(" ");
@@ -43,6 +41,7 @@ export function isCrowdToCharacterCut(
   });
   return prevChars.length === 0 && nextChars.length > 0;
 }
+
 
 async function findNextShotInEpisode(current: ShotRow): Promise<ShotRow | undefined> {
   const conditions = [
@@ -86,6 +85,16 @@ export async function linkNextShotAnchorFromCutPoint(params: {
     )
   ) {
     return { linked: false, reason: "crowd_to_character_cut" };
+  }
+
+  // 场景切换时不继承：两个镜头都有明确的 sceneId 且不同 → 跳过
+  // 场景切换意味着背景/光线/氛围完全变化，上一镜的 cut_point 作为下一镜首帧无意义
+  if (
+    params.sourceShot.sceneId != null &&
+    nextShot.sceneId != null &&
+    params.sourceShot.sceneId !== nextShot.sceneId
+  ) {
+    return { linked: false, reason: "scene_boundary" };
   }
 
   await db

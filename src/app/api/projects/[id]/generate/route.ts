@@ -3,8 +3,8 @@ import { streamText, generateText } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, scenes } from "@/lib/db/schema";
-import { eq, asc, and, lt, gt, desc, inArray, isNull } from "drizzle-orm";
+import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, scenes, trackVideos } from "@/lib/db/schema";
+import { eq, asc, and, lt, gt, desc, inArray, isNull, sql } from "drizzle-orm";
 import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
 import { superviseShots } from "@/lib/storyboard/shot-supervision";
@@ -26,7 +26,7 @@ import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
-import { getPromptDefinition } from "@/lib/ai/prompts/registry";
+import { getPromptDefinition, SPLIT_SHOT_SINGLE_SYSTEM } from "@/lib/ai/prompts/registry";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import {
   buildFirstFramePrompt,
@@ -122,7 +122,7 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
 
 /**
  * Check if a character is visible on-screen by looking for their name
- * in the videoScript or startFrameDesc fields.
+ * in the resolved motion text or startFrameDesc fields.
  *
  * Matching strategy (tolerant of age/descriptor suffixes):
  *   1. Full name match — "角色甲（10岁）" in text
@@ -132,11 +132,11 @@ async function getEpisodeCharacters(projectId: string, epId?: string | null) {
  */
 function isCharacterOnScreen(
   characterName: string,
-  videoScript: string,
+  motionText: string,
   startFrameDesc: string | null | undefined
 ): boolean {
   if (!characterName) return false;
-  const text = `${videoScript} ${startFrameDesc ?? ""}`;
+  const text = `${motionText} ${startFrameDesc ?? ""}`;
   if (!text.trim()) return false;
   if (text.includes(characterName)) return true;
   // Strip trailing parenthetical descriptor, e.g. "角色甲（10岁）" → "角色甲"
@@ -248,14 +248,12 @@ function buildShotCharacterText(shot: {
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
   motionScript?: string | null;
-  videoScript?: string | null;
 }): string {
   return [
     shot.prompt,
     shot.startFrameDesc,
     shot.endFrameDesc,
     shot.motionScript,
-    shot.videoScript,
   ].filter(Boolean).join(" ");
 }
 
@@ -489,10 +487,16 @@ export async function POST(
     return handleAiOptimizeText(payload, resolvedModelConfig);
   }
 
-
+  if (action === "split_shot") {
+    return handleSplitShot(projectId, userId, payload, resolvedModelConfig, episodeId);
+  }
 
   if (action === "video_assemble") {
     return handleVideoAssembleSync(projectId, payload, episodeId);
+  }
+
+  if (action === "expand_character_asset") {
+    return handleExpandCharacterAsset(projectId, userId, payload, resolvedModelConfig);
   }
 
   if (action === "assign_tracks") {
@@ -1112,7 +1116,6 @@ async function handleShotSplitStream(
     startFrame: string;
     endFrame: string;
     motionScript: string;
-    videoScript?: string;
     duration: number;
     dialogues: Array<{ character: string; text: string }>;
     cameraDirection?: string;
@@ -1216,12 +1219,8 @@ async function handleShotSplitStream(
       startFrameDesc: shot.startFrame,
       endFrameDesc: shot.endFrame,
       motionScript: shot.motionScript,
-      videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration,
-      emotion: (shot as Record<string, unknown>).emotion as string | null ?? null,
-      lightingAtm: (shot as Record<string, unknown>).lightingAtm as string | null ?? null,
-      framing: (shot as Record<string, unknown>).framing as string | null ?? null,
       soundEffectNote: (shot as Record<string, unknown>).soundEffect as string | null ?? null,
       dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string; type?: string }) => ({
         character: d.character,
@@ -1240,9 +1239,6 @@ async function handleShotSplitStream(
     sequence: shot.sequence,
     prompt: shot.sceneDescription,
     motionScript: shot.motionScript,
-    emotion: (shot as Record<string, unknown>).emotion as string | null ?? null,
-    lightingAtm: (shot as Record<string, unknown>).lightingAtm as string | null ?? null,
-    framing: (shot as Record<string, unknown>).framing as string | null ?? null,
     startFrameDesc: shot.startFrame,
     endFrameDesc: shot.endFrame,
     dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string }) => ({
@@ -1411,7 +1407,6 @@ async function handleSingleShotRestoreFromScript(
     prompt: scriptShot.prompt ?? shot.prompt,
     startFrameDesc: scriptShot.startFrameDesc ?? shot.startFrameDesc,
     endFrameDesc: scriptShot.endFrameDesc ?? shot.endFrameDesc,
-    videoScript: scriptShot.videoScript ?? shot.videoScript,
     motionScript: scriptShot.motionScript ?? shot.motionScript,
     cameraDirection: scriptShot.cameraDirection ?? shot.cameraDirection,
     duration: scriptShot.duration ?? shot.duration,
@@ -1476,13 +1471,9 @@ async function handleSingleShotRewrite(
     startFrameDesc: shot.startFrameDesc,
     endFrameDesc: shot.endFrameDesc,
     motionScript: shot.motionScript,
-    videoScript: shot.videoScript,
     cameraDirection: shot.cameraDirection,
     characterDescriptions,
     hasNamedChars,
-    emotion: shot.emotion,
-    lightingAtm: shot.lightingAtm,
-    framing: shot.framing,
   });
 
   console.log(
@@ -1490,19 +1481,20 @@ async function handleSingleShotRewrite(
   );
 
   try {
-    const { text } = await import("ai").then(({ generateText }) =>
-      generateText({ model, system, prompt: userPrompt, temperature: 0.7 })
-    );
+    const { text } = await generateText({
+      model,
+      system,
+      prompt: userPrompt,
+      temperature: 0.7,
+      // 120s 超时——LLM 无响应时主动中止，避免服务器挂起
+      abortSignal: AbortSignal.timeout(120_000),
+    });
 
     const parsed = JSON.parse(extractJSON(text)) as {
       startFrameDesc: string;
       endFrameDesc: string;
       motionScript: string;
-      videoScript?: string;
       cameraDirection: string;
-      emotion?: string;
-      lightingAtm?: string;
-      framing?: string;
     };
 
     await db
@@ -1512,11 +1504,10 @@ async function handleSingleShotRewrite(
         startFrameDesc: parsed.startFrameDesc,
         endFrameDesc: parsed.endFrameDesc,
         motionScript: parsed.motionScript,
-        videoScript: parsed.videoScript ?? null,
         cameraDirection: parsed.cameraDirection,
-        ...(parsed.emotion    ? { emotion: parsed.emotion }       : {}),
-        ...(parsed.lightingAtm ? { lightingAtm: parsed.lightingAtm } : {}),
-        ...(parsed.framing    ? { framing: parsed.framing }       : {}),
+        // 文字字段已更新，旧 videoPrompt 基于旧 motionScript 生成，视为过期，强制清除
+        // UI 会将 Step 3 回退到「待生成」状态，引导用户重新生成
+        videoPrompt: null,
       })
       .where(eq(shots.id, shotId));
 
@@ -1635,11 +1626,12 @@ async function handleFramePromptPreview(
  *
  * Toonflow 的做法：超出10张时把第10张之后的合并为一张合成图。
  * 本项目暂无 sharp，改用优先级截断：角色参考图在前，场景图在后，
- * continuityRef（衔接帧）永远排第一，整体截取前 MAX_REFERENCE_IMAGES 张。
+ * 跨镜参考图排最前，然后是角色定妆图、场景图，整体截取前 MAX_REFERENCE_IMAGES 张。
+ * Seedream API 最大支持 14 张参考图，此处设 14 以充分利用 API 能力。
  *
  * 实际使用中：1-4 角色 + 0-1 场景 = 2-5 张，极少超限。
  */
-const MAX_REFERENCE_IMAGES = 10;
+const MAX_REFERENCE_IMAGES = 14; // Seedream API 最大支持 14 张参考图
 
 function limitReferenceImages(images: string[]): string[] {
   if (images.length <= MAX_REFERENCE_IMAGES) return images;
@@ -1708,7 +1700,7 @@ async function handleSingleFrameGenerate(
   // (prompt) but NOT in startFrameDesc should not be drawn in the first frame, and vice-
   // versa for the last frame. Fall back to the full shot list only when the frame
   // description is empty so we never produce an empty character context by accident.
-  // Use only the per-frame description for character filtering — videoScript covers the
+  // Use only the per-frame description for character filtering — motionScript covers the
   // entire shot timeline and would import characters that only appear mid-clip or at the
   // end, incorrectly pulling their reference images into the first (or last) frame prompt.
   const firstFrameFilterText = shot.startFrameDesc ?? "";
@@ -1733,13 +1725,25 @@ async function handleSingleFrameGenerate(
     projectId
   );
   await saveShotWarnings(shotId, resolvedChars);
-  const charRefImages = resolvedChars.map((c) => c.imagePath);
+
+  // 构建角色参考图列表：主图 + 角度变体（每个角色最多追加 2 张角度图）
+  const charRefImages: string[] = [];
+  for (const rc of resolvedChars) {
+    charRefImages.push(rc.imagePath);
+    if (rc.angleImagePaths && rc.angleImagePaths.length > 0) {
+      charRefImages.push(...rc.angleImagePaths.slice(0, 2));
+    }
+  }
 
   // Frame-specific reference image subsets derived from the full resolved list.
   const firstFrameCharNames = new Set(charsForFirstFrame.map((c) => c.name));
   const lastFrameCharNames  = new Set(charsForLastFrame.map((c) => c.name));
-  const charRefImagesFirst = resolvedChars.filter((rc) => firstFrameCharNames.has(rc.name)).map((c) => c.imagePath);
-  const charRefImagesLast  = resolvedChars.filter((rc) => lastFrameCharNames.has(rc.name)).map((c) => c.imagePath);
+  const charRefImagesFirst = resolvedChars
+    .filter((rc) => firstFrameCharNames.has(rc.name))
+    .flatMap((c) => [c.imagePath, ...(c.angleImagePaths ?? []).slice(0, 2)]);
+  const charRefImagesLast = resolvedChars
+    .filter((rc) => lastFrameCharNames.has(rc.name))
+    .flatMap((c) => [c.imagePath, ...(c.angleImagePaths ?? []).slice(0, 2)]);
 
   // Resolve scene reference image (Toonflow: scene asset injected after character assets).
   // Only used when scene has an imagePath that exists on disk.
@@ -1793,12 +1797,24 @@ async function handleSingleFrameGenerate(
   // frameTarget: "first" = only regenerate anchorFirst; "last" = only anchorLastAi; "both" = default
   const frameTarget = (payload?.frameTarget as "first" | "last" | "both") ?? "both";
 
+  // 解析多参考图（frameReferences 数组，新）或单参考图（frameReference，兼容旧版）
+  // 第一张为主参考（用于 chainSourceShotId/chainSourceType 记录），后续为额外参考。
+  const rawFrameRefs = payload?.frameReferences as Array<Partial<FrameReferencePayload>> | undefined;
   const rawFrameRef = payload?.frameReference as Partial<FrameReferencePayload> | undefined;
-  let continuityRef:
-    | { path: string; shotId: string; frameType: FrameReferenceType; sourceSequence: number }
-    | undefined;
-  if (rawFrameRef?.shotId && rawFrameRef?.frameType) {
-    const frameType = rawFrameRef.frameType;
+
+  // 统一成数组处理
+  const rawRefList: Array<Partial<FrameReferencePayload>> = rawFrameRefs?.length
+    ? rawFrameRefs
+    : rawFrameRef?.shotId && rawFrameRef?.frameType
+      ? [rawFrameRef]
+      : [];
+
+  type ResolvedFrameRef = { path: string; shotId: string; frameType: FrameReferenceType; sourceSequence: number };
+  const resolvedFrameRefs: ResolvedFrameRef[] = [];
+
+  for (const ref of rawRefList) {
+    if (!ref.shotId || !ref.frameType) continue;
+    const frameType = ref.frameType;
     if (
       frameType !== "anchor_first" &&
       frameType !== "anchor_last_ai" &&
@@ -1807,26 +1823,32 @@ async function handleSingleFrameGenerate(
       return NextResponse.json({ error: "无效的 frameReference.frameType" }, { status: 400 });
     }
     const resolved = await resolveFrameReferenceForProject(projectId, {
-      shotId: rawFrameRef.shotId,
+      shotId: ref.shotId,
       frameType,
     });
     if (!resolved) {
-      return NextResponse.json(
-        { error: "参考帧不存在或文件已缺失，请重新生成该镜画面或换一张参考图" },
-        { status: 400 }
-      );
+      // 某一张缺失时跳过（不阻断整批），记录警告
+      console.warn(`[SingleFrameGenerate] frameReference ${ref.shotId}/${frameType} 不存在或文件缺失，已跳过`);
+      continue;
     }
-    continuityRef = resolved;
+    resolvedFrameRefs.push(resolved);
   }
+
+  // 主参考（第一张）用于衔接元数据记录；多张全部注入 refImages
+  const continuityRef: ResolvedFrameRef | undefined = resolvedFrameRefs[0];
 
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
     const generateAnchorFirst = async (): Promise<string> => {
-      // Scene image appended after character refs (Toonflow priority: role > scene)
-      const refImages = continuityRef
-        ? [continuityRef.path, ...charRefImagesFirst, ...(sceneAsset ? [sceneAsset.imagePath] : [])]
-        : [...charRefImagesFirst, ...(sceneAsset ? [sceneAsset.imagePath] : [])];
+      // 所有跨镜参考图路径（保持顺序：主参考优先，其余附加参考次之）
+      const crossShotRefPaths = resolvedFrameRefs.map((r) => r.path);
+      // Scene image appended after character refs (Toonflow priority: role > scene > cross-shot)
+      const refImages = [
+        ...crossShotRefPaths,
+        ...charRefImagesFirst,
+        ...(sceneAsset ? [sceneAsset.imagePath] : []),
+      ];
       const firstFrameAssets = [
         ...charsForFirstFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
         ...(sceneAsset ? [{ id: sceneAsset.id, name: sceneAsset.name, type: "scene" as const }] : []),
@@ -1850,14 +1872,14 @@ async function handleSingleFrameGenerate(
         : firstPromptRaw;
       if (continuityRef) {
         console.log(
-          `[SingleFrameGenerate] Shot ${shot.sequence}: frameReference ${frameReferenceContinuityLabel(
+          `[SingleFrameGenerate] Shot ${shot.sequence}: frameReferences[${resolvedFrameRefs.length}] primary=${frameReferenceContinuityLabel(
             continuityRef.sourceSequence,
             continuityRef.frameType
           )} → Seedream regen anchor_first`
         );
       }
       console.log(
-        `[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} charRefs=${refImages.length}`
+        `[SingleFrameGenerate][PROMPT DEBUG] shotId=${shotId} visualStyleTag=${JSON.stringify(singleVisualStyleTag)} crossShotRefs=${crossShotRefPaths.length} charRefs=${charRefImagesFirst.length} totalRefImages=${refImages.length}`
       );
       console.log(`[SingleFrameGenerate][PROMPT DEBUG] finalPrompt:\n${firstPrompt}`);
       return ai.generateImage(firstPrompt, {
@@ -1913,10 +1935,17 @@ async function handleSingleFrameGenerate(
       const lastPrompt = enhancePrompts && singleTextProvider
         ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
         : lastPromptRaw;
+      // 尾帧：首帧永远排第一（最高优先级），然后是跨镜参考图，再是角色/场景
+      const crossShotRefPathsLast = resolvedFrameRefs.map((r) => r.path);
       const lastFramePath = await ai.generateImage(lastPrompt, {
         ...imageOpts,
         quality: "hd",
-        referenceImages: limitReferenceImages([existingFirstFrame, ...charRefImagesLast, ...(sceneAsset ? [sceneAsset.imagePath] : [])]),
+        referenceImages: limitReferenceImages([
+          existingFirstFrame,
+          ...crossShotRefPathsLast,
+          ...charRefImagesLast,
+          ...(sceneAsset ? [sceneAsset.imagePath] : []),
+        ]),
       });
       await db
         .update(shots)
@@ -1951,10 +1980,17 @@ async function handleSingleFrameGenerate(
     const lastPrompt = enhancePrompts && singleTextProvider
       ? await enhanceImagePrompt(lastPromptRaw, singleImageProtocol, singleTextProvider)
       : lastPromptRaw;
+    // Both 模式尾帧：首帧优先，再是跨镜参考图，再是角色/场景
+    const bothCrossShotRefPaths = resolvedFrameRefs.map((r) => r.path);
     const lastFramePath = await ai.generateImage(lastPrompt, {
       ...imageOpts,
       quality: "hd",
-      referenceImages: limitReferenceImages([firstFramePath, ...charRefImagesLast, ...(sceneAsset ? [sceneAsset.imagePath] : [])]),
+      referenceImages: limitReferenceImages([
+        firstFramePath,
+        ...bothCrossShotRefPaths,
+        ...charRefImagesLast,
+        ...(sceneAsset ? [sceneAsset.imagePath] : []),
+      ]),
     });
 
     await db
@@ -2109,11 +2145,11 @@ async function handleSingleVideoGenerate(
     const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
 
     const { motionText: videoMotionRaw } = resolveVideoMotionAndScene(shotForVideo);
-    const videoScript = stripBgmContent(
+    const resolvedMotionText = stripBgmContent(
       videoMotionRaw || shotForVideo.prompt || "",
       shotForVideo.bgmNote
     );
-    const videoContextForDialogue = videoScript;
+    const videoContextForDialogue = resolvedMotionText;
     const onScreenDialogueChars = shotDialogues
       .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
       .filter((name) =>
@@ -2168,11 +2204,8 @@ async function handleSingleVideoGenerate(
         hasStoryboardImage: !!shotForVideo.anchorFirst,
         duration: effectiveDuration,
         sceneDescription: shotForVideo.prompt || "",
-        framing: shotForVideo.framing || null,
         cameraDirection: shotForVideo.cameraDirection || null,
-        motionScript: videoScript,
-        emotion: shotForVideo.emotion || null,
-        lightingAtm: shotForVideo.lightingAtm || null,
+        motionScript: resolvedMotionText,
         soundEffect: shotForVideo.soundEffectNote || null,
         dialogues: dialogueList.map((d) => ({
           characterName: d.characterName,
@@ -2195,7 +2228,7 @@ async function handleSingleVideoGenerate(
         shotForVideo.videoPrompt ||
           (useSingleVideoReferenceMode
             ? buildReferenceVideoPrompt({
-                videoScript,
+                motionText: resolvedMotionText,
                 cameraDirection: shotForVideo.cameraDirection || "static",
                 duration: effectiveDuration,
                 characters: singleVideoShotChars,
@@ -2206,7 +2239,7 @@ async function handleSingleVideoGenerate(
                 slimCharacterSection: true,
               })
             : buildVideoPrompt({
-                videoScript,
+                motionText: resolvedMotionText,
                 cameraDirection: shotForVideo.cameraDirection || "static",
                 startFrameDesc: shotForVideo.startFrameDesc ?? undefined,
                 endFrameDesc: shotForVideo.endFrameDesc ?? undefined,
@@ -2234,29 +2267,9 @@ async function handleSingleVideoGenerate(
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
-    // 参考模式下获取角色定妆图（只在首帧参考模式使用；首尾帧模式帧图已含角色外貌，无需额外传入）
-    let singleVideoCharImages: string[] = [];
-    if (useSingleVideoReferenceMode && singleVideoShotChars.length > 0) {
-      try {
-        const resolvedVideoChars = await resolveCharacterImages(
-          buildShotCharacterText(shot),
-          singleVideoShotChars,
-          modelConfig?.text,
-          userId,
-          projectId
-        );
-        singleVideoCharImages = resolvedVideoChars
-          .map((c) => c.imagePath)
-          .filter((p) => !!p && shotFrameFileOnDisk(p));
-        if (singleVideoCharImages.length > 0) {
-          console.log(`[SingleVideoGenerate] Shot ${shot.sequence}: passing ${singleVideoCharImages.length} character ref image(s) to video model`);
-        }
-      } catch (charErr) {
-        console.warn(`[SingleVideoGenerate] Shot ${shot.sequence}: failed to resolve character images, skipping:`, charErr);
-      }
-    }
-
     // 首帧模式：initialImage = anchorFirst；首尾帧模式：anchorFirst + 磁盘上存在的 AI anchorLastAi。
+    // 角色定妆图不传入视频模型：首帧图已由 Seedream + 定妆图生成，角色外貌已锚定其中；
+    // API 规定 first_frame / reference_image 两种模式互斥，混用会丢失首帧强约束。
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
         remoteVideoUrl: videoUrl,
@@ -2274,7 +2287,6 @@ async function handleSingleVideoGenerate(
             duration: effectiveDuration,
             ratio,
             ...(resolution && { resolution }),
-            ...(singleVideoCharImages.length > 0 && { referenceImages: singleVideoCharImages }),
             onRemoteResult: onRemoteResultSingle,
           }
         : {
@@ -2588,7 +2600,7 @@ async function handleAssignTracks(
   if (episodeId) conditions.push(eq(shots.episodeId, episodeId));
 
   const targetShots = await db
-    .select({ id: shots.id, sequence: shots.sequence, duration: shots.duration })
+    .select({ id: shots.id, sequence: shots.sequence, duration: shots.duration, sceneId: shots.sceneId })
     .from(shots)
     .where(and(...conditions))
     .orderBy(asc(shots.sequence));
@@ -2728,11 +2740,8 @@ async function handleBatchVideoGenerate(
       duration: shot.duration,
       sceneDescription: shot.prompt || "",
       sceneName: null,
-      framing: shot.framing || null,
       cameraDirection: shot.cameraDirection || null,
       motionScript: shot.motionScript || null,
-      emotion: shot.emotion || null,
-      lightingAtm: shot.lightingAtm || null,
       soundEffect: shot.soundEffectNote || null,
       storyboardImagePath: shot.anchorFirst || null,
       dialogues: shotDialogues.map((d) => {
@@ -2753,84 +2762,107 @@ async function handleBatchVideoGenerate(
     shots: seedanceShots,
   });
 
-  // 收集所有帧图文件（首帧 + 尾帧 + 角色参考图）
+  // ── 收集多模态参考文件（顺序必须与 buildRefEntries/@参考N 编号完全一致）──
+  // Toonflow 规范：API content 数组 = 图片先行（reference_image）+ 音频殿后（reference_audio）
+  // buildRefEntries 已更新为同样的三轮顺序，此处收集逻辑必须同步。
   const videoProvider = resolveVideoProvider(modelConfig);
 
-  // 按 @参考N 编号的真实顺序收集文件：
-  // 对每个角色 asset：先图片，紧跟音频（如有），然后下一个角色。
-  // 最后追加场景图、分镜首帧。
-  // 此顺序必须与 buildRefEntries() 的分配逻辑完全一致，否则 Seedance 音色克隆会错位。
-  const orderedRefFiles: string[] = [];
-  let firstCharImage: string | null = null; // 用于 initialImage fallback
+  // 第一轮：角色定妆图（按 seedanceAssets 输入顺序）
+  const charImageRefs: Array<{ type: "image"; path: string }> = [];
+  const charAudioRefs: Array<{ type: "audio"; path: string }> = [];
 
   for (const asset of seedanceAssets) {
-    if (asset.type === "role") {
-      const char = charById.get(asset.id);
-      if (!char) continue;
-      // 默认定妆图
-      const [defaultAsset] = await db
-        .select()
+    if (asset.type !== "role") continue;
+    const char = charById.get(asset.id);
+    if (!char) continue;
+
+    // 默认定妆图
+    const [defaultAsset] = await db
+      .select()
+      .from(characterAssets)
+      .where(and(eq(characterAssets.characterId, char.id), eq(characterAssets.isDefault, 1)))
+      .limit(1);
+    if (defaultAsset?.imagePath && shotFrameFileOnDisk(defaultAsset.imagePath)) {
+      charImageRefs.push({ type: "image", path: defaultAsset.imagePath });
+    }
+
+    // 音频参考（第三轮暂存，保持与图片相同的角色顺序）
+    if (asset.hasAudio) {
+      const audioAsset = await db
+        .select({ audioPath: characterAssets.audioPath })
         .from(characterAssets)
-        .where(and(eq(characterAssets.characterId, char.id), eq(characterAssets.isDefault, 1)))
-        .limit(1);
-      if (defaultAsset?.imagePath) {
-        orderedRefFiles.push(defaultAsset.imagePath);
-        if (!firstCharImage) firstCharImage = defaultAsset.imagePath;
+        .where(eq(characterAssets.characterId, char.id))
+        .then((rows) => rows.find((r) => !!r.audioPath));
+      if (audioAsset?.audioPath) {
+        charAudioRefs.push({ type: "audio", path: audioAsset.audioPath });
       }
-      // 音频参考紧跟在角色图后（与 buildRefEntries 一致）
-      if (asset.hasAudio) {
-        const audioAsset = await db
-          .select({ audioPath: characterAssets.audioPath })
-          .from(characterAssets)
-          .where(and(eq(characterAssets.characterId, char.id)))
-          .then((rows) => rows.find((r) => !!r.audioPath));
-        if (audioAsset?.audioPath) orderedRefFiles.push(audioAsset.audioPath);
-      }
-    } else if (asset.type === "scene") {
-      // 场景图紧跟在所有角色之后（batchSceneImages 已按相同顺序收集）
-      const sceneImg = batchSceneImages[
-        seedanceAssets.filter((a) => a.type === "scene").findIndex((a) => a.id === asset.id)
-      ];
-      if (sceneImg) orderedRefFiles.push(sceneImg);
     }
   }
 
-  // 各分镜首帧（接续在所有资产之后）
-  const storyboardImages: string[] = [];
+  // 第二轮：场景图（按 batchSceneImages 顺序，与 seedanceAssets 中 scene 条目对应）
+  const sceneImageRefs: Array<{ type: "image"; path: string }> = batchSceneImages.map((p) => ({ type: "image", path: p }));
+
+  // 第三轮中的图片部分：分镜首帧（跳过文件缺失的分镜，与 SeedanceShot.hasStoryboardImage 一致）
+  const storyboardImageRefs: Array<{ type: "image"; path: string }> = [];
   for (const shot of trackShots) {
-    if (shot.anchorFirst) storyboardImages.push(shot.anchorFirst);
+    if (shot.anchorFirst && shotFrameFileOnDisk(shot.anchorFirst)) {
+      storyboardImageRefs.push({ type: "image", path: shot.anchorFirst });
+    }
   }
-  orderedRefFiles.push(...storyboardImages);
 
-  const allRefImages = orderedRefFiles;
+  // 合并：图片先行（角色图 → 场景图 → 分镜首帧），音频殿后（角色音频）
+  const multimodalRefs = [
+    ...charImageRefs,
+    ...sceneImageRefs,
+    ...storyboardImageRefs,
+    ...charAudioRefs,
+  ];
 
-  // 提交给视频模型（Seedance 多参模式：首帧作为 initialImage）
-  const totalDuration = trackShots.reduce((sum, s) => sum + s.duration, 0);
-  const firstFramePath = trackShots[0]?.anchorFirst || null;
-
-  // 需要 initialImage：优先首帧，其次第一张角色参考图，否则报错
-  const initialImage = firstFramePath || firstCharImage || null;
-  if (!initialImage) {
+  if (multimodalRefs.filter((r) => r.type === "image").length === 0) {
     return NextResponse.json(
-      { error: "批量生成需要至少一张首帧或角色参考图" },
+      { error: "批量生成需要至少一张角色定妆图或分镜首帧（请先为角色上传定妆图或生成分镜首帧）" },
       { status: 400 }
     );
   }
+
+  // 同步更新 SeedanceShot.hasStoryboardImage（确保与实际文件状态一致）
+  for (const shot of seedanceShots) {
+    const idx = seedanceShots.indexOf(shot);
+    const trackShot = trackShots[idx];
+    if (trackShot) {
+      shot.hasStoryboardImage = !!trackShot.anchorFirst && shotFrameFileOnDisk(trackShot.anchorFirst);
+    }
+  }
+
+  // 提交给视频模型（Seedance 多模态参考模式）
+  const totalDuration = trackShots.reduce((sum, s) => sum + s.duration, 0);
 
   const videoResult = await videoProvider.generateVideo({
     prompt: videoPrompt,
     duration: Math.min(totalDuration, 15),
     ratio: (payload?.ratio as string) || "16:9",
-    referenceImages: limitReferenceImages(allRefImages),
-    initialImage,
+    multimodalRefs,
   });
 
   const localVideoPath = videoResult.filePath;
 
-  // 更新所有分镜的 videoUrl（共享同一视频；后续可按时间轴切割）
+  // A+B 并存策略：
+  // A — 每镜 shot.videoUrl 写同一个 Track 视频路径，分镜卡可预览、素材库可加载
+  // B — track_videos 表额外写一条，剪辑台可按 track 整段导入
   for (const shot of trackShots) {
     await db.update(shots).set({ videoUrl: localVideoPath }).where(eq(shots.id, shot.id));
   }
+
+  await db.insert(trackVideos).values({
+    id: ulid(),
+    projectId,
+    episodeId: episodeId ?? null,
+    versionId: versionId ?? null,
+    trackId: trackId ?? "T_unknown",
+    videoUrl: localVideoPath,
+    totalDuration: Math.round(totalDuration),
+    shotCount: trackShots.length,
+  });
 
   return NextResponse.json({
     trackId,
@@ -2935,7 +2967,7 @@ async function handleSceneImageGenerate(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 扫描本集所有分镜的 prompt + lightingAtm，调 LLM 识别独立场景地点并生成标准化描述。
+ * 扫描本集所有分镜的 prompt，调 LLM 识别独立场景地点并生成标准化描述。
  * 返回候选场景列表（不自动创建，由前端让用户勾选后再批量 POST）。
  */
 async function handleSceneExtract(
@@ -2956,8 +2988,6 @@ async function handleSceneExtract(
     .select({
       sequence: shots.sequence,
       prompt: shots.prompt,
-      lightingAtm: shots.lightingAtm,
-      framing: shots.framing,
     })
     .from(shots)
     .where(and(...conditions))
@@ -3007,4 +3037,266 @@ async function handleSceneExtract(
       { status: 500 }
     );
   }
+}
+
+// ─── split_shot：将单个分镜拆成两个连续分镜 ───────────────
+
+async function handleSplitShot(
+  projectId: string,
+  userId: string,
+  payload: Record<string, unknown> | undefined,
+  modelConfig: ModelConfig | undefined,
+  episodeId: string | undefined,
+) {
+  const shotId = payload?.shotId as string | undefined;
+  if (!shotId) {
+    return NextResponse.json({ error: "缺少 shotId" }, { status: 400 });
+  }
+
+  const textProvider = resolveAIProvider(modelConfig);
+
+  // 查询原始分镜
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot || shot.projectId !== projectId) {
+    return NextResponse.json({ error: "分镜不存在" }, { status: 404 });
+  }
+
+  // 构建用户消息
+  const userMessage = [
+    `原始分镜（需要拆分为两个）：`,
+    `- 场景描述：${shot.prompt || "（无）"}`,
+    `- 首帧：${shot.startFrameDesc || "（无）"}`,
+    `- 尾帧：${shot.endFrameDesc || "（无）"}`,
+    `- 动作脚本：${shot.motionScript || "（无）"}`,
+    `- 时长：${shot.duration}s`,
+    `- 运镜：${shot.cameraDirection || "（无）"}`,
+    `- 音效：${shot.soundEffectNote || "（无）"}`,
+    ``,
+    `拆分提示：${(payload?.hint as string | undefined) || "请在合适的叙事转折点拆分，确保每个分镜的首帧都包含该分镜主要角色。"}`,
+  ].join("\n");
+
+  let rawResponse: string;
+  try {
+    rawResponse = await textProvider.generateText(userMessage, {
+      systemPrompt: SPLIT_SHOT_SINGLE_SYSTEM,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: `AI 生成失败: ${err instanceof Error ? err.message : String(err)}` },
+      { status: 500 }
+    );
+  }
+
+  // 解析 JSON
+  let splitShots: unknown[];
+  try {
+    const extracted = extractJSON(rawResponse);
+    if (!Array.isArray(extracted) || extracted.length !== 2) {
+      throw new Error("LLM 返回的不是包含 2 个元素的数组");
+    }
+    splitShots = extracted;
+  } catch (err) {
+    return NextResponse.json(
+      { error: `解析 AI 响应失败: ${err instanceof Error ? err.message : String(err)}`, raw: rawResponse },
+      { status: 500 }
+    );
+  }
+
+  // 将原分镜之后所有分镜的 sequence +1，为两个新分镜腾出位置
+  // 新分镜 A 占 shot.sequence，新分镜 B 占 shot.sequence + 1
+  await db
+    .update(shots)
+    .set({ sequence: sql`${shots.sequence} + 1` })
+    .where(and(
+      eq(shots.versionId, shot.versionId!),
+      gt(shots.sequence, shot.sequence),
+      ...(shot.episodeId ? [eq(shots.episodeId, shot.episodeId)] : []),
+    ));
+
+  const newShots = [];
+  for (let i = 0; i < 2; i++) {
+    const s = splitShots[i] as Record<string, unknown>;
+    const dialogueList = Array.isArray(s.dialogues) ? s.dialogues : [];
+    const newShotId = ulid();
+    const [inserted] = await db.insert(shots).values({
+      id: newShotId,
+      projectId,
+      versionId: shot.versionId,
+      episodeId: shot.episodeId,
+      sequence: shot.sequence + i,
+      duration: typeof s.duration === "number" ? s.duration : shot.duration / 2,
+      prompt: typeof s.sceneDescription === "string" ? s.sceneDescription : null,
+      startFrameDesc: typeof s.startFrame === "string" ? s.startFrame : null,
+      endFrameDesc: typeof s.endFrame === "string" ? s.endFrame : null,
+      motionScript: typeof s.motionScript === "string" ? s.motionScript : null,
+      soundEffectNote: typeof s.soundEffect === "string" ? s.soundEffect : null,
+      cameraDirection: typeof s.cameraDirection === "string" ? s.cameraDirection : null,
+    }).returning();
+    newShots.push(inserted);
+
+    // 插入台词
+    for (let di = 0; di < dialogueList.length; di++) {
+      const d = dialogueList[di] as Record<string, unknown>;
+      if (typeof d.text !== "string" || !d.text.trim()) continue;
+      // 尝试匹配角色 ID（按名称模糊匹配）
+      const charName = typeof d.character === "string" ? d.character.trim() : "";
+      const [matchedChar] = charName
+        ? await db
+            .select({ id: characters.id })
+            .from(characters)
+            .where(and(eq(characters.projectId, projectId), eq(characters.name, charName)))
+            .limit(1)
+        : [undefined];
+      if (!matchedChar) continue;
+      await db.insert(dialogues).values({
+        id: ulid(),
+        shotId: newShotId,
+        characterId: matchedChar.id,
+        text: d.text.trim(),
+        sequence: di,
+        type: typeof d.type === "string" && ["dialogue", "os", "vo"].includes(d.type) ? d.type as "dialogue" | "os" | "vo" : "dialogue",
+      });
+    }
+  }
+
+  // 删除原分镜
+  await db.delete(shots).where(eq(shots.id, shotId));
+
+  return NextResponse.json({
+    success: true,
+    originalShotId: shotId,
+    newShots,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 定妆图多角度扩展（expand_character_asset）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 从一张正面定妆图自动生成 3/4 侧面、正侧面、背面三个角度变体。
+ * 角度变体写入 character_assets 表（angle 字段标记，sourceAssetId 指向来源）。
+ * 已存在同角度资产时跳过，不重复生成。
+ */
+async function handleExpandCharacterAsset(
+  projectId: string,
+  _userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig
+) {
+  const assetId = payload?.assetId as string | undefined;
+  if (!assetId) {
+    return NextResponse.json({ error: "No assetId provided" }, { status: 400 });
+  }
+  if (!modelConfig?.image) {
+    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
+  }
+
+  // 查询源资产
+  const [sourceAsset] = await db
+    .select()
+    .from(characterAssets)
+    .where(eq(characterAssets.id, assetId));
+  if (!sourceAsset) {
+    return NextResponse.json({ error: "Asset not found" }, { status: 404 });
+  }
+  if (!sourceAsset.imagePath) {
+    return NextResponse.json({ error: "Asset has no image" }, { status: 400 });
+  }
+  if (!fs.existsSync(sourceAsset.imagePath)) {
+    return NextResponse.json({ error: "Asset image file not found on disk" }, { status: 400 });
+  }
+
+  // 查询所属角色
+  const [character] = await db
+    .select({ id: characters.id, name: characters.name, description: characters.description, visualHint: characters.visualHint })
+    .from(characters)
+    .where(eq(characters.id, sourceAsset.characterId));
+  if (!character) {
+    return NextResponse.json({ error: "Character not found" }, { status: 404 });
+  }
+
+  // 查询项目画风
+  const [project] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const visualStyle = project?.visualStyle ?? "anime_2d";
+  const visualStyleTag = VISUAL_STYLE_PRESETS[visualStyle]?.tag ?? "";
+
+  const uploadDir = path.join(process.env.UPLOAD_DIR ?? "./uploads", "projects", projectId, "characters");
+  const aiImg = resolveImageProvider(modelConfig, uploadDir);
+
+  const angles: Array<{ angle: string; prompt: string }> = [
+    {
+      angle: "3q",
+      prompt: [
+        `【画面】${character.name}，3/4侧面视角（从左前方约45度），身体姿势自然直立，展示面部轮廓与发型侧面细节。严格保持参考图@图1中的服装款式、颜色、发型颜色与样式、面部特征，不得添加任何原图没有的道具或配饰。`,
+        `【背景】纯白色背景，character design sheet，全身图`,
+        `【风格】${visualStyleTag}，角色设计图规格，禁止画外字幕、水印、UI文字`,
+      ].join("\n"),
+    },
+    {
+      angle: "profile",
+      prompt: [
+        `【画面】${character.name}，正侧面视角（从左方90度），身体姿势自然直立，展示面部轮廓、耳朵、鼻梁结构与发型侧面。严格保持参考图@图1中的服装款式、颜色、发型颜色与样式、面部特征。`,
+        `【背景】纯白色背景，character design sheet，全身图`,
+        `【风格】${visualStyleTag}，角色设计图规格，禁止画外字幕、水印、UI文字`,
+      ].join("\n"),
+    },
+    {
+      angle: "back",
+      prompt: [
+        `【画面】${character.name}，背面视角（从后方180度），展示发型背面、服装背面细节。严格保持参考图@图1中的服装颜色与样式、发型颜色与样式，不得添加任何原图没有的道具。`,
+        `【背景】纯白色背景，character design sheet，全身图`,
+        `【风格】${visualStyleTag}，角色设计图规格，禁止画外字幕、水印、UI文字`,
+      ].join("\n"),
+    },
+  ];
+
+  const generated: Array<{ id: string; angle: string; imagePath: string }> = [];
+
+  for (const { angle, prompt } of angles) {
+    // 已存在同角度资产则跳过
+    const [existing] = await db
+      .select({ id: characterAssets.id })
+      .from(characterAssets)
+      .where(
+        and(
+          eq(characterAssets.characterId, character.id),
+          eq(characterAssets.tag, sourceAsset.tag),
+          eq(characterAssets.angle, angle)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      console.log(`[ExpandCharacterAsset] Skipping existing angle=${angle} for asset ${assetId}`);
+      continue;
+    }
+
+    try {
+      const imagePath = await aiImg.generateImage(prompt, {
+        referenceImages: [sourceAsset.imagePath],
+        quality: "hd",
+      });
+
+      const newId = ulid();
+      await db.insert(characterAssets).values({
+        id: newId,
+        characterId: character.id,
+        imagePath,
+        tag: sourceAsset.tag,
+        isDefault: 0,
+        assetType: "morph",
+        angle,
+        sourceAssetId: assetId,
+      });
+      generated.push({ id: newId, angle, imagePath });
+    } catch (err) {
+      console.error(`[ExpandCharacterAsset] Failed to generate angle=${angle}:`, err);
+    }
+  }
+
+  return NextResponse.json({ success: true, generated });
 }

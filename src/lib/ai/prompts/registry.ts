@@ -550,11 +550,7 @@ const SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE = `Output a JSON array. Each shot object
     "startFrame": "Detailed FIRST FRAME description for AI image generation (see requirements below)",
     "endFrame": "Detailed LAST FRAME description for AI image generation (see requirements below)",
     "motionScript": "Complete time-segmented action script ending with ｜朝向：[face direction] annotation (see requirements below)",
-    "videoScript": "MANDATORY 30-60 word Seedance-style prose (see requirements below)",
     "duration": {{MIN_DURATION}}-{{MAX_DURATION}},
-    "framing": "One of: 大远景/远景/全景/中景/近景/半身/特写/大特写/过肩",
-    "emotion": "Single emotional keyword describing the dominant mood, e.g. 坚定决绝/温柔深情/紧张不安/悲伤失落",
-    "lightingAtm": "Lighting & atmosphere description, e.g. 黄昏冷调侧逆光/清晨柔和漫射暖光/夜晚月光冷调局部暖光",
     "soundEffect": "Diegetic sound events only (no music/BGM), e.g. 风声衣袂声/脚步声金属碰撞/火焰噼啪声",
     "dialogues": [
       {
@@ -568,9 +564,6 @@ const SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE = `Output a JSON array. Each shot object
 ]
 
 FIELD RULES:
-- framing: REQUIRED. Pick the single most appropriate shot size from the 9 options above. For compound camera moves (远景→中景), use the STARTING framing.
-- emotion: REQUIRED. One 2-4 character Chinese keyword (e.g. 坚定/温柔/惊讶/孤独/紧张). No adjective phrases.
-- lightingAtm: REQUIRED. Include light direction + color temperature + mood, e.g. "黄昏冷调侧逆光，轮廓光勾勒人物边缘" or "清晨柔和散射暖光，空气透明感强"
 - soundEffect: REQUIRED. Diegetic/environmental sounds only. Write "无音效" if truly silent. NEVER include music or BGM here.
 - dialogues[].type: REQUIRED for all dialogue entries.
   - "dialogue": normal on-screen speech (mouth moving)
@@ -584,59 +577,46 @@ For dialogue scenes with two characters: specify both, e.g. ｜朝向：角色�
 For environment/crowd shots without named characters: omit the ｜朝向：annotation.`;
 
 const SHOT_SPLIT_VIDEO_SCRIPT_RULES = `═══════════════════════════════════════════════════
-  videoScript — THE MOST CRITICAL FIELD
+  motionScript — S-GRADE QUALITY REQUIREMENTS (per segment)
 ═══════════════════════════════════════════════════
-PURPOSE: The PRIMARY input to the Seedance video generation model. This single field determines 80% of output quality. Write it with the precision of a world-class film director briefing a cinematographer.
+These requirements apply to EVERY time-coded segment in motionScript, on top of the time-coded format rules. One action description per shot — motionScript is the single authoritative source.
 
-SEEDANCE PROMPT FORMULA: 主体 + 运动（必须）+ 环境（选填）+ 运镜（选填）+ 氛围/感官细节（选填）
-
-FORMAT: 30–60 words of seamless flowing prose. NO section labels. NO dialogue text.
-- Open with character name + brief visual tag in parentheses (e.g. 角色甲（黑甲）).
-  ⚠️ The video model ALREADY sees what the character looks like via the first/last frame images — the tag is for DISAMBIGUATION only (2–4 Chinese characters max). Do NOT re-describe full appearance; focus on what HAPPENS.
-- Describe ONE clear, specific physical action with a single verb — do NOT chain multiple actions
-- Specify camera movement using the formula: 起幅构图 + 运镜动作 + 运镜幅度 + 落幅构图 (e.g. "镜头从胸口中景缓慢推至下颌以上近景")
-- Close with ONE sharp atmospheric or sensory detail (light quality, sound texture, particle motion)
-- OPTIONAL timeline anchor for complex shots: prefix key moments with timestamp (e.g. "0s:起幅" "3s:动作峰值" "6s:落幅"), separated by semicolons
-
-LANGUAGE: Same as the screenplay.
-
-━━━ DIALOGUE SHOT REQUIREMENTS (S-GRADE) ━━━
-Every shot containing dialogue MUST include in the videoScript:
+━━━ DIALOGUE SEGMENT REQUIREMENTS (S-GRADE) ━━━
+Every segment containing dialogue MUST include:
 ① WHERE the character is in frame: exact position (left/center/right), standing/seated/crouching, distance implied
 ② ONE specific physical micro-action BEFORE or DURING the dialogue: head tilt angle, hand movement direction, eye cast direction, jaw set, breath hold, shoulder tension — be anatomically precise
-③ HOW the expression SHIFTS across the shot: not just "神情专注" but "眉头在最后一字落下时微微松开"
+③ HOW the expression SHIFTS across the segment: not just "神情专注" but "眉头在最后一字落下时微微松开"
 ④ Camera movement with speed AND endpoint: "镜头从中景缓慢推至颈部以上近景" not just "推镜"
 
-BAD (template, will fail): "角色甲面部表情随台词情绪流动，神情专注，特写推镜。"
-BAD (no physical specificity): "角色乙看着角色甲，眼神复杂。"
+BAD (template, will fail): "0-4s: 角色甲面部表情随台词情绪流动，神情专注，特写推镜。"
+BAD (no physical specificity): "0-4s: 角色乙看着角色甲，眼神复杂。"
 GOOD (S-grade dialogue):
-"角色甲（黑甲银纹）站于篝火左侧，低头注视角色乙手心里攥紧的信纸——沉默两秒后缓缓抬眼，下颌微微收紧，说话时声线平稳却带着一丝沙哑；镜头从胸口中景缓慢推至他下颌以上的近景，背景篝火在焦外跳动。"
+"0-4s: 角色甲站于篝火左侧，低头注视角色乙手心里攥紧的信纸——沉默两秒后缓缓抬眼，下颌微微收紧，说话时声线平稳却带着一丝沙哑；镜头从胸口中景缓慢推至下颌以上近景，背景篝火在焦外跳动。"
 
-━━━ ACTION SHOT REQUIREMENTS (S-GRADE) ━━━
-Every shot containing combat or physical action MUST include in the videoScript:
+━━━ ACTION SEGMENT REQUIREMENTS (S-GRADE) ━━━
+Every segment containing combat or physical action MUST include:
 ① Weapon/technique visual signature: blade color, energy trail color and shape, particle type and direction
 ② Body momentum: which foot plants, which direction body leans, follow-through arc
 ③ Impact/result in one sharp visual: specific spark color, shockwave ripple radius, debris trajectory
 ④ Camera response to action: does it shake, snap-zoom, whip-pan, or hold deliberately still?
 
-BAD (generic): "角色丙挥刀攻击巨型敌对单位。"
+BAD (generic): "0-3s: 角色丙挥刀攻击魔族。"
 GOOD (S-grade action):
-"角色丙（白发白和服）从队友丁护盾右侧掠出——右脚踏石地同时横臂劈出铭刃，银白刀气如一道凌冽冰河斜斩对方右臂重甲，钢铁接触的瞬间炸出白色霜花和蓝光碎星；镜头贴地低角度快速推进，随刀气落点骤然向上仰拍至全景。"
+"0-3s: 角色丙从护盾右侧掠出——右脚踏石地同时横臂劈出铭刃，银白刀气斜斩对方重甲，钢铁接触瞬间炸出白色霜花和蓝光碎星；镜头贴地低角度快速推进，随刀气落点骤然仰拍至全景。"
 
-━━━ ESTABLISHING / ATMOSPHERE SHOT REQUIREMENTS ━━━
-For wide shots, location reveals, and atmosphere-only shots:
-① Describe the MOVEMENT within the environment (what is actually moving: foliage, water, smoke, crowds)
-② Specify the lighting direction and quality (where shadows fall, what is backlit, color temperature)
+━━━ ESTABLISHING / ATMOSPHERE SEGMENT REQUIREMENTS ━━━
+For wide shots and atmosphere-only segments:
+① Describe the MOVEMENT within the environment (foliage, water, smoke, crowds)
+② Specify lighting direction and quality (where shadows fall, color temperature)
 ③ Camera movement must create a sense of SCALE or REVEAL
-GOOD: "镜头从地平线高度缓慢升起——城镇全景自下而上展开：红灯笼连排在屋檐下微微摇曳，篝火为中心放射出橙黄暖光将木屋轮廓染成剪影，夜空蓝黑色中繁星如盐粒散落；镜头升至屋顶高度后水平向左缓慢平移。"
 
-❌ ABSOLUTELY FORBIDDEN TEMPLATE PATTERNS — generating any of these is a CRITICAL FAILURE:
-- "[场景名]场景，说话人面部表情随台词情绪流动，神情专注"
+❌ ABSOLUTELY FORBIDDEN IN EVERY motionScript SEGMENT:
+- "说话人面部表情随台词情绪流动，神情专注"
 - "中景跟拍：捕捉[XX]动作过程"
-- "特写推镜：说话人面部，捕捉情绪细节" (without specifying WHOSE face and WHAT changes)
-- Any videoScript shorter than 25 Chinese characters
-- Any videoScript that is ONLY a camera description with no character motion
-- Any videoScript that duplicates the cameraDirection field verbatim
+- Segment under 25 Chinese characters
+- Segment that is ONLY camera description with no character motion
+- BGM / music descriptions (e.g. "配乐响起", "悲壮BGM", "弦乐渐强") — audio is post-production only
+- "角色情绪丰富" / "神情坚定" / "眼神复杂" — content-free phrases
 
 ❌ NARRATIVE EMPTINESS — each shot must earn its place:
 - Do NOT generate filler shots: "角色走向房间" with no emotional or story significance
@@ -666,8 +646,9 @@ Each must be a SELF-SUFFICIENT image generation prompt containing:
   主体角度: 正面 / 正侧 / 四分之三侧 / 背面
 - COMPOSITION: character positions (left/center/right, rule-of-thirds), foreground/background layers, depth-of-field
 - CHARACTERS: reference by exact name, describe CURRENT pose, expression, action only — visual appearance is carried by the frame image
-- LIGHTING: direction, quality, color temperature — specific to this frame's moment
-- EMOTIONAL STATE: one word or phrase describing the visible emotional tone of the frame
+- LIGHTING: direction + color temperature — specific to this frame (e.g. "右侧月光冷调侧逆光"). MUST be present.
+- EMOTIONAL STATE: anatomy-based body/face description ONLY — e.g. "下颌角收紧" / "眉心细纹" / "喉结轻动". ⚠️ NEVER use emotion adjectives (神情坚定/眼神复杂/情绪丰富) — these are banned.
+- SELF-SUFFICIENT: startFrame is the ONLY description sent to the image model. It must contain all four elements above so the model can generate the frame without any other field.
 - Do NOT include dialogue text in startFrame or endFrame
 
 startFrame = INITIAL STATE before action begins (starting poses, opening expressions, camera at start position)
@@ -711,7 +692,25 @@ PHYSICAL REALITY CHECK (every frame):
   - Objects under gravity (lanterns, flags, cloth) hang STRAIGHT DOWN — never "extend toward" or "point at" things
   - Camera angle in description MUST match the shot's cameraDirection field
   - No invented props or spatial relationships absent from the scene description
-  - Every frame description = a FROZEN STILL IMAGE — no motion verbs`;
+  - Every frame description = a FROZEN STILL IMAGE — no motion verbs
+
+═══════════════════════════════════════════════════
+  AI Image Generation Constraint — Characters MUST Appear in startFrame
+═══════════════════════════════════════════════════
+The startFrame is sent to an AI image model as the FIRST FRAME anchor for video generation. The image model uses character reference photos to draw the character. If the character is absent from startFrame, there is NO way to anchor their appearance in the video.
+
+RULE: If a named character appears in this shot, they MUST be visible in startFrame.
+
+WHEN TO SPLIT A SHOT:
+If the screenplay has a character entering the scene mid-shot (e.g., "Character A is waiting. Character B walks in."), you MUST split it into TWO shots:
+  Shot A: Character A alone — startFrame shows only Character A
+  Shot B: Character B enters — startFrame shows Character B's first moment of entry
+DO NOT write a shot where startFrame is empty/environment-only but a named character appears later in motionScript.
+
+EXCEPTIONS (no split needed):
+  ① The shot is a pure environment/crowd/establishing shot with NO named characters at all
+  ② The character's BACK or SILHOUETTE is in startFrame (still counts as present)
+  ③ The character appears only as a voice (OS/VO type dialogue) — they do not need to be in frame`;
 
 const SHOT_SPLIT_MOTION_SCRIPT_RULES = `═══════════════════════════════════════════════════
   motionScript — Time-Segmented Narrative
@@ -745,7 +744,7 @@ const SHOT_SPLIT_CAMERA_DIRECTIONS = `══════════════
 ═══════════════════════════════════════════════════
 Choose ONE value per shot. Compound movements allowed with " + ".
 
-▸ 基础运镜（中文优先，与 videoScript 保持一致）:
+▸ 基础运镜（中文优先，与 motionScript 保持一致）:
 - "static" / "固定" — locked camera
 - "推" / "dolly in" — camera moves forward toward subject
 - "拉" / "dolly out" — camera pulls away
@@ -870,7 +869,7 @@ const SHOT_SPLIT_VISUAL_CONTINUITY = `══════════════
 ━━━ 环境动态要求 ━━━
 每 3~4 个镜头至少安排 1 个有环境动态的镜头（防止画面"死掉"）：
 - 优先：窗帘轻摆、咖啡热气蒸腾、雨滴滑过玻璃、车流光影、树叶飘落
-- 在 motionScript 和 videoScript 中描述这些环境动态`;
+- 在 motionScript 中描述这些环境动态`;
 
 const SHOT_SPLIT_DIALOGUE_DURATION = `═══════════════════════════════════════════════════
   含台词镜头时长计算（MANDATORY — 必须精确计算）
@@ -900,7 +899,7 @@ const SHOT_SPLIT_DIALOGUE_DURATION = `══════════════
 ❌ 禁止把有长台词的镜头 duration 设为 3~5s（台词根本念不完）
 ❌ 一句台词对应一个镜头，禁止在单镜头内塞多角色多轮对白`;
 
-const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, videoScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
+const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
 
 OUTPUT FORMAT: If a DURATION BUDGET planning step is requested in the user prompt, output the <!-- PLAN: ... --> comment on its own line FIRST, then output the JSON array with no other text. If no planning step is requested, output ONLY the JSON array. No markdown fences. No other commentary.`;
 
@@ -981,7 +980,46 @@ const shotSplitDef: PromptDefinition = {
   },
 };
 
-// ─── 8. frame_generate_first ────────────────────────────
+// ─── 8. split_shot_single ───────────────────────────────
+// 将单个分镜拆成两个：用于"角色中途入镜"等首帧锚点问题。
+
+export const SPLIT_SHOT_SINGLE_SYSTEM = `你是一位资深商业动画导演，正在将一个分镜拆分为两个连续分镜。
+
+拆分原则：
+1. 拆分点通常是角色进入画面、场景重大变化、或叙事转折的时刻
+2. 分镜A = 拆分点之前（首帧不含即将入镜的角色）
+3. 分镜B = 拆分点之后（首帧含新入镜的角色或新状态）
+4. 两个分镜的总时长 = 原始时长（秒数分配应符合各自内容节奏）
+5. 分镜A的尾帧 → 暗示分镜B的到来（视线/运镜引导）
+6. 分镜B的首帧 → 与分镜A的尾帧在空间上连贯
+
+输出格式：严格输出 JSON 数组（2个对象），字段与 shot_split 一致：
+[
+  {
+    "sequence_offset": 0,
+    "sceneDescription": "...",
+    "startFrame": "...",
+    "endFrame": "...",
+    "motionScript": "...",
+    "duration": N,
+    "soundEffect": "...",
+    "cameraDirection": "...",
+    "dialogues": []
+  },
+  {
+    "sequence_offset": 1,
+    ...
+  }
+]
+
+约束：
+- startFrame 是静止画面（无运动词）
+- motionScript 格式：0-Xs: [...]. Xs-Ys: [...]. ｜朝向：...
+- motionScript 总时长精确等于该分镜 duration
+- 有具名角色的分镜：该角色必须出现在 startFrame 中
+- 仅输出 JSON 数组，无任何其他文字`;
+
+// ─── 9. frame_generate_first ────────────────────────────
 
 const FIRST_FRAME_STYLE_MATCHING = `=== 关键：画风匹配（最高优先级）===
 仔细阅读下方的角色描述和场景描述。它们指定或暗示了画风。

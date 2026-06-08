@@ -52,7 +52,6 @@ export const SHOT_WITH_NAMED_CHARACTERS = {
   endFrameDesc: "二人对视，中景正面构图，表情凝重",
   cameraDirection: "static — 固定镜头，中景正面",
   duration: 5,
-  videoScript: `${FIXTURE_CHAR_A}转身，与${FIXTURE_CHAR_D_BASE}目光相遇，二人无言对立`,
 };
 
 /** 群演场景，无主角配角 */
@@ -66,7 +65,6 @@ export const SHOT_CROWD_SCENE = {
   endFrameDesc: "俯拍篝火圈全景，村民围圈的宏观视角",
   cameraDirection: "crane up — 镜头从集会地面缓缓起吊",
   duration: 6,
-  videoScript: "镜头起吊，篝火圈全貌呈现",
 };
 
 /** 纯动作/环境镜头，无角色出现 */
@@ -78,7 +76,6 @@ export const SHOT_PURE_ACTION = {
   endFrameDesc: "烟尘散去，峡谷一分为二",
   cameraDirection: "extreme wide — 大远景俯拍",
   duration: 3,
-  videoScript: "剑气斩过山脉，地形被永久改变",
 };
 
 /** 单角色特写 */
@@ -90,7 +87,6 @@ export const SHOT_SINGLE_CHARACTER = {
   endFrameDesc: `${FIXTURE_CHAR_C}停步，气喘吁吁，回望身后`,
   cameraDirection: "tracking — 跟随运动",
   duration: 4,
-  videoScript: `${FIXTURE_CHAR_C}全速奔跑，镜头跟随`,
 };
 
 // ── Prompt enhancement fixtures ───────────────────────────────────────────────

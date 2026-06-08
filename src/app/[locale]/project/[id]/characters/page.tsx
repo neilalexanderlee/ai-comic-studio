@@ -26,6 +26,8 @@ interface Character {
     assetType: "morph" | "blueprint";
     isDefault: number;
     audioPath?: string | null;
+    angle?: string | null;
+    sourceAssetId?: string | null;
   }[];
   scope: string;
   episodeId: string | null;

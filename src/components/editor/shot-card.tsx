@@ -58,7 +58,6 @@ interface ShotCardProps {
   prompt: string;
   startFrameDesc: string | null;
   endFrameDesc: string | null;
-  videoScript: string | null;
   motionScript: string | null;
   cameraDirection: string;
   duration: number;
@@ -110,6 +109,8 @@ interface ShotCardProps {
   track?: string | null;
   /** 关联场景 ID */
   sceneId?: string | null;
+  /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
+  namedCharacterCount?: number;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -178,7 +179,6 @@ export function ShotCard({
   prompt,
   startFrameDesc,
   endFrameDesc,
-  videoScript,
   motionScript,
   cameraDirection,
   duration,
@@ -214,6 +214,7 @@ export function ShotCard({
   isCrowdShot = false,
   track,
   sceneId,
+  namedCharacterCount = 0,
 }: ShotCardProps) {
   const t = useTranslations();
   const videoReadiness = getShotVideoReadiness(
@@ -233,6 +234,7 @@ export function ShotCard({
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
+    namedCharacterCount,
     onUpdate,
   });
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
@@ -261,6 +263,7 @@ export function ShotCard({
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [rewritingText, setRewritingText] = useState(false);
+  const [splitingContent, setSplitingContent] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
 
   // 台词编辑状态
@@ -425,14 +428,42 @@ export function ShotCard({
         }),
       });
       onUpdate();
+      // 若首帧来自继承，提示用户可能需要刷新首帧（新角色不在继承图中）
+      if (chainSourceShotId) {
+        toast.info(
+          `首帧继承自第 ${chainSourceSequence ?? "?"} 镜 — 若本镜引入了新角色，请在下方 Step 2 点「刷新首帧」。`,
+          { duration: 6000 }
+        );
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
+    } finally {
+      setRewritingText(false);
     }
-    setRewritingText(false);
+  }
+
+  async function handleContentSplit() {
+    setSplitingContent(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "split_shot",
+          payload: { shotId: id },
+          modelConfig: getModelConfig(),
+        }),
+      });
+      toast.success("已拆分为两个连续分镜");
+      onUpdate();
+    } catch (err) {
+      toast.error("拆分失败：" + (err instanceof Error ? err.message : String(err)));
+    }
+    setSplitingContent(false);
   }
 
   function handleCopyPrompt() {
-    const text = videoPrompt || `${videoScript || motionScript || prompt}\nCamera: ${cameraDirection}`;
+    const text = videoPrompt || `${motionScript || prompt}\nCamera: ${cameraDirection}`;
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -814,16 +845,26 @@ export function ShotCard({
                 size="xs"
                 variant="outline"
                 onClick={handleRewriteText}
-                disabled={rewritingText}
+                disabled={rewritingText || splitingContent}
               >
                 {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {rewritingText ? t("common.generating") : t("shot.rewriteText")}
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={handleContentSplit}
+                disabled={splitingContent || rewritingText}
+                title="AI 将此分镜拆成两个连续分镜（用于角色中途入镜等首帧锚点问题）"
+              >
+                {splitingContent ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
+                {splitingContent ? "拆分中…" : "AI 拆分分镜"}
               </Button>
               <ShotRestoreFromScriptButton
                 projectId={projectId}
                 shotId={id}
                 onRestored={onUpdate}
-                disabled={rewritingText}
+                disabled={rewritingText || splitingContent}
               />
             </div>
           </div>
@@ -836,7 +877,22 @@ export function ShotCard({
           isNext={nextStep === "frame"}
         >
           {chainSourceHint && (
-            <p className="mb-2 text-[11px] font-medium text-primary/90">{chainSourceHint}</p>
+            <div className="mb-2 flex items-center gap-2 flex-wrap rounded-lg bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
+              <span className="text-[11px] font-medium text-amber-700 flex-1">{chainSourceHint}</span>
+              <Button
+                size="xs"
+                variant="ghost"
+                onClick={frameActions.handleGenerateFirstFrameFresh}
+                disabled={frameActions.frameActionsBusy || generatingVideo}
+                title="忽略继承，根据当前首帧描述 + 本镜定妆图重新生成"
+                className="h-5 px-1.5 text-[10px] text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+              >
+                {frameActions.generatingFrames && frameActions.generatingFrameTarget === "first"
+                  ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  : <RefreshCw className="h-2.5 w-2.5" />}
+                刷新首帧
+              </Button>
+            </div>
           )}
           <ShotFrameAssets
             projectId={projectId}
@@ -862,7 +918,7 @@ export function ShotCard({
               adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
               adoptingPrevFrame={frameActions.adoptingPrevFrame}
               disabled={generatingVideo}
-              onGenerateFrames={frameActions.handleGenerateFrames}
+              onGenerateFrames={frameActions.handleGenerateFirstFrameFresh}
               onPickReference={() => frameActions.openFrameReferencePicker("first")}
               onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}
               onAdoptPrevChain={frameActions.handleAdoptPrevChainFrame}
@@ -1056,6 +1112,7 @@ export function ShotCard({
         currentShotId={id}
         frameTarget={frameActions.pendingFrameTarget === "last" ? "last" : "first"}
         onConfirm={frameActions.handleFrameReferenceConfirm}
+        maxSelectable={frameActions.crossShotRefLimit}
       />
     </div>
   );

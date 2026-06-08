@@ -125,7 +125,7 @@ describe("buildLastFramePrompt", () => {
 describe("buildVideoPrompt slim anchors", () => {
   it("uses short frame anchor hint when visual frames attached", () => {
     const result = buildVideoPrompt({
-      videoScript: "角色甲拔剑，镜头缓推。",
+      motionText: "角色甲拔剑，镜头缓推。",
       cameraDirection: "dolly in",
       startFrameDesc: "角色甲握剑柄特写",
       endFrameDesc: "剑已出鞘半身",
@@ -140,7 +140,7 @@ describe("buildVideoPrompt slim anchors", () => {
 
   it("crowd shot has no long character block in reference mode", () => {
     const result = buildReferenceVideoPrompt({
-      videoScript: "人群奔逃。",
+      motionText: "人群奔逃。",
       cameraDirection: "static",
       characters: [],
       slimCharacterSection: true,

@@ -38,16 +38,10 @@ export type SeedanceShot = {
   sceneDescription: string;
   /** 场景名 */
   sceneName?: string | null;
-  /** 景别 */
-  framing?: string | null;
-  /** 运镜 */
+  /** 运镜（含景别信息，如"起幅[中景]→推镜→落幅[近景]"） */
   cameraDirection?: string | null;
   /** 角色动作（含 ｜朝向：标注） */
   motionScript?: string | null;
-  /** 情绪 */
-  emotion?: string | null;
-  /** 光影氛围 */
-  lightingAtm?: string | null;
   /** 音效 */
   soundEffect?: string | null;
   /** 台词列表 */
@@ -73,27 +67,36 @@ type RefEntry =
   | { kind: "storyboard_image"; refNum: number; shotIndex: number };
 
 /**
- * 按 Toonflow 规范分配 @参考N 编号：
- * 1. 资产图片（按输入顺序）
- * 2. 若资产有音频，紧跟资产图片后插入音频编号
- * 3. 分镜图（接续所有资产之后）；shouldGenerateImage=false 的分镜跳过
+ * 按 Toonflow API adapter 规范分配 @参考N 编号：
+ *
+ * Seedance 多模态参考 API 的 content 数组顺序：先全部图片（reference_image），再全部音频（reference_audio）。
+ * 因此编号也必须遵循"图片先行、音频殿后"的原则，不可交错。
+ *
+ * 分配顺序：
+ *   1. 所有资产图片（按输入顺序：角色 → 场景 → 道具）
+ *   2. 所有分镜首帧图（按分镜序号，跳过无首帧的分镜）
+ *   3. 所有资产音频（仅 hasAudio=true 的角色，保持与图片相同的角色顺序）
  */
 function buildRefEntries(assets: SeedanceAsset[], shots: SeedanceShot[]): RefEntry[] {
   const entries: RefEntry[] = [];
   let counter = 1;
 
-  // 资产（图片 + 可选音频）
+  // 第一轮：所有资产图片
   for (const asset of assets) {
     entries.push({ kind: "asset_image", refNum: counter++, asset });
-    if (asset.hasAudio) {
-      entries.push({ kind: "asset_audio", refNum: counter++, asset });
-    }
   }
 
-  // 分镜图
+  // 第二轮：所有分镜首帧图
   for (let i = 0; i < shots.length; i++) {
     if (shots[i].hasStoryboardImage) {
       entries.push({ kind: "storyboard_image", refNum: counter++, shotIndex: i });
+    }
+  }
+
+  // 第三轮：所有资产音频（顺序与图片轮相同，以保持音色绑定的角色对应关系）
+  for (const asset of assets) {
+    if (asset.hasAudio) {
+      entries.push({ kind: "asset_audio", refNum: counter++, asset });
     }
   }
 
@@ -211,7 +214,7 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
   // 6. 过渡描述（多镜时生成，单镜时写"无"）
   lines.push("场景:");
   if (shots.length > 1) {
-    lines.push(`分镜过渡: 镜头平滑切换，保持同一场景的视觉连贯性，情绪弧线从${shots[0].emotion || "当前情绪"}过渡至${shots[shots.length - 1].emotion || "末镜情绪"}。`);
+    lines.push(`分镜过渡: 镜头平滑切换，保持同一场景的视觉连贯性，情绪随动作自然流动。`);
   } else {
     lines.push("分镜过渡: 无");
   }
@@ -282,17 +285,13 @@ function buildShotLine(
   const timeOfDay = extractTimeOfDay(shot.sceneDescription);
   parts.push(`时间：${timeOfDay}`);
   parts.push(`场景：${shot.sceneName || "当前场景"}`);
-  parts.push(`镜头：${shot.framing || "中景"}`);
-  if (shot.cameraDirection) parts.push(shot.cameraDirection);
+  if (shot.cameraDirection) parts.push(`运镜：${shot.cameraDirection}`);
 
-  // 角色动作与情绪（分镜正文用角色名，不写 @参考N）
+  // 角色动作（分镜正文用角色名，不写 @参考N）
   const motionDesc = shot.motionScript
     ? shot.motionScript.replace(/｜朝向：[^\n]+/, "").trim()
     : shot.sceneDescription;
   if (motionDesc) parts.push(motionDesc);
-
-  // 情绪面容词
-  if (shot.emotion) parts.push(`情绪：${shot.emotion}`);
 
   // 台词（按类型格式化，有音色则附带，无则省略音色段）
   const dialogueParts: string[] = [];
@@ -311,9 +310,6 @@ function buildShotLine(
   if (dialogueParts.length === 0) {
     dialogueParts.push("无台词");
   }
-
-  // 光影
-  if (shot.lightingAtm) parts.push(shot.lightingAtm);
 
   // 音效
   if (shot.soundEffect) parts.push(shot.soundEffect);

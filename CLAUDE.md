@@ -15,7 +15,7 @@
 
 AI漫剧工坊（英文 **AI Comic Studio**，仓库名 `ai-comic-studio`）是一个基于 AI 的漫剧/短剧分镜生成工具。用户可以：
 1. 创建项目 → 编写剧情大纲和剧本
-2. 将剧本解析为分镜版本（storyboard versions），含 12 维结构化字段（emotion / framing / lightingAtm / 朝向 / 台词类型等）
+2. 将剧本解析为分镜版本（storyboard versions），含结构化字段（startFrameDesc / endFrameDesc / motionScript / 朝向 / 台词类型等）
 3. 为每个分镜生成首帧/尾帧（三段式 Toonflow 提示词 + @图N 角色绑定）
 4. Seedance 多参模式批量生成连贯视频（@参考N 编号 + 音色克隆 + Track 分组）
 5. 浏览器端视频编辑器（时间线 + 字幕 + BGM + 转场 + 导出 WebM）
@@ -77,15 +77,15 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │   │   │       ├── storyboard-image.ts  # ★ buildStoryboardImagePrompt()（三段式 + @图N）
 │   │   │       ├── seedance-multi-param.ts  # ★ buildSeedanceMultiParamVideoPrompt()
 │   │   │       ├── frame-generate.ts    # buildFirstFramePrompt / buildLastFramePrompt
-│   │   │       ├── outline-expand-defaults.ts  # 大纲扩写（含12维 videoDesc 输出规范）
-│   │   │       ├── single-shot-rewrite-defaults.ts  # 单镜重写（含6重校验 + 朝向）
+│   │   │       ├── outline-expand-defaults.ts  # 大纲扩写（含 videoDesc 输出规范）
+│   │   │       ├── single-shot-rewrite-defaults.ts  # 单镜重写（含红线校验 + 朝向）
 │   │   │       └── ...
 │   │   ├── db/
-│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=37）
+│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=42）
 │   │   │   └── index.ts               # DB 实例 + idempotent migration runner
 │   │   ├── storyboard/                # 分镜工具函数
 │   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
-│   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（12维 videoDesc 组装）
+│   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（10维 videoDesc 组装）
 │   │   │   ├── track-grouping.ts      # ★ groupShotsIntoTracks()（≤15s 分组）
 │   │   │   ├── shot-supervision.ts    # ★ superviseShots()（6红线校验 + LLM judge）
 │   │   │   ├── detect-structured-storyboard.ts
@@ -153,7 +153,9 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 37` — `0037_character_asset_audio`
+**当前最新迁移索引**：`idx 43` — `0043_remove_lighting_atm`
+
+> 注：文档中目录结构里 `schema.ts` 注释写的 `最新 idx=42` 已过期，以此处为准。
 
 ### 关键表
 
@@ -162,7 +164,7 @@ VideoProvider    // generateVideo
 | `projects` | 顶层实体，含 `visualStyle`、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；**v0.4 新增**：`emotion`、`framing`、`lightingAtm`、`track`（语义见 `docs/ARCHITECTURE-FRAMES.md` §0） |
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；**v0.4 新增**：`track`（`emotion`/`framing`/`lightingAtm` 已于 migration 0042/0043 全部移除，光影/情绪语义完全内嵌进 `startFrameDesc`） |
 | `dialogues` | 台词；**v0.4 新增**：`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
 | `character_assets` | 角色图片/音频；**v0.4 新增**：`audioPath`（音色参考，用于 Seedance 音色克隆）|
@@ -274,6 +276,69 @@ where(isNull(storyboardVersions.episodeId))
 where(eq(storyboardVersions.episodeId, null))
 ```
 
+### 10. 多参考图生成首/尾帧 — frameReferences 数组
+
+Seedream API（`doubao-seedream-5.0-lite/4.5/4.0`）支持最多 **14 张**参考图（官方文档确认）。
+
+**类型约定**：
+
+```typescript
+// ✅ 新格式（v0.5）：多选数组，第一张为主参考/衔接参考
+export type FrameReferenceChoice =
+  | { mode: "none" }
+  | { mode: "pick"; references: Array<{ shotId: string; frameType: FrameReferenceType }> };
+
+// 发送给服务端的字段
+payload.frameReferences = choice.references;  // 数组
+```
+
+**API 路由**（`generate/route.ts`）：
+- `MAX_REFERENCE_IMAGES = 14`（与 API 上限对齐）
+- 解析顺序：优先读 `frameReferences[]`（新）；若无，fallback 到 `frameReference`（旧单个）保持向后兼容
+- `resolvedFrameRefs[0]` 作为 `continuityRef`（写 `chainSourceShotId` / `chainSourceType`）
+- refImages 组装顺序：`crossShotRefPaths`（用户手选）→ `charRefImages`（角色定妆图）→ `sceneAsset`（场景图）
+
+**动态上限计算**（`use-shot-frame-actions.ts`）：
+
+```typescript
+const API_MAX_REF_IMAGES = 14;
+
+function estimateAutoRefCount(namedCharacterCount: number): number {
+  return namedCharacterCount + 1; // 1 张定妆图/角色 + 1 张场景图
+}
+
+// 暴露给组件的动态上限
+crossShotRefLimit: Math.max(1, API_MAX_REF_IMAGES - estimateAutoRefCount(namedCharacterCount))
+```
+
+**上限示例**（`namedCharacterCount` 来自 `filterShotCharacters()`）：
+- 0 个角色 → 用户可手选 13 张（14 - 1 场景）
+- 1 个角色 → 用户可手选 12 张（14 - 2）
+- 3 个角色 → 用户可手选 10 张（14 - 4）
+
+**组件链路**：`storyboard/page.tsx` → `namedCharacterCount={shotNamedCharacters.length}` → `ShotCard` / `ShotDrawer` → `useShotFrameActions` → `crossShotRefLimit` → `FrameReferencePicker maxSelectable`
+
+**FrameReferencePicker UI**：checkbox 多选（替代原 radio 单选），第一张选中标「主参考」角标；达上限其余选项置灰。
+
+### 11. startFrameDesc — 帧生成唯一事实来源
+
+`startFrameDesc` / `endFrameDesc` 是图像生成的唯一画面依据，必须自包含四要素（景别/角色姿态/主光/情绪身体解剖）。`emotion`、`framing`、`lightingAtm` 三个冗余字段已于 migration 0042/0043 从数据库完全移除，所有信息统一写入 `startFrameDesc`。
+
+```
+// ✅ 正确：startFrameDesc 自包含全部视觉信息（含光影）
+startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额，右臂垂落，
+                 左侧冷调月光侧逆光勾勒轮廓，嘴角绷紧眼眸下垂"
+
+// ❌ 错误：startFrameDesc 缺少主光描述（光影是四要素之一，不得省略）
+startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额，嘴角绷紧"
+```
+
+**startFrameDesc 四要素**（缺一不可）：
+1. 景别/视角（如"近景平视"）
+2. 具名角色精确位置与静止姿态（不写运动过程）
+3. 主光（颜色 + 方向 + 来源，如"左侧冷调月光侧逆光"）
+4. 情绪的身体解剖表现（如"嘴角绷紧眼眸下垂"，禁用"神情坚定"等形容词）
+
 ---
 
 ## AI Prompt 增强系统
@@ -313,6 +378,12 @@ where(eq(storyboardVersions.episodeId, null))
 2. 单一动词驱动的核心动作
 3. 摄影机公式：起幅 + 运镜动作 + 速度 + 落幅
 4. 单一感官细节（光线/粒子/材质/声音，只选其一）
+
+**startFrameDesc / endFrameDesc 四要素**（单一事实来源，必须自包含）：
+1. 景别/视角（如"近景仰拍"）
+2. 具名角色精确位置/姿态（静止态，不写运动过程）
+3. 主光（颜色 + 方向 + 来源，如"左侧冷调月光侧逆光"）
+4. 情绪的身体解剖表现（如"嘴唇微颤、眼睑下垂"，禁用形容词如"神情坚定"）
 
 **首帧/尾帧配对规则**：
 - 首帧 = 动作开始前的静止状态（不写运动过程）
@@ -363,10 +434,11 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
 | PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧 |
-| shot_split 输出字段不完整（emotion 等为空）| LLM 未按新 schema 输出 | 重新点「解析分镜」；单镜「重新生成文本」|
+| 生成首帧出现火光/动态元素 | `lightingAtm` 含视频级动态描述被注入静帧 `【光影】` 段 | migration 0042/0043：从数据库完全移除 `emotion`/`framing`/`lightingAtm`；光影信息统一写入 `startFrameDesc` |
 | Seedance 多参音色错位 | audioPath 有值但 hasAudio 未传入 | `handleBatchVideoGenerate` 查询 `character_assets.audioPath` |
 | Track 分组后视频混乱 | 分镜不连续（有跳号 sequence）| 重新「自动分配 Track」重计算分组 |
 | 视频编辑器字幕未显示 | Canvas 字幕轨道 clip 时间范围不覆盖当前播放头 | 调整字幕 clip 的 startTime / endTime |
+| 参考图只能单选 | `FrameReferenceChoice` 为单值设计，API 实际支持 14 张 | 改为多选数组 `frameReferences[]`；`use-shot-frame-actions` 暴露 `crossShotRefLimit` 动态上限 |
 
 ---
 

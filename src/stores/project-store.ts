@@ -31,7 +31,6 @@ interface Shot {
   prompt: string;
   startFrameDesc: string | null;
   endFrameDesc: string | null;
-  videoScript: string | null;
   motionScript: string | null;
   cameraDirection: string;
   duration: number;

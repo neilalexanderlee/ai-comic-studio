@@ -22,7 +22,7 @@ function buildVersionLabel(versionNum: number): string {
  *   sourceVersionId – if present, clone shots from that version
  *   copyText        – copy prompt / motionScript / startFrameDesc / endFrameDesc / cameraDirection / duration
  *   copyFrames      – copy anchorFirst / anchorLastAi / cutPoint
- *   copyVideoPrompts– copy videoPrompt / videoScript
+ *   copyVideoPrompts– copy videoPrompt
  *   copyVideos      – copy videoUrl
  */
 export async function POST(
@@ -96,7 +96,6 @@ export async function POST(
         startFrameDesc: body.copyText ? s.startFrameDesc : null,
         endFrameDesc: body.copyText ? s.endFrameDesc : null,
         motionScript: body.copyText ? s.motionScript : null,
-        videoScript: body.copyVideoPrompts ? s.videoScript : null,
         cameraDirection: body.copyText ? (s.cameraDirection ?? "static") : "static",
         duration: body.copyText ? (s.duration ?? 10) : 10,
         // frame fields

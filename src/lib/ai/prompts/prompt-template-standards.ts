@@ -46,7 +46,6 @@ export const PROMPT_TEMPLATE_SOURCE_FILES = [
   "shot-split.ts",
   "outline-expand-defaults.ts",
   "frame-generate.ts",
-  "frame-strategy-judge.ts",
   "script-parse.ts",
   "script-generate.ts",
   "script-split.ts",

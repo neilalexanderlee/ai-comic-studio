@@ -48,6 +48,7 @@ type KeyframeVideoParams = {
   anchorFirst: string;
   anchorLastAi: string;
   initialImage?: never;
+  multimodalRefs?: never;
   /** 首帧图片的公网 URL（来自图片生成 API），优先用于视频生成请求，避免 base64 转换 */
   anchorFirstRemoteUrl?: string;
   /** 尾帧图片的公网 URL（来自图片生成 API），优先用于视频生成请求，避免 base64 转换 */
@@ -55,13 +56,40 @@ type KeyframeVideoParams = {
 };
 
 // Reference image mode: a single initial image (local path or http URL)
+// 用于单镜视频生成，initialImage 作为严格首帧锚点（first_frame 模式）。
+// 角色定妆图不传入此模式（API 规定 first_frame / reference_image 互斥）。
 type ReferenceVideoParams = {
   anchorFirst?: never;
   anchorLastAi?: never;
   initialImage: string;
+  multimodalRefs?: never;
 };
 
-export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams) & {
+/**
+ * 多模态参考模式：用于 Track 级批量生成（多镜合一视频）。
+ *
+ * 对应 Toonflow 的 imageReference 数组模式：
+ *   - 所有图片（角色定妆图 + 场景图 + 分镜首帧）→ role: "reference_image"
+ *   - 所有音频（角色音色克隆参考）→ role: "reference_audio"
+ *
+ * 顺序必须与 buildRefEntries() 的 @参考N 编号完全一致：
+ *   先全部图片（资产图 → 场景图 → 分镜首帧），再全部音频。
+ *
+ * 此模式无严格首帧约束，视频内容由 prompt 中的 @参考N 引用驱动。
+ */
+export type MultimodalRefItem = {
+  type: "image" | "audio";
+  path: string; // 本地文件路径
+};
+
+type MultimodalVideoParams = {
+  anchorFirst?: never;
+  anchorLastAi?: never;
+  initialImage?: never;
+  multimodalRefs: MultimodalRefItem[];
+};
+
+export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams | MultimodalVideoParams) & {
   prompt: string;
   duration: number;
   ratio: string;

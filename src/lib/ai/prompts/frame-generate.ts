@@ -39,13 +39,7 @@ export function buildFirstFramePrompt(params: {
   slotContents?: Record<string, string>;
   /** 关联资产列表（按 associateAssetsIds 顺序），用于 @图N 编号。 */
   assets?: AssetRef[];
-  /** 情绪字段 */
-  emotion?: string | null;
-  /** 光影氛围字段 */
-  lightingAtm?: string | null;
-  /** 景别字段 */
-  framing?: string | null;
-  /** 角色动作（含 ｜朝向：标注） */
+  /** 角色动作（含 ｜朝向：标注，用于提取朝向补充到【画面】末尾） */
   motionScript?: string | null;
 }): string {
   // 优先使用三段式新系统（有 visualStyle 或 assets 时启用）
@@ -53,9 +47,6 @@ export function buildFirstFramePrompt(params: {
     return buildStoryboardImagePrompt({
       sceneDescription: params.sceneDescription,
       startFrameDesc: params.startFrameDesc,
-      emotion: params.emotion,
-      lightingAtm: params.lightingAtm,
-      framing: params.framing,
       motionScript: params.motionScript,
       assets: params.assets ?? [],
       visualStyle: params.visualStyle ?? "",
@@ -170,13 +161,7 @@ export function buildLastFramePrompt(params: {
   slotContents?: Record<string, string>;
   /** 关联资产列表，用于 @图N 编号。 */
   assets?: AssetRef[];
-  /** 情绪字段 */
-  emotion?: string | null;
-  /** 光影氛围字段 */
-  lightingAtm?: string | null;
-  /** 景别字段 */
-  framing?: string | null;
-  /** 角色动作（含 ｜朝向：标注） */
+  /** 角色动作（含 ｜朝向：标注，用于提取朝向补充到【画面】末尾） */
   motionScript?: string | null;
 }): string {
   // 尾帧使用同一三段式系统，但画面主干是 endFrameDesc
@@ -184,9 +169,6 @@ export function buildLastFramePrompt(params: {
     const endPrompt = buildStoryboardImagePrompt({
       sceneDescription: params.sceneDescription,
       startFrameDesc: params.endFrameDesc,   // 尾帧描述传入 startFrameDesc 位置
-      emotion: params.emotion,
-      lightingAtm: params.lightingAtm,
-      framing: params.framing,
       motionScript: params.motionScript,
       assets: params.assets ?? [],
       visualStyle: params.visualStyle ?? "",

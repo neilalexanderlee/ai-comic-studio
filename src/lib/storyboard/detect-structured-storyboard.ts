@@ -60,13 +60,13 @@ export function detectStructuredStoryboard(
     script.match(/\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\s*\|/g) ?? [];
   const tc = timecodeBlocks.length;
 
-  // S-grade markers: 【videoScript】 + 【首帧】/【尾帧】 → strong signal for S-grade storyboard
-  const videoScriptBlocks = (script.match(/【videoScript】/g) ?? []).length;
+  // S-grade markers: 【motionScript】 + 【首帧】/【尾帧】 → strong signal for S-grade storyboard
+  const motionScriptBlocks = (script.match(/【motionScript】/g) ?? []).length;
   const keyframeBlocks = (script.match(/【首帧】/g) ?? []).length +
     (script.match(/【尾帧】/g) ?? []).length;
-  if (videoScriptBlocks >= 2) {
+  if (motionScriptBlocks >= 2) {
     score += 6;
-    reasons.push(`S-grade: ${videoScriptBlocks} 【videoScript】 blocks`);
+    reasons.push(`S-grade: ${motionScriptBlocks} 【motionScript】 blocks`);
   }
   if (keyframeBlocks >= 4) {
     score += 4;
@@ -95,7 +95,7 @@ export function detectStructuredStoryboard(
     lensBlocks + frameBlocks >= 3;
   // S-grade format: no 【分镜详情】 but has dense timecodes + S-grade fields
   const sGradeMatch = !hasDetailBlock && tc >= 6 &&
-    (videoScriptBlocks >= 3 || keyframeBlocks >= 6);
+    (motionScriptBlocks >= 3 || keyframeBlocks >= 6);
   const denseBracketMatch =
     !hasDetailBlock && lensBlocks + frameBlocks >= 12 && tc >= 3;
 

@@ -24,7 +24,7 @@ export type FrameRefPickerShot = {
 
 export type FrameReferenceChoice =
   | { mode: "none" }
-  | { mode: "pick"; shotId: string; frameType: FrameReferenceType };
+  | { mode: "pick"; references: Array<{ shotId: string; frameType: FrameReferenceType }> };
 
 type FrameOption = {
   shotId: string;
@@ -56,6 +56,9 @@ function collectFrameOptions(shots: FrameRefPickerShot[]): FrameOption[] {
   return options;
 }
 
+/** Seedream API 总参考图上限，用于 tooltip 提示 */
+const API_MAX_REF_IMAGES = 14;
+
 interface FrameReferencePickerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -64,6 +67,12 @@ interface FrameReferencePickerProps {
   title?: string;
   frameTarget?: "first" | "last";
   onConfirm: (choice: FrameReferenceChoice) => void;
+  /**
+   * 用户最多可手选的参考图数量。
+   * 由父组件根据本镜命名角色数动态计算（API 上限 14 减去自动注入的角色/场景图预留）。
+   * 默认 10（0 个角色时的保守上限）。
+   */
+  maxSelectable?: number;
 }
 
 export function FrameReferencePicker({
@@ -74,10 +83,13 @@ export function FrameReferencePicker({
   title,
   frameTarget = "first",
   onConfirm,
+  maxSelectable = 10,
 }: FrameReferencePickerProps) {
   const defaultTitle = frameTarget === "last" ? "选择尾帧参考图" : "选择首帧参考图";
   const resolvedTitle = title ?? defaultTitle;
-  const [selected, setSelected] = useState<FrameReferenceChoice | null>({ mode: "none" });
+
+  // 多选状态：key = `${shotId}::${frameType}`
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
 
   const options = useMemo(
     () =>
@@ -87,30 +99,66 @@ export function FrameReferencePicker({
     [shots, currentShotId]
   );
 
+  function makeKey(shotId: string, frameType: FrameReferenceType) {
+    return `${shotId}::${frameType}`;
+  }
+
+  function toggleOption(opt: FrameOption) {
+    const key = makeKey(opt.shotId, opt.frameType);
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else if (next.size < maxSelectable) {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function handleSelectNone() {
+    setSelectedKeys(new Set());
+  }
+
   function handleConfirm() {
-    if (!selected) return;
-    onConfirm(selected);
+    if (selectedKeys.size === 0) {
+      onConfirm({ mode: "none" });
+    } else {
+      const references = options
+        .filter((opt) => selectedKeys.has(makeKey(opt.shotId, opt.frameType)))
+        .map((opt) => ({ shotId: opt.shotId, frameType: opt.frameType }));
+      onConfirm({ mode: "pick", references });
+    }
     onOpenChange(false);
   }
 
+  // 重置选择状态当弹窗关闭
+  function handleOpenChange(open: boolean) {
+    if (!open) setSelectedKeys(new Set());
+    onOpenChange(open);
+  }
+
+  const isNoneMode = selectedKeys.size === 0;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{resolvedTitle}</DialogTitle>
           <p className="text-sm text-[--text-secondary]">
             {frameTarget === "last"
-              ? "将所选画面作为构图/连续性参考发给 AI 生成尾帧（不是直接复制文件）。可选任意分镜的首帧、AI 尾帧或视频真实尾帧。"
-              : "将所选画面作为构图/连续性参考发给 AI 生成首帧（不是直接复制文件）。可选任意更早分镜的首帧、AI 尾帧或视频真实尾帧。"}
+              ? `勾选一张或多张参考图（最多 ${maxSelectable} 张，角色定妆图自动注入不占此数）发给 AI 生成尾帧，第一张优先用于镜间衔接。`
+              : `勾选一张或多张参考图（最多 ${maxSelectable} 张，角色定妆图自动注入不占此数）发给 AI 生成首帧，第一张优先用于镜间衔接。`}
           </p>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+          {/* 独立生成选项 */}
           <button
             type="button"
-            onClick={() => setSelected({ mode: "none" })}
+            onClick={handleSelectNone}
             className={`w-full rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
-              selected?.mode === "none"
+              isNoneMode
                 ? "border-primary bg-primary/5 text-primary"
                 : "border-[--border-subtle] hover:border-primary/30"
             }`}
@@ -119,7 +167,7 @@ export function FrameReferencePicker({
             <p className="mt-1 text-xs text-[--text-muted]">
               {frameTarget === "last"
                 ? "仅使用本镜描述与角色定妆图生成尾帧，不读取其他分镜画面。"
-                : "仅使用本镜描述与角色定妆图生成首帧，不读取上一镜尾帧。"}
+                : "仅使用本镜描述与角色定妆图生成首帧，不读取其他分镜画面。"}
             </p>
           </button>
 
@@ -128,52 +176,82 @@ export function FrameReferencePicker({
               当前版本中没有其他分镜的可选参考图
             </p>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {options.map((opt) => {
-                const isSelected =
-                  selected?.mode === "pick" &&
-                  selected.shotId === opt.shotId &&
-                  selected.frameType === opt.frameType;
-                return (
-                  <button
-                    key={`${opt.shotId}-${opt.frameType}`}
-                    type="button"
-                    onClick={() =>
-                      setSelected({
-                        mode: "pick",
-                        shotId: opt.shotId,
-                        frameType: opt.frameType,
-                      })
-                    }
-                    className={`rounded-xl border overflow-hidden text-left transition-colors ${
-                      isSelected
-                        ? "border-primary ring-2 ring-primary/30"
-                        : "border-[--border-subtle] hover:border-primary/30"
-                    }`}
-                  >
-                    <div className="aspect-video bg-[--surface] relative">
-                      <img
-                        src={uploadUrl(opt.src)}
-                        alt={opt.label}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <p className="px-2 py-1.5 text-[11px] text-[--text-secondary] truncate">
-                      {opt.label}
-                    </p>
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              {/* 已选计数 */}
+              {selectedKeys.size > 0 && (
+                <p className="text-xs text-primary font-medium">
+                  已选 {selectedKeys.size} 张参考图（上限 {maxSelectable} 张，API 总上限 {API_MAX_REF_IMAGES} 张含角色定妆图）
+                  {selectedKeys.size >= maxSelectable && (
+                    <span className="ml-1 text-amber-500">· 已达上限</span>
+                  )}
+                </p>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {/* Set 维护插入顺序，第一个元素即用户最先点击的那张 */}
+                {(() => {
+                  const firstSelectedKey = selectedKeys.size > 0 ? [...selectedKeys][0] : undefined;
+                  return options.map((opt) => {
+                  const key = makeKey(opt.shotId, opt.frameType);
+                  const isChecked = selectedKeys.has(key);
+                  const isDisabled = !isChecked && selectedKeys.size >= maxSelectable;
+                  // 主参考 = 用户最先点击的那张（Set 插入顺序）
+                  const isPrimary = isChecked && key === firstSelectedKey;
+
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => !isDisabled && toggleOption(opt)}
+                      disabled={isDisabled}
+                      className={`rounded-xl border overflow-hidden text-left transition-colors relative ${
+                        isChecked
+                          ? "border-primary ring-2 ring-primary/30"
+                          : isDisabled
+                            ? "border-[--border-subtle] opacity-40 cursor-not-allowed"
+                            : "border-[--border-subtle] hover:border-primary/30"
+                      }`}
+                    >
+                      <div className="aspect-video bg-[--surface] relative">
+                        <img
+                          src={uploadUrl(opt.src)}
+                          alt={opt.label}
+                          className="h-full w-full object-cover"
+                        />
+                        {/* 勾选角标 */}
+                        {isChecked && (
+                          <div className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-primary flex items-center justify-center shadow">
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          </div>
+                        )}
+                        {/* 主参考角标 */}
+                        {isPrimary && (
+                          <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded bg-primary/90 text-white text-[10px] font-medium leading-none">
+                            主参考
+                          </div>
+                        )}
+                      </div>
+                      <p className="px-2 py-1.5 text-[11px] text-[--text-secondary] truncate">
+                        {opt.label}
+                      </p>
+                    </button>
+                  );
+                });
+                })()}
+              </div>
+            </>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => handleOpenChange(false)}>
             取消
           </Button>
-          <Button onClick={handleConfirm} disabled={!selected}>
-            确认并生成
+          <Button onClick={handleConfirm}>
+            {selectedKeys.size > 0
+              ? `确认并生成（${selectedKeys.size} 张参考图）`
+              : "确认并生成"}
           </Button>
         </DialogFooter>
       </DialogContent>

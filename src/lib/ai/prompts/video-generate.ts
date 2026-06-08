@@ -92,7 +92,7 @@ type DialogueEntry = {
  * No frame interpolation header, no [FRAME ANCHORS] — the reference image provides visual context.
  */
 export function buildReferenceVideoPrompt(params: {
-  videoScript: string;
+  motionText: string;
   cameraDirection: string;
   duration?: number;
   characters?: CharacterRef[];
@@ -123,7 +123,7 @@ export function buildReferenceVideoPrompt(params: {
     })
   );
 
-  lines.push(params.videoScript);
+  lines.push(params.motionText);
 
   lines.push(``);
   lines.push(`Camera: ${params.cameraDirection}.`);
@@ -168,7 +168,7 @@ export function buildReferenceVideoPrompt(params: {
 }
 
 export function buildVideoPrompt(params: {
-  videoScript: string;
+  motionText: string;
   cameraDirection: string;
   startFrameDesc?: string;
   endFrameDesc?: string;
@@ -214,7 +214,7 @@ export function buildVideoPrompt(params: {
   lines.push(interpolationHeader);
   lines.push(``);
 
-  lines.push(params.videoScript);
+  lines.push(params.motionText);
 
   lines.push(``);
   lines.push(`Camera: ${params.cameraDirection}.`);
@@ -264,7 +264,7 @@ export function buildVideoPrompt(params: {
     const offScreenLabel = extractLabel(dialogueFormatText, "画外旁白", "【画外音】");
 
     // Add a disambiguation note so the model doesn't double-voice dialogue that
-    // may also appear as prose in the videoScript above.
+    // may also appear as prose in the motion text above.
     lines.push(``);
     lines.push(`NOTE: The following are the ONLY lines of speech. Do not repeat or infer additional dialogue from the scene description above.`);
     for (const d of params.dialogues) {

@@ -60,16 +60,18 @@ flowchart LR
 
 ## 分镜字段合同（必守）
 
-| 字段 | 语义 | 首/尾帧图像 | 视频 |
+| 字段 | 语义 | 首/尾帧图像 | 视频（Seedance） |
 |------|------|-------------|------|
 | `shot.prompt` | 镜头情节/场景卡（可含将发生的动态） | **仅上下文**，禁止作为主画面 | 理解场次，不重复长人设 |
-| `startFrameDesc` | 动作开始前的静止画面 | **首帧主依据** | 可选 Opening 锚点 |
-| `endFrameDesc` | 动作结束后的静止收束 | **尾帧主依据** | 可选 Closing 锚点 |
-| `videoScript` | Seedance 式运动散文（60–180 字） | 不用 | **默认视频文案** |
+| `startFrameDesc` | 动作开始前的静止画面；**自包含四要素**：景别/视角 + 具名角色姿态 + 主光（颜色+方向+来源）+ 情绪的身体解剖表现 | **首帧唯一依据**（单一事实来源） | 可选 Opening 锚点 |
+| `endFrameDesc` | 动作结束后的静止收束；同格式；必须与首帧有可见位移差 | **尾帧唯一依据** | 可选 Closing 锚点 |
+| `motionScript` | 精确时间线（含 `｜朝向：` 标注）；`buildStoryboardImagePrompt` 从中提取朝向注入构图 | 朝向提取 | **主要动作脚本** |
 | `cameraDirection` | `起幅→…→落幅` 整镜链 | 首帧=起幅、尾帧=落幅（代码截取） | 整句或精炼句 |
 | `videoPrompt` | Vision 精炼后的成片 prompt | — | 优先于组装（B2 帧变更后自动刷新） |
 
-编剧原则：**动态情节写进 `videoScript` / `motionScript`，不要写进 `startFrameDesc`/`endFrameDesc` 的对立面。**  
+> **已移除字段**（migration 0042/0043）：`emotion`（情绪）、`framing`（景别）、`lightingAtm`（光影氛围）。其信息现由 `startFrameDesc` 直接承载（自包含四要素），不再作为独立 DB 列。
+
+编剧原则：**动态情节写进 `motionScript`，景别/角色姿态/主光/情绪解剖全部写进 `startFrameDesc`（四要素格式），不作为独立字段单独维护。**  
 `prompt` 可写场次与将发生的事，但静帧生成以 start/end 为准。
 
 ---

@@ -68,16 +68,12 @@ export function buildSceneExtractPrompt(
   shots: Array<{
     sequence: number;
     prompt: string | null;
-    lightingAtm: string | null;
-    framing: string | null;
   }>
 ): string {
   const lines = shots.map((shot) => {
     const parts = [
       `分镜${shot.sequence}`,
-      shot.framing ? `[${shot.framing}]` : null,
       shot.prompt || null,
-      shot.lightingAtm ? `（光影：${shot.lightingAtm}）` : null,
     ].filter(Boolean);
     return parts.join(" ");
   });

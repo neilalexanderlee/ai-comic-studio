@@ -15,7 +15,9 @@ type ShotFrameToolbarProps = {
   adoptingPrevEpisode: boolean;
   adoptingPrevFrame: boolean;
   disabled?: boolean;
+  /** 直接从 startFrameDesc + 定妆图生成，不打开参考图选择器（主路径） */
   onGenerateFrames: () => void;
+  /** 打开参考图选择器（次要路径，用于选其他镜头帧作为参考） */
   onPickReference: () => void;
   onAdoptPrevEpisode: () => void;
   onAdoptPrevChain: () => void;
@@ -58,12 +60,16 @@ export function ShotFrameToolbar({
             ? t("shot.regenerateFrames")
             : t("project.generateFrames")}
       </Button>
-      {frameRefShotsCount > 0 && (
-        <Button size="xs" variant="ghost" onClick={onPickReference} disabled={blocked}>
-          <ImageIcon className="h-3 w-3" />
-          {t("shot.pickFrameReference")}
-        </Button>
-      )}
+      <Button
+        size="xs"
+        variant="ghost"
+        onClick={onPickReference}
+        disabled={blocked}
+        title="选择其他镜头的帧作为参考图来生成首帧（保留场景氛围）"
+      >
+        <ImageIcon className="h-3 w-3" />
+        {t("shot.pickFrameReference")}
+      </Button>
       {showAdoptPrevEpisode && (
         <Button
           size="xs"

@@ -9,7 +9,7 @@ import { getUserIdFromRequest } from "@/lib/get-user-id";
  * POST /api/projects/[id]/shots/[shotId]/split
  *
  * Splits a shot whose duration exceeds the video model's max into N sub-shots.
- * Each sub-shot inherits prompt / videoScript / motionScript from the original.
+ * Each sub-shot inherits prompt / motionScript from the original.
  * Sub-shots are inserted right after the original's sequence position; all
  * subsequent shots in the same episode/version are shifted up.
  *
@@ -111,7 +111,6 @@ export async function POST(
         startFrameDesc: null,   // sub-shots need new frames
         endFrameDesc: null,
         motionScript: original.motionScript,
-        videoScript: original.videoScript,
         cameraDirection: original.cameraDirection ?? "static",
         duration: subDuration,
         status: "pending",

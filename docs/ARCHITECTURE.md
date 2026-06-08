@@ -36,9 +36,9 @@
 
 ## 2. 数据模型
 
-### 核心实体关系（v0.4）
+### 核心实体关系（v0.4 精简版）
 
-> ★ = v0.4 新增字段（Toonflow 质量升级）
+> ★ = v0.4 新增字段；emotion/framing 已于 migration 0042 移除（语义内嵌至 startFrameDesc）
 
 ```
 Project (1)
@@ -53,15 +53,11 @@ Project (1)
   │     │     ├── label: string
   │     │     └──< Shot (N)
   │     │           ├── prompt: string          # 场景描述
-  │     │           ├── startFrameDesc          # 首帧描述
-  │     │           ├── endFrameDesc            # 尾帧描述
-  │     │           ├── videoScript             # 视频脚本（Seedance 散文）
+  │     │           ├── startFrameDesc          # 首帧（四要素自包含：景别/姿态/主光/情绪解剖）★
+  │     │           ├── endFrameDesc            # 尾帧（同格式，与首帧体现位移差）★
   │     │           ├── motionScript            # 时间线动作（含 ｜朝向：标注）★
   │     │           ├── cameraDirection         # 运镜
   │     │           ├── duration: int           # 秒
-  │     │           ├── emotion: string         # 情绪（videoDesc 第8维）★
-  │     │           ├── framing: string         # 景别（videoDesc 第5维）★
-  │     │           ├── lightingAtm: string     # 光影氛围（videoDesc 第9维）★
   │     │           ├── track: string           # Seedance 多参分组（T1/T2...）★
   │     │           ├── anchorFirst: path       # Seedream 首帧
   │     │           ├── anchorLastAi: path       # Seedream AI 尾帧（可选）
@@ -106,7 +102,10 @@ pending → generating → completed
 ### 3.1 单镜生成（当前帧方案）
 
 ```
-Shot prompt / startFrameDesc / endFrameDesc / emotion / framing / lightingAtm
+Shot prompt / startFrameDesc / endFrameDesc / motionScript
+    │                                          ↑
+    │                              startFrameDesc 自包含四要素（景别/姿态/主光/情绪解剖）
+    │                              光影/情绪/景别统一写入 startFrameDesc，无独立字段
     │
     ├── filterShotCharacters(shotText, episodeChars)
     │       └── 无匹配 → []，不 fallback 全量角色
@@ -114,7 +113,9 @@ Shot prompt / startFrameDesc / endFrameDesc / emotion / framing / lightingAtm
     ├── resolveFrameMode (确定性 + 可选 LLM judge) → first_only | both
     │
     ├── single_frame_generate
-    │       ├── buildStoryboardImagePrompt()   ← v0.4 三段式【画面/光影/风格】+ @图N
+    │       ├── buildStoryboardImagePrompt()   ← Toonflow 对齐：startFrameDesc 直出【画面】
+    │       │     ├── 【画面】= startFrameDesc（单一事实来源，自包含景别/姿态/主光/情绪解剖）
+    │       │     ├── 【光影】= 从 startFrameDesc 自身提取主光关键词
     │       │     ├── getArtStylePrompt(visualStyle, 'storyboard') → 风格词库
     │       │     ├── 按 associateAssetsIds 分配 @图1..N（角色/场景资产）
     │       │     └── 从 motionScript 提取 ｜朝向：标注
@@ -138,7 +139,7 @@ assign_tracks action
     → 写入 shots.track 字段
 
 batch_video_generate action（按 track 分组提交）
-    → buildVideoDesc(shot)            ← video-desc.ts（12维）
+    → buildVideoDesc(shot)            ← video-desc.ts（10维：移除景别/情绪维度）
     → buildSeedanceMultiParamVideoPrompt()  ← seedance-multi-param.ts
     │   ├── 参考定义段：@参考N 编号（资产图→音频→分镜图）
     │   ├── 台词处理：对白/内心OS/画外音VO + 9维音色

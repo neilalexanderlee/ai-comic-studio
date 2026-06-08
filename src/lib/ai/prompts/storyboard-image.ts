@@ -14,6 +14,27 @@ const FRAMING_MAP: Record<string, string> = {
   过肩: "过肩构图，前景人物后背虚化，远景人物清晰",
 };
 
+/**
+ * 从 startFrameDesc 中提取光影关键词（如"月光""火光""侧逆光""逆光""顺光"等）。
+ * 规范要求 startFrameDesc 写"主光（颜色+方向+来源）"，此函数把它抠出来复用到【光影】段，
+ * 避免重复写、确保光影信息单一来源（startFrameDesc）。
+ * 找不到时返回空字符串，调用方 fallback 到通用默认光影。
+ */
+function extractLightingHintFromDesc(desc: string): string {
+  if (!desc) return "";
+  // 匹配常见光影关键词片段（保持简短，不整句提取）
+  const patterns = [
+    /[^\s，。]{1,4}(侧逆光|逆光|顺光|侧光|背光|漫射光|环境光|轮廓光)[^\s，。]{0,6}/,
+    /(月光|火光|烛光|灯光|晨光|夕光|阳光|霓虹|闪光)[^\s，。]{0,10}/,
+    /(冷调|暖调|高调|低调)[^\s，。]{0,10}(光|打光|照射)?/,
+  ];
+  for (const p of patterns) {
+    const m = desc.match(p);
+    if (m) return m[0].trim();
+  }
+  return "";
+}
+
 // ── 首帧识别规则（从分镜描述类型推断首帧处理方式）──
 type FrameHandling = "direct" | "freeze_start" | "camera_start";
 
@@ -32,53 +53,62 @@ export type AssetRef = {
   type: "role" | "scene" | "prop";
 };
 
+/**
+ * 三段式分镜图提示词参数。
+ *
+ * 设计原则（对齐 Toonflow，2026-06-08 重构）：
+ * startFrameDesc 是唯一视觉事实来源，必须自包含：
+ *   景别 + 所有具名角色位置/姿态 + 主光（颜色+方向） + 情绪的身体解剖表现
+ *
+ * 原先的 emotion / framing / lightingAtm 三个字段已从数据库完全移除（migration 0042/0043）：
+ * - framing    → 景别写进 startFrameDesc 开头（四要素之①）
+ * - emotion    → 情绪改用解剖学面容词写进 startFrameDesc（四要素之④）
+ * - lightingAtm → 光影信息写进 startFrameDesc 主光描述（四要素之③），不再单独维护
+ * 光影线索从 startFrameDesc 里自动提取作为【光影】段。
+ */
 export type StoryboardImageParams = {
-  /** 分镜主体画面描述（prompt 字段） */
+  /** 分镜主体画面描述（fallback，startFrameDesc 为空时使用） */
   sceneDescription: string;
-  /** 首帧静止构图描述（startFrameDesc） */
+  /**
+   * 首帧静止构图描述——单一视觉事实来源。
+   * 必须包含：景别/视角 + 具名角色精确位置与静止姿态 + 主光（颜色+方向+来源）
+   *           + 情绪的身体解剖表现（禁用情绪形容词）。
+   * 光影信息（四要素之③）包含在此字段内，提示词组装时自动提取。
+   */
   startFrameDesc?: string | null;
-  /** 情绪字段 */
-  emotion?: string | null;
-  /** 光影氛围字段 */
-  lightingAtm?: string | null;
-  /** 景别字段（决定构图词） */
-  framing?: string | null;
-  /** 角色动作（含 ｜朝向：标注） */
+  /** 角色动作（仅用于提取 ｜朝向：标注，补充人物面朝方向） */
   motionScript?: string | null;
   /** 关联资产（按 associateAssetsIds 顺序排列，决定 @图N 编号） */
   assets?: AssetRef[];
   /** 项目视觉风格（对应 art-styles/ 目录） */
   visualStyle?: string;
-  /**
-   * 旧版画风标签（fallback，当 art-styles 文件不存在时使用）
-   * 来自 VISUAL_STYLE_PRESETS[style].tag
-   */
+  /** 旧版画风标签 fallback（当 art-styles 文件不存在时使用） */
   visualStyleTag?: string;
   /** 是否为空镜/群演镜（无命名角色，不加 @图N 前缀） */
   isCrowdOrEmpty?: boolean;
 };
 
 /**
- * 构建三段式分镜图提示词（Toonflow storyboard_prompt_techniques.md 规范）
+ * 构建三段式分镜图提示词（Toonflow 对齐，2026-06-08 重构）
  *
  * 输出格式：
- * @图1 为{角色名}角色 @图2 为{场景名}场景,
+ *   @图1 为{角色名}角色 @图2 为{场景名}场景,
  *
- * 【画面】{景别词}，{画面描述}，{角色位置/朝向}，{情绪面容词}。
+ *   【画面】{startFrameDesc}，朝向：{from motionScript}。
  *
- * 【光影】{光影氛围描述}。
+ *   【光影】{从 startFrameDesc 提取光影关键词，否则通用默认}。
  *
- * 【风格】{风格锚定词}，{画质锁定词}，禁止画外字幕、水印、UI 文字。
+ *   【风格】{风格约束词}，禁止画外字幕、水印、UI 文字。
  *
- * 保持 @图N 面部特征、发型、服饰与参考图完全一致。
+ *   保持 @图N 面部特征、发型、服饰与参考图完全一致。
+ *
+ * startFrameDesc 是单一视觉事实来源，必须自包含所有视觉信息。
+ * startFrameDesc 是单一视觉事实来源，包含所有视觉信息（景别/姿态/主光/情绪解剖）。
  */
 export function buildStoryboardImagePrompt(params: StoryboardImageParams): string {
   const {
     sceneDescription,
     startFrameDesc,
-    emotion,
-    lightingAtm,
-    framing,
     motionScript,
     assets = [],
     visualStyle = "",
@@ -88,7 +118,7 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
 
   const parts: string[] = [];
 
-  // ── 1. @图N 资产前缀标注 ──────────────────────────────
+  // ── 1. @图N 资产前缀标注 ──────────────────────────────────────────────────
   const roleAssets = assets.filter((a) => a.type === "role");
   const hasNamedAssets = !isCrowdOrEmpty && assets.length > 0;
 
@@ -105,80 +135,48 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
     parts.push("");
   }
 
-  // ── 2. 景别映射 ──────────────────────────────────────
-  let framingWord = "";
-  if (framing) {
-    // 处理复合景别（"远景→中景" → 取起始端）
-    const baseFraming = framing.split(/→|->|至/)[0].trim();
-    framingWord = FRAMING_MAP[baseFraming] ?? framing;
-  }
-
-  // ── 3. 首帧识别——确定画面描述如何写入【画面】段 ──────
+  // ── 2. 主画面文字（startFrameDesc 优先，fallback 到 sceneDescription）────
   const mainDesc = startFrameDesc || sceneDescription;
   const handling = detectFrameHandling(mainDesc);
 
   let paintDesc = mainDesc;
   if (handling === "freeze_start") {
-    // 连续动作：提示 LLM 取起始凝固态
     paintDesc = `（取动作起始瞬间静止状态）${mainDesc}`;
   } else if (handling === "camera_start") {
-    // 镜头运动：取起始端景别
     paintDesc = `（取镜头起始端构图）${mainDesc}`;
   }
 
-  // ── 4. 朝向信息提取（从 motionScript 中的 ｜朝向：标注） ──
+  // ── 3. 朝向补充（从 motionScript ｜朝向：标注提取，补充人物面朝信息）────
+  // 朝向是结构性标注（不在 startFrameDesc 里），单独提取追加到【画面】末尾
   let orientationNote = "";
   if (motionScript) {
     const match = motionScript.match(/｜朝向：([^，。\n]+)/);
-    if (match) {
-      orientationNote = match[1].trim();
-    }
+    if (match) orientationNote = match[1].trim();
   }
 
-  // ── 5. 情绪面容词（从 storyboard.md 情绪→面容映射表查找精确词汇）──
-  let emotionDesc = "";
-  if (emotion) {
-    const { faceWord, eyeWord } = lookupEmotionFaceWords(visualStyle, emotion);
-    if (faceWord || eyeWord) {
-      // 使用映射表里的精确面容/眼神词，替代原始情绪标签
-      emotionDesc = `，${[faceWord, eyeWord].filter(Boolean).join("，")}`;
-    } else {
-      // 映射表未命中，直接用 emotion 字段
-      emotionDesc = `，情绪：${emotion}`;
-    }
-  }
-
-  // ── 5b. lightingAtm 兜底（emotion 有值但 lightingAtm 为空时，从光影词库匹配）──
-  let resolvedLightingAtm = lightingAtm;
-  if (!resolvedLightingAtm && emotion && visualStyle) {
-    resolvedLightingAtm = lookupEmotionLighting(visualStyle, emotion);
-  }
-
-  // ── 6. 构建 @图N 替代正文中的角色/场景名（资产模式）──
+  // ── 4. @图N 替换（资产名 → @图N 编号）────────────────────────────────────
   let paintBody = paintDesc;
   if (hasNamedAssets) {
     assets.forEach((a, i) => {
-      // 在画面描述中用 @图N 替代资产名称（精确匹配名字）
       paintBody = paintBody.replaceAll(a.name, `@图${i + 1}`);
     });
   }
 
-  // ── 7. 组装【画面】段 ──────────────────────────────────
-  const paintSection: string[] = ["【画面】"];
-  const paintContent: string[] = [];
-  if (framingWord) paintContent.push(framingWord);
-  paintContent.push(paintBody);
-  if (orientationNote) paintContent.push(`朝向：${orientationNote}`);
-  paintSection.push(paintContent.join("，") + emotionDesc + "。");
-  parts.push(paintSection.join(""));
+  // ── 5. 组装【画面】段 ─────────────────────────────────────────────────────
+  // startFrameDesc 必须自包含景别/位置/光影/情绪身体表现，直接写入，不额外注入
+  const paintLine = orientationNote
+    ? `【画面】${paintBody}，朝向：${orientationNote}。`
+    : `【画面】${paintBody}。`;
+  parts.push(paintLine);
   parts.push("");
 
-  // ── 8. 组装【光影】段（优先 lightingAtm，其次情绪兜底，最后通用默认）──
-  if (resolvedLightingAtm) {
-    parts.push(`【光影】${resolvedLightingAtm}。`);
-  } else {
-    parts.push("【光影】自然光照，光影层次清晰，电影感光效。");
-  }
+  // ── 6. 组装【光影】段（从 startFrameDesc 提取光影关键词，否则通用默认）──
+  // 光影信息完全来自 startFrameDesc，不依赖任何外部字段
+  const lightingHint = extractLightingHintFromDesc(mainDesc);
+  parts.push(lightingHint
+    ? `【光影】${lightingHint}。`
+    : "【光影】自然光照，光影层次清晰，电影感光效。"
+  );
   parts.push("");
 
   // ── 9. 组装【风格】段（从 art-styles 文件获取风格词）──
@@ -253,30 +251,6 @@ function buildStyleSection(visualStyle: string, fallbackTag: string): string {
   return fallbackTag || "高清画质，线条清晰，色彩柔和，画面无杂色无噪点";
 }
 
-/**
- * 从 art-styles/{style}/storyboard.md 的情绪光影映射表查找对应光影描述。
- * Toonflow 每个风格的 director_storyboard.md 都有「情绪基调 → 光线类型」映射。
- * 找不到时返回空字符串（调用方使用默认光影）。
- */
-export function lookupEmotionLighting(visualStyle: string, emotion: string): string {
-  if (!emotion || !visualStyle || visualStyle === "auto") return "";
-
-  const content = getArtStylePrompt(visualStyle, "storyboard");
-  if (!content) return "";
-
-  // 在「情绪光影」或「光影氛围词库」段落里查找匹配行
-  // 格式：| 情绪基调 | 光线类型 | 补充约束 |
-  const lines = content.split("\n");
-  for (const line of lines) {
-    if (!line.includes("|")) continue;
-    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length >= 2 && cols[0].includes(emotion.slice(0, 2))) {
-      // 取光线类型列（第2列）
-      return cols[1] || "";
-    }
-  }
-  return "";
-}
 
 // 通用负向词（所有风格共用）
 const BASE_NEGATIVE_PROMPT =
@@ -308,31 +282,3 @@ export function extractNegativePrompt(visualStyle?: string): string {
   return BASE_NEGATIVE_PROMPT;
 }
 
-/**
- * 从 art-styles storyboard.md 的情绪→面容映射表中查找对应的面容/眼神词。
- * 找不到映射时返回空字符串（直接使用原始情绪词）。
- */
-export function lookupEmotionFaceWords(
-  visualStyle: string,
-  emotion: string
-): { faceWord: string; eyeWord: string } {
-  if (!emotion || !visualStyle || visualStyle === "auto") {
-    return { faceWord: "", eyeWord: "" };
-  }
-
-  const content = getArtStylePrompt(visualStyle, "storyboard");
-  if (!content) return { faceWord: "", eyeWord: "" };
-
-  // 在情绪→面容/眼神映射表中查找匹配行
-  const lines = content.split("\n");
-  for (const line of lines) {
-    if (line.includes(emotion)) {
-      // 格式：| 情绪 / 同义词 | 面容词 | 眼神词 | ...
-      const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-      if (cols.length >= 3) {
-        return { faceWord: cols[1] ?? "", eyeWord: cols[2] ?? "" };
-      }
-    }
-  }
-  return { faceWord: "", eyeWord: "" };
-}

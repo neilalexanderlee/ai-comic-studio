@@ -16,12 +16,11 @@ type ShotForVideoScan = {
   prompt?: string | null;
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
-  videoScript?: string | null;
   motionScript?: string | null;
 };
 
 function buildShotText(shot: ShotForVideoScan): string {
-  return [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+  return [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.motionScript]
     .filter(Boolean)
     .join(" ");
 }

@@ -1,12 +1,16 @@
 /**
- * videoDesc 12维结构化字符串组装（Toonflow 标准格式）
+ * videoDesc 9维结构化字符串组装（完全对齐 Toonflow 精简格式）
  *
- * 格式：（画面描述、场景、关联资产名称、时长、景别、运镜、角色动作、情绪、光影氛围、台词、音效、关联资产ID）
+ * 格式：（画面描述、场景、关联资产名称、时长、运镜、角色动作、台词、音效、关联资产ID）
+ *
+ * 注：emotion / framing / lightingAtm 三个冗余字段已从数据库完全移除（migration 0042/0043）：
+ * - 景别 → 内含于 cameraDirection（如"起幅[中景]→..."）及 startFrameDesc 开头
+ * - 情绪 → 内含于 startFrameDesc 情绪身体解剖表现（四要素之④）
+ * - 光影氛围 → 内含于 startFrameDesc 主光描述（四要素之③）
  *
  * 用途：
  * - 作为 Seedance 多参模式视频提示词的核心输入
- * - 作为 universalFirstAndLastFrameMode 的结构化描述
- * - 供监督层质量校验（T13）逐字段检查
+ * - 供监督层质量校验逐字段检查
  */
 
 export type VideoDescDialogue = {
@@ -25,21 +29,15 @@ export type VideoDescParams = {
   assetNames?: string | null;
   /** 第4维：时长（秒数，来自 shot.duration） */
   duration: number;
-  /** 第5维：景别（来自 shot.framing） */
-  framing?: string | null;
-  /** 第6维：运镜（来自 shot.cameraDirection） */
+  /** 第5维：运镜（来自 shot.cameraDirection；含景别信息如"起幅[中景]→..."） */
   cameraDirection?: string | null;
-  /** 第7维：角色动作（来自 shot.motionScript，含 ｜朝向：标注） */
+  /** 第6维：角色动作（来自 shot.motionScript，含 ｜朝向：标注） */
   motionScript?: string | null;
-  /** 第8维：情绪（来自 shot.emotion） */
-  emotion?: string | null;
-  /** 第9维：光影氛围（来自 shot.lightingAtm） */
-  lightingAtm?: string | null;
-  /** 第10维：台词（列表，含类型） */
+  /** 第7维：台词（列表，含类型） */
   dialogues?: VideoDescDialogue[];
-  /** 第11维：音效（来自 shot.soundEffectNote） */
+  /** 第8维：音效（来自 shot.soundEffectNote） */
   soundEffect?: string | null;
-  /** 第12维：关联资产ID（斜杠分隔，如 A001/A002/A003） */
+  /** 第9维：关联资产ID（斜杠分隔，如 A001/A002/A003） */
   assetIds?: string | null;
 };
 
@@ -60,17 +58,14 @@ export function buildVideoDesc(params: VideoDescParams): string {
     sceneName,
     assetNames,
     duration,
-    framing,
     cameraDirection,
     motionScript,
-    emotion,
-    lightingAtm,
     dialogues = [],
     soundEffect,
     assetIds,
   } = params;
 
-  // 第10维：台词字符串组装
+  // 第7维：台词字符串组装
   let dialogueStr = "无台词";
   if (dialogues.length > 0) {
     dialogueStr = dialogues
@@ -81,7 +76,7 @@ export function buildVideoDesc(params: VideoDescParams): string {
       .join("；");
   }
 
-  // 第7维：角色动作（截去 ｜朝向：标注部分保持简洁，完整标注保留在 motionScript 字段）
+  // 第6维：角色动作（截去 ｜朝向：标注部分保持简洁，完整标注保留在 motionScript 字段）
   const motionDesc = motionScript
     ? motionScript.replace(/｜朝向：[^\n]+/, "").trim()
     : "";
@@ -91,14 +86,11 @@ export function buildVideoDesc(params: VideoDescParams): string {
     sceneName || "",                   // 2. 场景
     assetNames || "",                  // 3. 关联资产名称
     `${duration}s`,                    // 4. 时长
-    framing || "",                     // 5. 景别
-    cameraDirection || "",             // 6. 运镜
-    motionDesc,                        // 7. 角色动作
-    emotion || "",                     // 8. 情绪
-    lightingAtm || "",                 // 9. 光影氛围
-    dialogueStr,                       // 10. 台词
-    soundEffect || "无音效",           // 11. 音效
-    assetIds || "",                    // 12. 关联资产ID
+    cameraDirection || "",             // 5. 运镜
+    motionDesc,                        // 6. 角色动作
+    dialogueStr,                       // 7. 台词
+    soundEffect || "无音效",           // 8. 音效
+    assetIds || "",                    // 9. 关联资产ID
   ];
 
   return `（${fields.join("、")}）`;
@@ -111,11 +103,8 @@ export function buildVideoDescFromShot(params: {
   shot: {
     prompt?: string | null;
     duration: number;
-    framing?: string | null;
     cameraDirection?: string | null;
     motionScript?: string | null;
-    emotion?: string | null;
-    lightingAtm?: string | null;
     soundEffectNote?: string | null;
   };
   /** 角色名列表（按 associateAssets 顺序） */
@@ -134,11 +123,8 @@ export function buildVideoDescFromShot(params: {
     sceneName: sceneName || "",
     assetNames: characterNames.join("/") || null,
     duration: shot.duration,
-    framing: shot.framing,
     cameraDirection: shot.cameraDirection,
     motionScript: shot.motionScript,
-    emotion: shot.emotion,
-    lightingAtm: shot.lightingAtm,
     dialogues,
     soundEffect: shot.soundEffectNote,
     assetIds: assetIds.join("/") || null,

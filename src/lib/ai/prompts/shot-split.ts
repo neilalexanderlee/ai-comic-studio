@@ -88,11 +88,10 @@ These shot types ADD duration without padding or stretching existing shots:
   TRANSITION SHOT — character moving between locations, pace/posture carrying story subtext (8–11s)
 
 EVERY SHOT (including inserted ones) MUST MEET S-GRADE STANDARDS:
-  ✅ videoScript: 30–60 word Seedance prose, character name + visual ID, ONE action verb, camera formula, ONE sensory detail
   ✅ startFrame / endFrame: character position, expression, lighting, emotional tone — NOT mid-motion
   ✅ motionScript: time-segmented, max 3s per segment, all four layers (character/environment/camera/physics)
   ✅ Must advance: plot, character relationship, emotional state, or world-building
-  ❌ No template videoScripts, no shots under 25 characters, no "character walks/sits" with no subtext
+  ❌ No template phrases, no segments under 25 characters, no "character walks/sits" with no subtext
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
       })()

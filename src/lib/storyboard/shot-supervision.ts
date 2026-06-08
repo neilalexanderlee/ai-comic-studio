@@ -3,7 +3,7 @@
  *
  * 两层实现：
  * 1. 确定性规则校验（纯逻辑，无 LLM，始终执行）
- * 2. LLM 语义判断（当 enhancePrompts=true 时启用，与 frame-generation-strategy 一致）
+ * 2. LLM 语义判断（当 enhancePrompts=true 时启用）
  *
  * 评分标准：
  * - A级：严重问题 0，中等问题 ≤ 2 → 直接通过
@@ -40,9 +40,6 @@ export type SupervisionShot = {
   sequence: number;
   prompt?: string | null;
   motionScript?: string | null;
-  emotion?: string | null;
-  lightingAtm?: string | null;
-  framing?: string | null;
   soundEffectNote?: string | null;
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
@@ -59,17 +56,16 @@ export type ProjectChar = {
 const RED_LINES = [
   {
     id: "R1",
-    label: "结构化字段完整",
+    label: "朝向标注完整",
     check: (shot: SupervisionShot) => {
-      const missing: string[] = [];
-      if (!shot.emotion?.trim()) missing.push("emotion（情绪）");
-      if (!shot.lightingAtm?.trim()) missing.push("lightingAtm（光影氛围）");
-      if (!shot.framing?.trim()) missing.push("framing（景别）");
-      if (missing.length === 0) return null;
+      // 有命名角色的镜头，motionScript 末尾必须有 ｜朝向：标注
+      const hasNamedChars = shot.dialogues && shot.dialogues.length > 0;
+      if (!hasNamedChars) return null; // 群演/环境镜不要求
+      if (shot.motionScript && /｜朝向：/.test(shot.motionScript)) return null;
       return {
         severity: "warning" as IssueSeverity,
-        description: `缺少字段：${missing.join("、")}`,
-        suggestion: "运行「重新生成文本」以补全结构化字段",
+        description: "motionScript 缺少 ｜朝向：标注",
+        suggestion: "运行「重新生成文本」以补全角色朝向标注",
       };
     },
   },
@@ -126,7 +122,7 @@ const RED_LINES = [
   },
   {
     id: "R5",
-    label: "videoScript 长度",
+    label: "motionScript 长度",
     check: (shot: SupervisionShot) => {
       const vs = shot.motionScript || "";
       if (vs.length > 200) {
@@ -242,10 +238,9 @@ export const SUPERVISION_LLM_SYSTEM = `你是专业分镜质量审核 Agent，�
 ## 审核维度（在确定性规则通过后执行）
 
 1. **内容忠实性**：分镜 prompt（画面描述）与 motionScript、startFrameDesc 是否逻辑一致，无矛盾
-2. **情绪与面容词一致性**：emotion 字段与 startFrameDesc 中的面容描述是否对应（悲伤 vs 嘴角上扬 = 矛盾）
-3. **首帧状态合理性**：startFrameDesc 是否为静止稳定状态（非 mid-motion），是否符合首帧识别规则
-4. **运镜与景别一致性**：framing 字段与 startFrameDesc 中描述的景别是否匹配
-5. **台词类型合理性**：os（内心OS）的台词内容是否适合内心独白（不应是外部对话）
+2. **首帧状态合理性**：startFrameDesc 是否为静止稳定状态（非 mid-motion），是否符合首帧识别规则；光影描述是否为静态主光而非动态进展
+3. **首尾帧差异**：endFrameDesc 是否与 startFrameDesc 有可见构图/姿态差异（体现动作起止位移）
+4. **台词类型合理性**：os（内心OS）的台词内容是否适合内心独白（不应是外部对话）
 
 ## 输出格式（JSON）
 
@@ -270,8 +265,7 @@ export function buildSupervisionUserPrompt(shots: SupervisionShot[]): string {
     sequence: shot.sequence,
     prompt: shot.prompt?.slice(0, 100),
     startFrameDesc: shot.startFrameDesc?.slice(0, 100),
-    emotion: shot.emotion,
-    framing: shot.framing,
+    endFrameDesc: shot.endFrameDesc?.slice(0, 100),
     motionScript: shot.motionScript?.slice(0, 120),
     dialogues: shot.dialogues?.slice(0, 3),
   }));

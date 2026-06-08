@@ -80,9 +80,6 @@ type ShotFrameFields = {
   endFrameDesc?: string | null;
   cameraDirection?: string | null;
   motionScript?: string | null;
-  emotion?: string | null;
-  lightingAtm?: string | null;
-  framing?: string | null;
 };
 
 type PickFramePromptOpts = {
@@ -125,9 +122,6 @@ export function pickFirstFramePromptBuildParams(
     slotContents: opts.slotContents,
     previousLastFrame: opts.previousLastFrame,
     assets: opts.assets,
-    emotion: opts.shot.emotion,
-    lightingAtm: opts.shot.lightingAtm,
-    framing: opts.shot.framing,
     motionScript: opts.shot.motionScript,
   };
 }
@@ -155,9 +149,6 @@ export function pickLastFramePromptBuildParams(
     cameraDirection: extractClosingCameraDirection(cleanedCamera),
     slotContents: opts.slotContents,
     assets: opts.assets,
-    emotion: opts.shot.emotion,
-    lightingAtm: opts.shot.lightingAtm,
-    framing: opts.shot.framing,
     motionScript: opts.shot.motionScript,
   };
 }

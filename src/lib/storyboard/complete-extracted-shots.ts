@@ -2,20 +2,26 @@ import type { ExtractedShot } from "./extract-shot-script";
 import type { PersistableShot } from "./persist-storyboard-version";
 
 /**
- * 根据台词字数和情绪语速计算最低时长（秒）。
+ * 根据台词字数和文本节奏线索计算最低时长（秒）。
  * 移植自 Toonflow storyboard_table_techniques.md 台词时长计算规则。
+ * 注：情绪字段已移除，改为从台词文本中推断节奏。
  */
-function calcMinDurationForDialogue(dialogues: Array<{ text: string }>, emotion?: string | null): number {
+function calcMinDurationForDialogue(dialogues: Array<{ text: string }>): number {
   if (!dialogues.length) return 0;
 
   const fullText = dialogues.map((d) => d.text).join("");
   const charCount = fullText.length;
   if (!charCount) return 0;
 
-  // 语速：愤怒/急促 4字/秒，正常 3字/秒，悲伤/深情 2字/秒
+  // 语速：根据台词内容的标点密度推断节奏
+  // - 感叹号/问号密集 → 急促 4字/秒
+  // - 省略号/破折号密集 → 沉缓 2字/秒
+  // - 其他 → 正常 3字/秒
+  const exclamationCount = (fullText.match(/[！？]/g) ?? []).length;
+  const pauseMarkCount = (fullText.match(/[…—]/g) ?? []).length;
   let charsPerSec = 3;
-  if (emotion && /愤怒|急促|争吵|惊慌|激动/.test(emotion)) charsPerSec = 4;
-  if (emotion && /悲伤|深情|沉思|哀悼|回忆|低语|虚弱|临终/.test(emotion)) charsPerSec = 2;
+  if (exclamationCount / charCount > 0.15) charsPerSec = 4;
+  else if (pauseMarkCount / charCount > 0.1) charsPerSec = 2;
 
   const baseSeconds = Math.ceil(charCount / charsPerSec);
 
@@ -47,7 +53,7 @@ export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): Persistable
     // 台词时长校正：有台词时确保 duration 足够念完
     let duration = shot.duration ?? 10;
     if (shot.dialogues.length > 0) {
-      const minDuration = calcMinDurationForDialogue(shot.dialogues, shot.emotion);
+      const minDuration = calcMinDurationForDialogue(shot.dialogues);
       if (minDuration > duration) {
         duration = minDuration;
       }
@@ -59,14 +65,10 @@ export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): Persistable
       startFrameDesc,
       endFrameDesc,
       motionScript: shot.motionScript ?? shot.prompt ?? null,
-      videoScript: shot.videoScript ?? null,
       cameraDirection: cameraDirection ?? "static",
       duration,
       bgmNote: shot.bgmNote ?? null,
       soundEffectNote: shot.soundEffectNote ?? null,
-      emotion: shot.emotion ?? null,
-      lightingAtm: shot.lightingAtm ?? null,
-      framing: shot.framing ?? null,
       dialogues: shot.dialogues.map((d, i) => ({
         character: d.character,
         text: d.text,

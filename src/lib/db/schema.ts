@@ -128,6 +128,15 @@ export const characterAssets = sqliteTable("character_assets", {
    * 有值时对应 SeedanceAsset.hasAudio = true，生成视频时角色说话声音克隆自该音频。
    */
   audioPath: text("audio_path"),
+  /**
+   * 角度标签：null=正面原图（用户上传），"3q"=3/4侧面，"profile"=正侧面，"back"=背面。
+   * 由 expand_character_asset action 从正面定妆图自动生成角度变体。
+   */
+  angle: text("angle"),
+  /**
+   * 若是扩展生成的角度资产，指向来源正面资产的 ID（用户直接上传的原始资产此字段为 null）。
+   */
+  sourceAssetId: text("source_asset_id"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -175,7 +184,6 @@ export const shots = sqliteTable("shots", {
   remoteVideoCreatedAt: integer("remote_video_created_at", { mode: "timestamp" }),
   remoteVideoExpiresAt: integer("remote_video_expires_at", { mode: "timestamp" }),
   remoteVideoLastDownloadAt: integer("remote_video_last_download_at", { mode: "timestamp" }),
-  videoScript: text("video_script"),
   videoPrompt: text("video_prompt"),
   /** 首/尾帧路径+mtime 指纹；与 videoPrompt 对照以触发 B2 自动 vision 刷新 */
   videoPromptFrameFingerprint: text("video_prompt_frame_fingerprint"),
@@ -213,23 +221,6 @@ export const shots = sqliteTable("shots", {
    * 在视频生成 prompt 中作为 SFX 提示注入，引导 Seedance/Kling 生成对应的原生音效。
    */
   soundEffectNote: text("sound_effect_note"),
-  /**
-   * 情绪字段（videoDesc 第8维）。
-   * 示例："坚定决绝" / "温柔深情" / "惊讶震惊"
-   */
-  emotion: text("emotion"),
-  /**
-   * 光影氛围（videoDesc 第9维）。
-   * 示例："黄昏冷调侧逆光" / "清晨柔和漫射暖光"
-   * 与 soundEffectNote 独立，soundEffectNote 是音效，lightingAtm 是光线/色调描述。
-   */
-  lightingAtm: text("lighting_atm"),
-  /**
-   * 景别（videoDesc 第5维）。
-   * 标准值：大远景 / 远景 / 全景 / 中景 / 近景 / 半身 / 特写 / 大特写 / 过肩
-   * 独立于 cameraDirection（运镜），景别描述的是构图范围而非镜头运动。
-   */
-  framing: text("framing"),
   /**
    * 视频分组标识（Seedance 多参模式）。
    * 同 track 的连续分镜会被合并为一次多分镜视频生成请求（累计时长 ≤ 15s 为一组）。
@@ -401,4 +392,27 @@ export const tasks = sqliteTable("tasks", {
   episodeId: text("episode_id").references(() => episodes.id, {
     onDelete: "cascade",
   }),
+});
+
+/**
+ * Track 级别合并视频表。
+ * Seedance 多参批量生成后，将同 track 的分镜合并成一个视频文件，
+ * 写入此表（而非 shot.videoUrl），在剪辑台按 track 导入整段视频。
+ */
+export const trackVideos = sqliteTable("track_videos", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull(),
+  episodeId: text("episode_id"),
+  versionId: text("version_id"),
+  /** Track 标识符，如 "T1" / "T2" */
+  trackId: text("track_id").notNull(),
+  /** 本地视频文件路径 */
+  videoUrl: text("video_url").notNull(),
+  /** 累计时长（秒） */
+  totalDuration: integer("total_duration"),
+  /** 包含的分镜数量 */
+  shotCount: integer("shot_count"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });

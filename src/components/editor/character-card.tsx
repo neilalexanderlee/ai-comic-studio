@@ -31,6 +31,13 @@ export interface CharacterAsset {
   isDefault: number;
   /** 参考音频路径（MP3/WAV/M4A），用于 Seedance 多参模式音色克隆 */
   audioPath?: string | null;
+  /**
+   * 角度标签：null=正面原图（用户上传），"3q"=3/4侧面，"profile"=正侧面，"back"=背面
+   * 由 expand_character_asset action 从正面定妆图自动生成。
+   */
+  angle?: string | null;
+  /** 若是角度变体资产，指向来源正面资产的 ID */
+  sourceAssetId?: string | null;
 }
 
 export interface EpisodeRef {
@@ -89,6 +96,7 @@ export function CharacterCard({
   useEffect(() => { setEditDesc(description); }, [description]);
   useEffect(() => { setEditVisualHint(visualHint ?? ""); }, [visualHint]);
   const [generating, setGenerating] = useState(false);
+  const [expandingAssetId, setExpandingAssetId] = useState<string | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -128,6 +136,30 @@ export function CharacterCard({
 
   const linkedEpisodes = allEpisodes.filter((e) => localEpisodeIds.includes(e.id));
   const unlinkedEpisodes = allEpisodes.filter((e) => !localEpisodeIds.includes(e.id));
+
+  /** 从正面定妆图扩展三个角度变体（3/4 侧、正侧、背面） */
+  async function handleExpandAsset(assetId: string) {
+    if (!imageGuard()) return;
+    setExpandingAssetId(assetId);
+    try {
+      const modelConfig = getModelConfig();
+      await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "expand_character_asset",
+          payload: { assetId },
+          modelConfig,
+        }),
+      });
+      toast.success("角度变体资产已生成（3/4侧面、正侧面、背面）");
+      onUpdate();
+    } catch (err) {
+      toast.error("扩展角度失败：" + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setExpandingAssetId(null);
+    }
+  }
 
   // Gacha State
   const [gachaOpen, setGachaOpen] = useState(false);
@@ -445,8 +477,30 @@ export function CharacterCard({
               e.target.value = ''; // reset
             }} />
           </label>
+
+          {/* 角度变体标签 */}
+          {asset.angle && (
+            <div className="absolute bottom-1 right-1 z-10 rounded-md bg-indigo-600/80 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm">
+              {asset.angle === "3q" ? "3/4" : asset.angle === "profile" ? "侧" : asset.angle === "back" ? "背" : asset.angle}
+            </div>
+          )}
         </div>
 
+        {/* 扩展角度按钮：仅正面原图（angle=null）且有图片时显示 */}
+        {!asset.angle && asset.assetType === "morph" && asset.imagePath && (
+          <button
+            onClick={() => handleExpandAsset(asset.id)}
+            disabled={expandingAssetId === asset.id}
+            title="从此正面定妆图自动生成 3/4 侧面、正侧面、背面三个角度变体"
+            className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+          >
+            {expandingAssetId === asset.id ? (
+              <><Loader2 className="h-2.5 w-2.5 animate-spin" />扩展中...</>
+            ) : (
+              <><Sparkles className="h-2.5 w-2.5" />扩展角度</>
+            )}
+          </button>
+        )}
       </div>
     );
   }

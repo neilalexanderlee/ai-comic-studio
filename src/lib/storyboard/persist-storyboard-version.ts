@@ -28,19 +28,12 @@ export interface PersistableShot {
   startFrameDesc?: string | null;
   endFrameDesc?: string | null;
   motionScript?: string | null;
-  videoScript?: string | null;
   cameraDirection?: string | null;
   duration?: number | null;
   /** 背景音乐注记（仅后期参考，不注入视频 prompt） */
   bgmNote?: string | null;
   /** 场景级音效提示（注入视频 prompt 供 Seedance/Kling 生成原生 SFX） */
   soundEffectNote?: string | null;
-  /** 情绪字段（videoDesc 第8维），如"坚定决绝"/"温柔深情" */
-  emotion?: string | null;
-  /** 光影氛围（videoDesc 第9维），如"黄昏冷调侧逆光" */
-  lightingAtm?: string | null;
-  /** 景别（videoDesc 第5维），如"中景"/"近景"/"远景" */
-  framing?: string | null;
   dialogues: Array<{ character: string; text: string; sequence?: number; type?: "dialogue" | "os" | "vo" }>;
   warnings?: string[];
 }
@@ -171,14 +164,10 @@ export async function persistStoryboardVersion(params: {
       startFrameDesc: shot.startFrameDesc ?? null,
       endFrameDesc: shot.endFrameDesc ?? null,
       motionScript: shot.motionScript ?? null,
-      videoScript: shot.videoScript ?? null,
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration ?? 10,
       bgmNote: shot.bgmNote ?? null,
       soundEffectNote: shot.soundEffectNote ?? null,
-      emotion: shot.emotion ?? null,
-      lightingAtm: shot.lightingAtm ?? null,
-      framing: shot.framing ?? null,
       episodeId: episodeId ?? null,
       warnings: shot.warnings?.join("; ") || null,
     });

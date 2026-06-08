@@ -57,7 +57,6 @@ function makeShot(partial: Partial<ShotRow> & { sequence: number }): ShotRow {
     startFrameDesc: partial.startFrameDesc ?? null,
     endFrameDesc: partial.endFrameDesc ?? null,
     motionScript: partial.motionScript ?? null,
-    videoScript: partial.videoScript ?? null,
     anchorFirst: partial.anchorFirst ?? null,
     anchorLastAi: partial.anchorLastAi ?? null,
     cutPoint: partial.cutPoint ?? null,

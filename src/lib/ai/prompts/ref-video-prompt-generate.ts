@@ -116,14 +116,18 @@ function countStages(motionScript: string): number {
   return (motionScript.match(/\[\s*\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*\]/g) ?? []).length;
 }
 
-/** 分镜字段拆分：动作主文案 vs 场景描述（shots.prompt） */
+/**
+ * 分镜字段拆分：动作主文案 vs 场景描述（shots.prompt）
+ *
+ * motionScript = 详细时间线，用户可编辑，唯一生成输入来源。
+ *                对应 Toonflow 里"每个 shot 只有一条动作描述"的设计原则。
+ */
 export function resolveVideoMotionAndScene(shot: {
   prompt?: string | null;
-  videoScript?: string | null;
   motionScript?: string | null;
 }): { motionText: string; sceneDescription?: string } {
   const sceneRaw = shot.prompt?.trim() ?? "";
-  const primary = (shot.videoScript || shot.motionScript || "").trim();
+  const primary = (shot.motionScript || "").trim();
   if (primary) {
     const motionText = primary;
     const sceneDescription =

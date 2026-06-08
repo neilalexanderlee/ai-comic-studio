@@ -50,7 +50,6 @@ interface DrawerShot {
   prompt: string;
   startFrameDesc: string | null;
   endFrameDesc: string | null;
-  videoScript: string | null;
   motionScript: string | null;
   cameraDirection: string;
   duration: number;
@@ -66,6 +65,7 @@ interface DrawerShot {
   videoResolution?: string | null;
   dialogues: Dialogue[];
   isCrowdShot?: boolean;
+  chainSourceShotId?: string | null;
 }
 
 interface ShotDrawerProps {
@@ -87,6 +87,8 @@ interface ShotDrawerProps {
   frameRefShots?: FrameRefPickerShot[];
   chainSourceSequence?: number | null;
   chainSourceType?: string | null;
+  /** 本镜命名角色数量，用于动态计算用户可手选的参考图上限 */
+  namedCharacterCount?: number;
 }
 
 export function ShotDrawer({
@@ -108,6 +110,7 @@ export function ShotDrawer({
   frameRefShots = [],
   chainSourceSequence = null,
   chainSourceType = null,
+  namedCharacterCount = 0,
 }: ShotDrawerProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -177,6 +180,7 @@ export function ShotDrawer({
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
+    namedCharacterCount,
     onUpdate,
   });
 
@@ -320,6 +324,12 @@ export function ShotDrawer({
         }),
       });
       onUpdate();
+      if (shot?.chainSourceShotId) {
+        toast.info(
+          `首帧继承自第 ${chainSourceSequence ?? "?"} 镜 — 若本镜引入了新角色，请点下方「刷新首帧」。`,
+          { duration: 6000 }
+        );
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     } finally {
@@ -549,7 +559,22 @@ export function ShotDrawer({
               {t("shot.stepFrames")}
             </p>
             {chainSourceHint && (
-              <p className="mb-2 text-[11px] font-medium text-primary/90">{chainSourceHint}</p>
+              <div className="mb-2 flex items-center gap-2 flex-wrap rounded-lg bg-amber-50/60 border border-amber-100 px-2.5 py-1.5">
+                <span className="text-[11px] font-medium text-amber-700 flex-1">{chainSourceHint}</span>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  onClick={frameActions.handleGenerateFirstFrameFresh}
+                  disabled={frameActions.frameActionsBusy || anyGenerating}
+                  title="忽略继承，根据当前首帧描述 + 本镜定妆图重新生成"
+                  className="h-5 px-1.5 text-[10px] text-amber-700 hover:bg-amber-100 hover:text-amber-900"
+                >
+                  {frameActions.generatingFrames && frameActions.generatingFrameTarget === "first"
+                    ? <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                    : <RefreshCw className="h-2.5 w-2.5" />}
+                  刷新首帧
+                </Button>
+              </div>
             )}
             <ShotFrameAssets
               projectId={projectId}
@@ -575,7 +600,7 @@ export function ShotDrawer({
                 adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
                 adoptingPrevFrame={frameActions.adoptingPrevFrame}
                 disabled={anyGenerating}
-                onGenerateFrames={frameActions.handleGenerateFrames}
+                onGenerateFrames={frameActions.handleGenerateFirstFrameFresh}
                 onPickReference={() => frameActions.openFrameReferencePicker("first")}
                 onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}
                 onAdoptPrevChain={frameActions.handleAdoptPrevChainFrame}
@@ -701,6 +726,7 @@ export function ShotDrawer({
         currentShotId={shot.id}
         frameTarget={frameActions.pendingFrameTarget === "last" ? "last" : "first"}
         onConfirm={frameActions.handleFrameReferenceConfirm}
+        maxSelectable={frameActions.crossShotRefLimit}
       />
 
       <ShotVideoHistoryDialog

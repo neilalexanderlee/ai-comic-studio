@@ -48,13 +48,17 @@
 
 ## 2. 当前实现（与代码一致）
 
-### 2.0 首帧 prompt 语义（`first-frame-prompt.ts` + `frame_generate_first`）
+### 2.0 首帧 prompt 语义（`storyboard-image.ts` + `frame_generate_first`）
+
+**设计原则（完整 Toonflow 对齐）：** `startFrameDesc` 是图像生成的唯一事实来源。  
+`emotion` / `framing` / `lightingAtm` 三个冗余字段已全部移除（migration 0042/0043），其语义全部内嵌于 `startFrameDesc` 自包含四要素中。
 
 | 字段 | 用途 |
 |------|------|
-| `startFrameDesc` | **首帧唯一画面依据**（动作开始前的静止态） |
+| `startFrameDesc` | **首帧唯一画面依据**（动作开始前的静止态）；必须自包含四要素：景别/视角 + 具名角色姿态 + 主光（颜色+方向+来源）+ 情绪的身体解剖表现 |
 | `prompt`（场景描述） | 镜头整体情节；有 `startFrameDesc` 时仅作「禁止画进首帧」的上下文 |
 | `cameraDirection` | 仅 **起幅** 段注入首帧（`→` 后的跳切/特写不进首帧） |
+| `motionScript` | 提取 `｜朝向：` 标注 → 注入首帧构图（非动态描述） |
 | 群演/无具名角色 | `shotKind=environment`：不用「角色占 40–70%」，改用环境主体渲染块 |
 | `frameReference` | `frameReferenceMode=continuity`：参考图按镜间衔接规则，非角色设定图 |
 
@@ -187,4 +191,6 @@ flowchart TB
 - `drizzle/0029_shot_frame_semantics.sql` — 字段语义改版（Plan B）
 - `drizzle/0030_link_shots_via_cut_point.sql` — `link_shots_via_cut_point`
 - `drizzle/0033_drop_shot_last_frame_url.sql` — 移除废弃列 `last_frame_url`（视频尾帧仅存 `cut_point`）
+- `drizzle/0042_remove_redundant_shot_fields.sql` — 移除 `emotion` / `framing` 列（Toonflow 对齐第一步）
+- `drizzle/0043_remove_lighting_atm.sql` — 移除 `lighting_atm` 列；`startFrameDesc` 成为所有视觉信息（含光影）的唯一事实来源（Toonflow 完整对齐）
 - 启动时 `bootstrap()` 自动应用

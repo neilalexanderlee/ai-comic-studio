@@ -39,7 +39,7 @@ export type VideoPromptSyncDeps = {
   ensureDialoguesInPrompt: (prompt: string, dialogueList: DialoguePromptEntry[]) => string;
   isCharacterOnScreen: (
     characterName: string,
-    videoScript: string,
+    motionText: string,
     startFrameDesc: string | null | undefined
   ) => boolean;
   stripThinkingBlocks?: (text: string) => string;
@@ -123,7 +123,7 @@ export async function generateAndPersistVisionVideoPrompt(params: {
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
 
-  const videoContextForDialogue = shot.videoScript || shot.motionScript || shot.prompt || "";
+  const videoContextForDialogue = shot.motionScript || shot.prompt || "";
   const dialogueList: DialoguePromptEntry[] = shotDialogues.map((d) => {
     const char = shotCharacters.find((c) => c.id === d.characterId);
     const characterName = char?.name ?? "Unknown";
@@ -146,7 +146,7 @@ export async function generateAndPersistVisionVideoPrompt(params: {
   const sceneDescription = sceneDescRaw
     ? pruneSceneDescForVideoPrompt(deps.stripBgmContent(sceneDescRaw, shot.bgmNote))
     : undefined;
-  const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.videoScript, shot.motionScript]
+  const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.motionScript]
     .filter(Boolean)
     .join(" ");
   const filteredCharsForPrompt = filterShotCharacters(allShotText, shotCharacters, {
