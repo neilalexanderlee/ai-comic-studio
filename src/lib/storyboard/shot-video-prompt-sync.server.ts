@@ -65,12 +65,21 @@ export function computeVideoPromptFrameFingerprint(shot: {
   return parts.join("|");
 }
 
+/** 哨兵值：用户手动编辑过 videoPrompt，禁止自动刷新覆盖 */
+const MANUAL_FINGERPRINT = "__manual__";
+
 export function shouldRefreshVideoPrompt(shot: {
   videoPrompt?: string | null;
   videoPromptFrameFingerprint?: string | null;
   anchorFirst?: string | null;
   anchorLastAi?: string | null;
 }): boolean {
+  // 用户手动编辑过的提示词，无论帧是否变化都不覆盖
+  // 例外：videoPrompt 已被清空（如重写文字后），此时应允许重新生成
+  if (shot.videoPromptFrameFingerprint === MANUAL_FINGERPRINT) {
+    if (!shot.videoPrompt?.trim()) return true; // prompt 已清空，允许重生
+    return false; // 有手动编辑内容，保护
+  }
   const fingerprint = computeVideoPromptFrameFingerprint(shot);
   if (!fingerprint) return false;
   if (!shot.videoPrompt?.trim()) return true;

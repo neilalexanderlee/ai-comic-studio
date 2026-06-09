@@ -103,6 +103,13 @@ export async function PATCH(
   // ── Shot 字段更新 ─────────────────────────────────────────────────────────
   const { dialogues: _d, ...shotFields } = body;
   if (Object.keys(shotFields).length > 0) {
+    // 用户手动编辑 videoPrompt 时，将 videoPromptFrameFingerprint 设为哨兵值 "__manual__"。
+    // shouldRefreshVideoPrompt 看到 "__manual__" 直接跳过自动刷新，无论帧文件此后是否变化。
+    // 用户显式点「生成提示词」时会写入真实指纹，覆盖 "__manual__"，恢复自动刷新能力。
+    if ("videoPrompt" in shotFields && shotFields.videoPrompt != null) {
+      (shotFields as Record<string, unknown>).videoPromptFrameFingerprint = "__manual__";
+    }
+
     const [updated] = await db
       .update(shots)
       .set(shotFields)

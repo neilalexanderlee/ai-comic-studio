@@ -33,12 +33,11 @@ export async function resolveSingleShotRewriteSystem(
       const sectionMatches = tableConstraints.match(/## [^\n]+\n([\s\S]*?)(?=\n##|$)/g) ?? [];
       for (const sec of sectionMatches) {
         if (/运镜禁忌|动作节奏|光影|情绪|环境动态/.test(sec)) {
-          // 截取前300字避免过长
-          sections.push(sec.slice(0, 300).trimEnd());
+          sections.push(sec.slice(0, 220).trimEnd());
         }
       }
       if (sections.length > 0) {
-        system += `\n\n━━━ 当前画风专属约束 ━━━\n${sections.join("\n\n")}`;
+        system += `\n\n━━━ 当前画风专属约束 ━━━\n${sections.join("\n\n").slice(0, 700)}`;
       }
     }
   }
@@ -89,6 +88,7 @@ ${frameDescMulti}
   "startFrameDesc": "首帧静帧：景别/视角，主体+静止姿态，主光颜色+方向+来源，情绪的身体解剖表现",
   "endFrameDesc": "尾帧静帧：景别/视角，主体+稳定落幅姿态，与首帧有可见构图差异",
   "motionScript": "(承接上镜: 衔接说明)0-Xs: [...]. Xs-Ys: [...].｜朝向：角色名-朝向方位",
-  "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]"
+  "cameraDirection": "起幅[景别]→运动方式+速度→落幅[景别]",
+  "_director_note": "（可选）仅在发现结构性问题时填写，如「角色中途入镜建议拆成两个镜头：…」；无问题则省略此字段"
 }`;
 }

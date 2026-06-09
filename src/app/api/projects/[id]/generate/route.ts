@@ -1420,6 +1420,23 @@ async function handleSingleShotRestoreFromScript(
 
 // --- single_shot_rewrite: regenerate text fields for one shot ---
 
+const SINGLE_SHOT_REWRITE_PRIMARY_TIMEOUT_MS = 110_000;
+const SINGLE_SHOT_REWRITE_RETRY_TIMEOUT_MS = 90_000;
+const SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS = 1800;
+
+function isAbortTimeoutError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = String((err as NodeJS.ErrnoException).code ?? "");
+  return err.name === "TimeoutError" || err.name === "AbortError" || code === "23";
+}
+
+function compactSingleShotRewriteSystem(system: string): string {
+  return system
+    .replace(/\n\n━━━ 当前画风专属约束 ━━━[\s\S]*$/u, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 async function handleSingleShotRewrite(
   projectId: string,
   userId: string,
@@ -1442,7 +1459,17 @@ async function handleSingleShotRewrite(
 
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
-  const characterDescriptions = projectCharacters
+  const shotCharacterText = [
+    shot.prompt,
+    shot.startFrameDesc,
+    shot.endFrameDesc,
+    shot.motionScript,
+    shot.cameraDirection,
+  ].filter(Boolean).join("\n");
+  const shotCharacters = filterShotCharacters(shotCharacterText, projectCharacters, {
+    contextText: shot.prompt,
+  });
+  const characterDescriptions = shotCharacters
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
   const [rewriteProject] = await db
@@ -1457,7 +1484,7 @@ async function handleSingleShotRewrite(
 
   const model = createLanguageModel(modelConfig.text);
 
-  const hasNamedChars = characterDescriptions.length > 0;
+  const hasNamedChars = shotCharacters.length > 0;
 
   const system = await resolveSingleShotRewriteSystem(
     { userId, projectId },
@@ -1477,24 +1504,46 @@ async function handleSingleShotRewrite(
   });
 
   console.log(
-    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length}`
+    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length} chars=${shotCharacters.length}/${projectCharacters.length}`
   );
 
   try {
-    const { text } = await generateText({
-      model,
-      system,
-      prompt: userPrompt,
-      temperature: 0.7,
-      // 120s 超时——LLM 无响应时主动中止，避免服务器挂起
-      abortSignal: AbortSignal.timeout(120_000),
-    });
+    let text: string;
+    try {
+      const result = await generateText({
+        model,
+        system,
+        prompt: userPrompt,
+        temperature: 0.35,
+        maxOutputTokens: SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(SINGLE_SHOT_REWRITE_PRIMARY_TIMEOUT_MS),
+      });
+      text = result.text;
+    } catch (err) {
+      if (!isAbortTimeoutError(err)) throw err;
+
+      const compactSystem = compactSingleShotRewriteSystem(system);
+      console.warn(
+        `[SingleShotRewrite] Primary timeout for shot ${shotId}; retrying with compact system. system=${system.length}->${compactSystem.length} user=${userPrompt.length}`
+      );
+      const retry = await generateText({
+        model,
+        system: compactSystem,
+        prompt: userPrompt,
+        temperature: 0.2,
+        maxOutputTokens: SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS,
+        abortSignal: AbortSignal.timeout(SINGLE_SHOT_REWRITE_RETRY_TIMEOUT_MS),
+      });
+      text = retry.text;
+    }
 
     const parsed = JSON.parse(extractJSON(text)) as {
       startFrameDesc: string;
       endFrameDesc: string;
       motionScript: string;
       cameraDirection: string;
+      /** 可选：LLM 发现结构性问题时填写，如「建议拆成两个镜头」 */
+      _director_note?: string;
     };
 
     await db
@@ -1513,6 +1562,10 @@ async function handleSingleShotRewrite(
 
     return NextResponse.json({ shotId, status: "ok", ...parsed });
   } catch (err) {
+    if (isAbortTimeoutError(err)) {
+      console.error(`[SingleShotRewrite] Timeout for shot ${shotId} after retry. system=${system.length} user=${userPrompt.length}`);
+      return NextResponse.json({ shotId, status: "error", error: "AI 响应超时：已用精简提示词重试仍未完成，请稍后重试或换用更快的文本模型" }, { status: 504 });
+    }
     console.error(`[SingleShotRewrite] Error for shot ${shotId}:`, err);
     return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
   }
@@ -3104,13 +3157,14 @@ async function handleSplitShot(
 
   // 将原分镜之后所有分镜的 sequence +1，为两个新分镜腾出位置
   // 新分镜 A 占 shot.sequence，新分镜 B 占 shot.sequence + 1
+  // episodeId 必须精确匹配（包括 null）：null 时用 isNull() 避免条件被省略导致跨剧集误移
   await db
     .update(shots)
     .set({ sequence: sql`${shots.sequence} + 1` })
     .where(and(
       eq(shots.versionId, shot.versionId!),
       gt(shots.sequence, shot.sequence),
-      ...(shot.episodeId ? [eq(shots.episodeId, shot.episodeId)] : []),
+      shot.episodeId ? eq(shots.episodeId, shot.episodeId) : isNull(shots.episodeId),
     ));
 
   const newShots = [];

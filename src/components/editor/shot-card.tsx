@@ -235,6 +235,7 @@ export function ShotCard({
     prevCutPoint,
     prevAnchorLastAi,
     namedCharacterCount,
+    endFrameDesc,
     onUpdate,
   });
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
@@ -265,6 +266,8 @@ export function ShotCard({
   const [rewritingText, setRewritingText] = useState(false);
   const [splitingContent, setSplitingContent] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
+  /** LLM 重写后返回的导演注记（如「建议拆分镜头」），手动关闭后清除 */
+  const [directorNote, setDirectorNote] = useState<string | null>(null);
 
   // 台词编辑状态
   type DialogueType = "dialogue" | "os" | "vo";
@@ -417,8 +420,9 @@ export function ShotCard({
 
   async function handleRewriteText() {
     setRewritingText(true);
+    setDirectorNote(null);
     try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
+      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -427,6 +431,10 @@ export function ShotCard({
           modelConfig: getModelConfig(),
         }),
       });
+      const data = (await res.json()) as { _director_note?: string; [k: string]: unknown };
+      if (data._director_note?.trim()) {
+        setDirectorNote(data._director_note.trim());
+      }
       onUpdate();
       // 若首帧来自继承，提示用户可能需要刷新首帧（新角色不在继承图中）
       if (chainSourceShotId) {
@@ -840,6 +848,26 @@ export function ShotCard({
               )}
             </div>
 
+            {directorNote && (
+              <div className="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+                <span className="mt-0.5 text-amber-500 shrink-0">✂️</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-semibold text-amber-700 mb-0.5">导演建议 · AI 拆分分镜</p>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">{directorNote}</p>
+                  <p className="mt-1 text-[10px] text-amber-500">点击下方「AI 拆分分镜」按钮执行拆分</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDirectorNote(null)}
+                  className="shrink-0 text-amber-400 hover:text-amber-600"
+                  title="关闭提示"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            )}
             <div className="flex flex-wrap gap-1.5">
               <Button
                 size="xs"
@@ -850,16 +878,21 @@ export function ShotCard({
                 {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
                 {rewritingText ? t("common.generating") : t("shot.rewriteText")}
               </Button>
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleContentSplit}
-                disabled={splitingContent || rewritingText}
-                title="AI 将此分镜拆成两个连续分镜（用于角色中途入镜等首帧锚点问题）"
-              >
-                {splitingContent ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
-                {splitingContent ? "拆分中…" : "AI 拆分分镜"}
-              </Button>
+              <div className="flex flex-col gap-0.5">
+                <Button
+                  size="xs"
+                  variant={directorNote ? "default" : "outline"}
+                  onClick={handleContentSplit}
+                  disabled={splitingContent || rewritingText}
+                  title="AI 将此分镜拆成两个连续分镜（用于角色中途入镜等首帧锚点问题）"
+                >
+                  {splitingContent ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
+                  {splitingContent ? "拆分中…" : "AI 拆分分镜"}
+                </Button>
+                <p className="text-[9px] text-[--text-muted] leading-tight px-0.5">
+                  适用：角色中途入镜、首帧无法锚定主体
+                </p>
+              </div>
               <ShotRestoreFromScriptButton
                 projectId={projectId}
                 shotId={id}
@@ -918,6 +951,7 @@ export function ShotCard({
               adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
               adoptingPrevFrame={frameActions.adoptingPrevFrame}
               disabled={generatingVideo}
+              generateFramesTarget={frameActions.generateFramesTarget}
               onGenerateFrames={frameActions.handleGenerateFirstFrameFresh}
               onPickReference={() => frameActions.openFrameReferencePicker("first")}
               onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}
