@@ -1420,6 +1420,8 @@ async function handleSingleShotRestoreFromScript(
 
 // --- single_shot_rewrite: regenerate text fields for one shot ---
 
+const SINGLE_SHOT_REWRITE_TIMEOUT_MS = 180_000;
+
 async function handleSingleShotRewrite(
   projectId: string,
   userId: string,
@@ -1442,7 +1444,17 @@ async function handleSingleShotRewrite(
 
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
-  const characterDescriptions = projectCharacters
+  const shotCharacterText = [
+    shot.prompt,
+    shot.startFrameDesc,
+    shot.endFrameDesc,
+    shot.motionScript,
+    shot.cameraDirection,
+  ].filter(Boolean).join("\n");
+  const shotCharacters = filterShotCharacters(shotCharacterText, projectCharacters, {
+    contextText: shot.prompt,
+  });
+  const characterDescriptions = shotCharacters
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
   const [rewriteProject] = await db
@@ -1457,7 +1469,7 @@ async function handleSingleShotRewrite(
 
   const model = createLanguageModel(modelConfig.text);
 
-  const hasNamedChars = characterDescriptions.length > 0;
+  const hasNamedChars = shotCharacters.length > 0;
 
   const system = await resolveSingleShotRewriteSystem(
     { userId, projectId },
@@ -1477,7 +1489,7 @@ async function handleSingleShotRewrite(
   });
 
   console.log(
-    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length}`
+    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length} chars=${shotCharacters.length}/${projectCharacters.length}`
   );
 
   try {
@@ -1486,8 +1498,8 @@ async function handleSingleShotRewrite(
       system,
       prompt: userPrompt,
       temperature: 0.7,
-      // 240s 超时——路由 maxDuration=300s，给慢模型和网络抖动留余量
-      abortSignal: AbortSignal.timeout(240_000),
+      // 保留完整质量规则，最多等待 3 分钟；优化来自减少无关角色上下文，而非裁剪规则。
+      abortSignal: AbortSignal.timeout(SINGLE_SHOT_REWRITE_TIMEOUT_MS),
     });
 
     const parsed = JSON.parse(extractJSON(text)) as {
@@ -1515,10 +1527,14 @@ async function handleSingleShotRewrite(
 
     return NextResponse.json({ shotId, status: "ok", ...parsed });
   } catch (err) {
-    const isTimeout = err instanceof Error && (err.name === "TimeoutError" || String((err as NodeJS.ErrnoException).code) === "23");
+    const isTimeout = err instanceof Error && (
+      err.name === "TimeoutError" ||
+      err.name === "AbortError" ||
+      String((err as NodeJS.ErrnoException).code) === "23"
+    );
     if (isTimeout) {
-      console.error(`[SingleShotRewrite] Timeout for shot ${shotId} (>240s). system=${system.length} user=${userPrompt.length}`);
-      return NextResponse.json({ shotId, status: "error", error: "AI 响应超时（超过 240s），请稍后重试或换用更快的模型" }, { status: 504 });
+      console.error(`[SingleShotRewrite] Timeout for shot ${shotId} (>180s). system=${system.length} user=${userPrompt.length}`);
+      return NextResponse.json({ shotId, status: "error", error: "AI 响应超时（超过 3 分钟），请稍后重试或换用更快的文本模型" }, { status: 504 });
     }
     console.error(`[SingleShotRewrite] Error for shot ${shotId}:`, err);
     return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
