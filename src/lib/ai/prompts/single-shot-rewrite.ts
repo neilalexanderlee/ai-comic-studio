@@ -33,11 +33,12 @@ export async function resolveSingleShotRewriteSystem(
       const sectionMatches = tableConstraints.match(/## [^\n]+\n([\s\S]*?)(?=\n##|$)/g) ?? [];
       for (const sec of sectionMatches) {
         if (/运镜禁忌|动作节奏|光影|情绪|环境动态/.test(sec)) {
-          sections.push(sec.slice(0, 220).trimEnd());
+          // 截取前300字避免过长
+          sections.push(sec.slice(0, 300).trimEnd());
         }
       }
       if (sections.length > 0) {
-        system += `\n\n━━━ 当前画风专属约束 ━━━\n${sections.join("\n\n").slice(0, 700)}`;
+        system += `\n\n━━━ 当前画风专属约束 ━━━\n${sections.join("\n\n")}`;
       }
     }
   }

@@ -1420,23 +1420,6 @@ async function handleSingleShotRestoreFromScript(
 
 // --- single_shot_rewrite: regenerate text fields for one shot ---
 
-const SINGLE_SHOT_REWRITE_PRIMARY_TIMEOUT_MS = 110_000;
-const SINGLE_SHOT_REWRITE_RETRY_TIMEOUT_MS = 90_000;
-const SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS = 1800;
-
-function isAbortTimeoutError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const code = String((err as NodeJS.ErrnoException).code ?? "");
-  return err.name === "TimeoutError" || err.name === "AbortError" || code === "23";
-}
-
-function compactSingleShotRewriteSystem(system: string): string {
-  return system
-    .replace(/\n\n━━━ 当前画风专属约束 ━━━[\s\S]*$/u, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
 async function handleSingleShotRewrite(
   projectId: string,
   userId: string,
@@ -1459,17 +1442,7 @@ async function handleSingleShotRewrite(
 
   const shotEpisodeId = episodeId || shot.episodeId;
   const projectCharacters = await getEpisodeCharacters(projectId, shotEpisodeId);
-  const shotCharacterText = [
-    shot.prompt,
-    shot.startFrameDesc,
-    shot.endFrameDesc,
-    shot.motionScript,
-    shot.cameraDirection,
-  ].filter(Boolean).join("\n");
-  const shotCharacters = filterShotCharacters(shotCharacterText, projectCharacters, {
-    contextText: shot.prompt,
-  });
-  const characterDescriptions = shotCharacters
+  const characterDescriptions = projectCharacters
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
   const [rewriteProject] = await db
@@ -1484,7 +1457,7 @@ async function handleSingleShotRewrite(
 
   const model = createLanguageModel(modelConfig.text);
 
-  const hasNamedChars = shotCharacters.length > 0;
+  const hasNamedChars = characterDescriptions.length > 0;
 
   const system = await resolveSingleShotRewriteSystem(
     { userId, projectId },
@@ -1504,38 +1477,18 @@ async function handleSingleShotRewrite(
   });
 
   console.log(
-    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length} chars=${shotCharacters.length}/${projectCharacters.length}`
+    `[SingleShotRewrite] Shot ${shot.sequence} system=${system.length} user=${userPrompt.length}`
   );
 
   try {
-    let text: string;
-    try {
-      const result = await generateText({
-        model,
-        system,
-        prompt: userPrompt,
-        temperature: 0.35,
-        maxOutputTokens: SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS,
-        abortSignal: AbortSignal.timeout(SINGLE_SHOT_REWRITE_PRIMARY_TIMEOUT_MS),
-      });
-      text = result.text;
-    } catch (err) {
-      if (!isAbortTimeoutError(err)) throw err;
-
-      const compactSystem = compactSingleShotRewriteSystem(system);
-      console.warn(
-        `[SingleShotRewrite] Primary timeout for shot ${shotId}; retrying with compact system. system=${system.length}->${compactSystem.length} user=${userPrompt.length}`
-      );
-      const retry = await generateText({
-        model,
-        system: compactSystem,
-        prompt: userPrompt,
-        temperature: 0.2,
-        maxOutputTokens: SINGLE_SHOT_REWRITE_MAX_OUTPUT_TOKENS,
-        abortSignal: AbortSignal.timeout(SINGLE_SHOT_REWRITE_RETRY_TIMEOUT_MS),
-      });
-      text = retry.text;
-    }
+    const { text } = await generateText({
+      model,
+      system,
+      prompt: userPrompt,
+      temperature: 0.7,
+      // 240s 超时——路由 maxDuration=300s，给慢模型和网络抖动留余量
+      abortSignal: AbortSignal.timeout(240_000),
+    });
 
     const parsed = JSON.parse(extractJSON(text)) as {
       startFrameDesc: string;
@@ -1562,9 +1515,10 @@ async function handleSingleShotRewrite(
 
     return NextResponse.json({ shotId, status: "ok", ...parsed });
   } catch (err) {
-    if (isAbortTimeoutError(err)) {
-      console.error(`[SingleShotRewrite] Timeout for shot ${shotId} after retry. system=${system.length} user=${userPrompt.length}`);
-      return NextResponse.json({ shotId, status: "error", error: "AI 响应超时：已用精简提示词重试仍未完成，请稍后重试或换用更快的文本模型" }, { status: 504 });
+    const isTimeout = err instanceof Error && (err.name === "TimeoutError" || String((err as NodeJS.ErrnoException).code) === "23");
+    if (isTimeout) {
+      console.error(`[SingleShotRewrite] Timeout for shot ${shotId} (>240s). system=${system.length} user=${userPrompt.length}`);
+      return NextResponse.json({ shotId, status: "error", error: "AI 响应超时（超过 240s），请稍后重试或换用更快的模型" }, { status: 504 });
     }
     console.error(`[SingleShotRewrite] Error for shot ${shotId}:`, err);
     return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
