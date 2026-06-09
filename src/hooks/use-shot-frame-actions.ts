@@ -31,11 +31,6 @@ export type UseShotFrameActionsOptions = {
   prevAnchorLastAi?: string | null;
   /** 本镜命名角色数量，用于动态计算用户可手选的参考图上限 */
   namedCharacterCount?: number;
-  /**
-   * 本镜尾帧描述。有值时「生成画面」同时生成首+尾帧；
-   * 无值（群演/无尾帧描述）时仅生成首帧，避免浪费 API 调用。
-   */
-  endFrameDesc?: string | null;
   onUpdate: () => void;
 };
 
@@ -50,7 +45,6 @@ export function useShotFrameActions({
   prevCutPoint = null,
   prevAnchorLastAi = null,
   namedCharacterCount = 0,
-  endFrameDesc = null,
   onUpdate,
 }: UseShotFrameActionsOptions) {
   const t = useTranslations();
@@ -130,18 +124,13 @@ export function useShotFrameActions({
     openFrameReferencePicker("first");
   }
 
-  /**
-   * 直接从 startFrameDesc + 定妆图生成画面，不打开参考图选择器（主路径）。
-   * - 有 endFrameDesc → frameTarget: "both"，一次调用生成首帧+尾帧
-   * - 无 endFrameDesc（群演/无尾帧描述）→ frameTarget: "first"，仅生成首帧
-   */
+  /** 直接从 startFrameDesc + 定妆图生成首帧，不打开参考图选择器（最常见路径）*/
   async function handleGenerateFirstFrameFresh() {
     if (!imageGuard()) return;
-    const target: "first" | "both" = endFrameDesc?.trim() ? "both" : "first";
     setGeneratingFrames(true);
-    setGeneratingFrameTarget(target === "both" ? null : "first"); // both 时不高亮单帧
+    setGeneratingFrameTarget("first");
     try {
-      await executeFrameGenerate(target);
+      await executeFrameGenerate("first"); // no choice = fresh, chainSourceShotId/Type will be cleared
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
     } finally {
@@ -199,8 +188,6 @@ export function useShotFrameActions({
   return {
     generatingFrames,
     generatingFrameTarget,
-    /** 点击「生成画面」时实际的生成目标（有 endFrameDesc → both，无 → first） */
-    generateFramesTarget: (endFrameDesc?.trim() ? "both" : "first") as "first" | "both",
     adoptingPrevFrame,
     adoptingPrevEpisode,
     frameActionsBusy,

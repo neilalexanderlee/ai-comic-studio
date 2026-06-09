@@ -15,8 +15,6 @@ type ShotFrameToolbarProps = {
   adoptingPrevEpisode: boolean;
   adoptingPrevFrame: boolean;
   disabled?: boolean;
-  /** 有 endFrameDesc 时为 "both"，无时为 "first"；影响按钮文案 */
-  generateFramesTarget?: "first" | "both";
   /** 直接从 startFrameDesc + 定妆图生成，不打开参考图选择器（主路径） */
   onGenerateFrames: () => void;
   /** 打开参考图选择器（次要路径，用于选其他镜头帧作为参考） */
@@ -38,7 +36,6 @@ export function ShotFrameToolbar({
   adoptingPrevEpisode,
   adoptingPrevFrame,
   disabled = false,
-  generateFramesTarget = "first",
   onGenerateFrames,
   onPickReference,
   onAdoptPrevEpisode,
@@ -47,14 +44,6 @@ export function ShotFrameToolbar({
 }: ShotFrameToolbarProps) {
   const t = useTranslations();
   const blocked = disabled || generatingFrames || adoptingPrevEpisode || adoptingPrevFrame;
-
-  const generateLabel = (() => {
-    if (generatingFrames) return t("common.generating");
-    if (hasFrame) {
-      return generateFramesTarget === "both" ? "重新生成首+尾帧" : t("shot.regenerateFrames");
-    }
-    return generateFramesTarget === "both" ? "生成首+尾帧" : t("project.generateFrames");
-  })();
 
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -65,7 +54,11 @@ export function ShotFrameToolbar({
         disabled={blocked}
       >
         {generatingFrames ? <Loader2 className="h-3 w-3 animate-spin" /> : <ImageIcon className="h-3 w-3" />}
-        {generateLabel}
+        {generatingFrames
+          ? t("common.generating")
+          : hasFrame
+            ? t("shot.regenerateFrames")
+            : t("project.generateFrames")}
       </Button>
       <Button
         size="xs"

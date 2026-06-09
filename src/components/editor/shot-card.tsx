@@ -235,7 +235,6 @@ export function ShotCard({
     prevCutPoint,
     prevAnchorLastAi,
     namedCharacterCount,
-    endFrameDesc,
     onUpdate,
   });
   const videoModelMax = getModelMaxDuration(getModelConfig().video?.modelId);
@@ -951,7 +950,6 @@ export function ShotCard({
               adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
               adoptingPrevFrame={frameActions.adoptingPrevFrame}
               disabled={generatingVideo}
-              generateFramesTarget={frameActions.generateFramesTarget}
               onGenerateFrames={frameActions.handleGenerateFirstFrameFresh}
               onPickReference={() => frameActions.openFrameReferencePicker("first")}
               onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}

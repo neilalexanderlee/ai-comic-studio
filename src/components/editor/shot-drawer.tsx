@@ -181,7 +181,6 @@ export function ShotDrawer({
     prevCutPoint,
     prevAnchorLastAi,
     namedCharacterCount,
-    endFrameDesc: shot?.endFrameDesc ?? null,
     onUpdate,
   });
 
@@ -601,7 +600,6 @@ export function ShotDrawer({
                 adoptingPrevEpisode={frameActions.adoptingPrevEpisode}
                 adoptingPrevFrame={frameActions.adoptingPrevFrame}
                 disabled={anyGenerating}
-                generateFramesTarget={frameActions.generateFramesTarget}
                 onGenerateFrames={frameActions.handleGenerateFirstFrameFresh}
                 onPickReference={() => frameActions.openFrameReferencePicker("first")}
                 onAdoptPrevEpisode={frameActions.handleAdoptPrevEpisodeFrame}
