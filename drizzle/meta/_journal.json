@@ -309,6 +309,13 @@
       "when": 1779000019000,
       "tag": "0043_remove_lighting_atm",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1779000020000,
+      "tag": "0044_scene_variants",
+      "breakpoints": true
     }
   ]
 }

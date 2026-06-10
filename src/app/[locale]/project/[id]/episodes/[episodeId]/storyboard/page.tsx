@@ -869,6 +869,7 @@ export default function EpisodeStoryboardPage() {
               versionId={selectedVersionId}
               track={(shot as { track?: string | null }).track ?? null}
               sceneId={(shot as { sceneId?: string | null }).sceneId ?? null}
+              sceneVariantId={(shot as { sceneVariantId?: string | null }).sceneVariantId ?? null}
               namedCharacterCount={shotNamedCharacters.length}
             />
             </div>

@@ -3,7 +3,7 @@ import { streamText, generateText } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, scenes, trackVideos } from "@/lib/db/schema";
+import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, scenes, sceneVariants, trackVideos } from "@/lib/db/schema";
 import { eq, asc, and, lt, gt, desc, inArray, isNull, sql } from "drizzle-orm";
 import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
@@ -509,6 +509,10 @@ export async function POST(
 
   if (action === "scene_image_generate") {
     return handleSceneImageGenerate(projectId, payload, resolvedModelConfig);
+  }
+
+  if (action === "scene_angle_variant") {
+    return handleSceneAngleVariant(projectId, payload, resolvedModelConfig);
   }
 
   if (action === "scene_extract") {
@@ -1769,15 +1773,33 @@ async function handleSingleFrameGenerate(
     .flatMap((c) => [c.imagePath, ...(c.angleImagePaths ?? []).slice(0, 2)]);
 
   // Resolve scene reference image (Toonflow: scene asset injected after character assets).
-  // Only used when scene has an imagePath that exists on disk.
+  // Priority: sceneVariantId (angle variant) > scene.imagePath (main image).
   let sceneAsset: { id: string; name: string; imagePath: string } | null = null;
   if (shot.sceneId) {
-    const [shotScene] = await db
-      .select({ id: scenes.id, name: scenes.name, imagePath: scenes.imagePath })
-      .from(scenes)
-      .where(eq(scenes.id, shot.sceneId));
-    if (shotScene?.imagePath && shotFrameFileOnDisk(shotScene.imagePath)) {
-      sceneAsset = { id: shotScene.id, name: shotScene.name, imagePath: shotScene.imagePath };
+    // 1. 优先使用该分镜指定的角度变体
+    if ((shot as Record<string, unknown>).sceneVariantId) {
+      const [variant] = await db
+        .select({ id: sceneVariants.id, imagePath: sceneVariants.imagePath })
+        .from(sceneVariants)
+        .where(eq(sceneVariants.id, (shot as Record<string, unknown>).sceneVariantId as string));
+      if (variant?.imagePath && shotFrameFileOnDisk(variant.imagePath)) {
+        // 场景名从主表取
+        const [shotScene] = await db
+          .select({ name: scenes.name })
+          .from(scenes)
+          .where(eq(scenes.id, shot.sceneId));
+        sceneAsset = { id: variant.id, name: shotScene?.name ?? "场景", imagePath: variant.imagePath };
+      }
+    }
+    // 2. Fallback 到场景主图
+    if (!sceneAsset) {
+      const [shotScene] = await db
+        .select({ id: scenes.id, name: scenes.name, imagePath: scenes.imagePath })
+        .from(scenes)
+        .where(eq(scenes.id, shot.sceneId));
+      if (shotScene?.imagePath && shotFrameFileOnDisk(shotScene.imagePath)) {
+        sceneAsset = { id: shotScene.id, name: shotScene.name, imagePath: shotScene.imagePath };
+      }
     }
   }
 
@@ -1866,11 +1888,25 @@ async function handleSingleFrameGenerate(
     const generateAnchorFirst = async (): Promise<string> => {
       // 所有跨镜参考图路径（保持顺序：主参考优先，其余附加参考次之）
       const crossShotRefPaths = resolvedFrameRefs.map((r) => r.path);
-      // Scene image appended after character refs (Toonflow priority: role > scene > cross-shot)
+      // @图N 对齐规则（与 Toonflow generateFlowImage 一致）：
+      //   referenceList 前 N 项必须与 prompt 里 @图1…@图N 编号一一对应。
+      //   firstFrameAssets = [char0, char1, ..., scene]，所以：
+      //     @图1 → referenceList[0] = char0 主图
+      //     @图2 → referenceList[1] = char1 主图
+      //     @图N → scene 主图
+      //   角色的多角度图（angleImages）和跨镜参考图（crossShotRefPaths）
+      //   追加到末尾，作为额外上下文，不占 @图N 编号。
+      // 用 resolvedChars（含 imagePath/angleImagePaths）过滤出首帧角色
+      const resolvedFirst = resolvedChars.filter((rc) => firstFrameCharNames.has(rc.name));
+      const charMainImagesFirst = resolvedFirst.map((c) => c.imagePath);
+      const charAngleImagesFirst = resolvedFirst.flatMap((c) =>
+        (c.angleImagePaths ?? []).slice(0, 2)
+      );
       const refImages = [
-        ...crossShotRefPaths,
-        ...charRefImagesFirst,
+        ...charMainImagesFirst,
         ...(sceneAsset ? [sceneAsset.imagePath] : []),
+        ...charAngleImagesFirst,   // 角度图追加到末尾（无 @图N 绑定，提供额外一致性上下文）
+        ...crossShotRefPaths,      // 跨镜参考图追加到末尾
       ];
       const firstFrameAssets = [
         ...charsForFirstFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
@@ -2978,6 +3014,143 @@ async function handleSceneImageGenerate(
     return NextResponse.json({ sceneId, imagePath, status: "ok" });
   } catch (err) {
     console.error(`[SceneImageGenerate] Error for scene ${sceneId}:`, err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Generation failed" },
+      { status: 500 }
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 场景角度变体生成（以现有场景图为 @图1 参考，文字指定新角度）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 内置角度预设（描述必须足够强硬，因为生成时不传参考图，完全靠文字驱动构图） */
+const SCENE_ANGLE_PRESETS: Record<string, string> = {
+  side_walk:
+    "camera angle: strict 90-degree side view, camera positioned exactly perpendicular to the street axis, " +
+    "road and ground extending horizontally left-to-right across the full frame, " +
+    "buildings as flat vertical backdrop on both sides, horizon line at center, " +
+    "zero perspective vanishing depth — strictly lateral 2D composition",
+  front_facing:
+    "camera angle: direct frontal view, camera facing the scene head-on at eye level, " +
+    "main architectural subject centered and symmetrical, " +
+    "flat frontal composition with no diagonal recession, " +
+    "viewer faces the facade directly — strictly frontal 2D composition",
+  overhead_45:
+    "camera angle: 45-degree bird's-eye overhead view looking diagonally downward, " +
+    "scene depth recedes from lower-left to upper-right, " +
+    "ground plane and rooftops both visible simultaneously, " +
+    "strong diagonal depth lines — isometric-like top-down perspective",
+  low_angle:
+    "camera angle: extreme low angle, camera near ground level tilting sharply upward, " +
+    "buildings and structures tower high above filling the upper frame, " +
+    "sky or ceiling dominates the top portion, " +
+    "dramatic upward foreshortening — worm's-eye view composition",
+};
+
+async function handleSceneAngleVariant(
+  projectId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig
+) {
+  const sceneId = payload?.sceneId as string | undefined;
+  const anglePreset = payload?.anglePreset as string | undefined;
+  const customAngle = payload?.customAngle as string | undefined;
+
+  if (!sceneId) {
+    return NextResponse.json({ error: "No sceneId" }, { status: 400 });
+  }
+  if (!modelConfig?.image) {
+    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
+  }
+
+  const [scene] = await db.select().from(scenes).where(eq(scenes.id, sceneId));
+  if (!scene) {
+    return NextResponse.json({ error: "Scene not found" }, { status: 404 });
+  }
+
+  // 角度描述：优先自定义，其次预设
+  const angleDesc =
+    customAngle?.trim() ||
+    (anglePreset ? SCENE_ANGLE_PRESETS[anglePreset] : undefined);
+  if (!angleDesc) {
+    return NextResponse.json({ error: "No angle specified" }, { status: 400 });
+  }
+
+  const [project] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const visualStyle = project?.visualStyle || "anime_2d";
+
+  // 风格词（复用 handleSceneImageGenerate 的逻辑）
+  const sceneMdContent = getArtStylePrompt(visualStyle, "scene");
+  let sceneStyleBase = "";
+  if (sceneMdContent) {
+    const templateMatch = sceneMdContent.match(
+      /##\s*[六6][\s\S]*?提示词模板[\s\S]*?\n+([\s\S]+?)(?=\n---|\n##|$)/
+    );
+    if (templateMatch) {
+      sceneStyleBase = templateMatch[1]
+        .replace(/\{[^}]+\}/g, "")
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#"))
+        .join("，");
+    }
+  }
+  const styleSection =
+    sceneStyleBase ||
+    [
+      VISUAL_STYLE_PRESETS[visualStyle]?.tag ?? "高清画质，线条清晰",
+      "scene design sheet，environment concept art，no people，no characters",
+      "画面中无任何人物",
+    ].join("，");
+
+  // 角度变体 prompt：
+  //   - 不使用 @图N（@图N 会让模型照抄参考图构图）
+  //   - 不传 referenceImages（图生图模式下模型会保留原始视角，导致角度无法改变）
+  //   - 完全靠文字描述驱动新构图；风格一致性由 art-style 风格词保证
+  const scenePrompt = [
+    `【画面】${angleDesc}，${scene.description || scene.name}，单画面，画面中无任何人物。`,
+    `【光影】自然光照，光影层次清晰，电影感光效。`,
+    `【风格】${styleSection}，禁止画外字幕、水印、UI 文字。`,
+  ].join("\n\n");
+
+  const sceneUploadDir = path.join(
+    process.env.UPLOAD_DIR || "./uploads",
+    "projects",
+    projectId,
+    "scenes"
+  );
+  const ai = resolveImageProvider(modelConfig, sceneUploadDir);
+
+  try {
+    // 不传参考图 — 角度变体必须完全由文字构图描述驱动，传参考图会锁死原始视角
+    const imagePath = await ai.generateImage(scenePrompt, {
+      quality: "hd",
+      referenceImages: [],
+    });
+
+    // 插入新变体记录（原图不变）
+    const variantLabel =
+      anglePreset
+        ? ({ side_walk: "侧视", front_facing: "正面", overhead_45: "俯瞰45°", low_angle: "低角仰拍" }[anglePreset] ?? anglePreset)
+        : (customAngle?.slice(0, 20) ?? "自定义角度");
+    const variantId = ulid();
+    await db.insert(sceneVariants).values({
+      id: variantId,
+      sceneId,
+      projectId,
+      label: variantLabel,
+      imagePath,
+      createdAt: new Date(),
+    });
+
+    return NextResponse.json({ sceneId, variantId, imagePath, label: variantLabel, status: "ok" });
+  } catch (err) {
+    console.error(`[SceneAngleVariant] Error for scene ${sceneId}:`, err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Generation failed" },
       { status: 500 }

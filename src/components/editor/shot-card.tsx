@@ -109,6 +109,8 @@ interface ShotCardProps {
   track?: string | null;
   /** 关联场景 ID */
   sceneId?: string | null;
+  /** 关联场景角度变体 ID */
+  sceneVariantId?: string | null;
   /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
   namedCharacterCount?: number;
 }
@@ -214,6 +216,7 @@ export function ShotCard({
   isCrowdShot = false,
   track,
   sceneId,
+  sceneVariantId,
   namedCharacterCount = 0,
 }: ShotCardProps) {
   const t = useTranslations();
@@ -968,6 +971,7 @@ export function ShotCard({
               episodeId={episodeId}
               shotId={id}
               currentSceneId={sceneId}
+              currentSceneVariantId={sceneVariantId}
               onUpdate={onUpdate}
               disabled={frameActions.frameActionsBusy || generatingVideo}
             />

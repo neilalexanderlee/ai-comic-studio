@@ -23,6 +23,8 @@ export async function PATCH(
     videoPrompt: string | null;
     /** 关联场景 ID（null = 取消关联） */
     sceneId: string | null;
+    /** 关联场景角度变体 ID（null = 使用主图） */
+    sceneVariantId: string | null;
     /** 台词更新：传入完整列表，后端全量替换 */
     dialogues: Array<{
       /** 已有台词的 id（传则更新 text），不传则视为新增 */
@@ -98,6 +100,10 @@ export async function PATCH(
     if (!scene) {
       return NextResponse.json({ error: "Scene not found" }, { status: 400 });
     }
+  }
+  // sceneId 清空时同步清空 sceneVariantId
+  if (body.sceneId === null && body.sceneVariantId === undefined) {
+    (body as Record<string, unknown>).sceneVariantId = null;
   }
 
   // ── Shot 字段更新 ─────────────────────────────────────────────────────────

@@ -77,6 +77,28 @@ export const scenes = sqliteTable("scenes", {
     .$defaultFn(() => new Date()),
 });
 
+/**
+ * 场景角度变体图——每个场景可有多张不同拍摄角度的参考图。
+ * scenes.imagePath 是主图（默认），variants 是衍生角度版本。
+ * shot.sceneVariantId 指向某条 variant，为 null 时用主图。
+ */
+export const sceneVariants = sqliteTable("scene_variants", {
+  id: text("id").primaryKey(),
+  sceneId: text("scene_id")
+    .notNull()
+    .references(() => scenes.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  /** 角度标签，如"横向侧视"、"正面视角"或用户自定义描述 */
+  label: text("label").notNull().default(""),
+  /** 变体图本地路径 */
+  imagePath: text("image_path").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 export const characters = sqliteTable("characters", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -234,6 +256,14 @@ export const shots = sqliteTable("shots", {
    * null = 未关联场景。
    */
   sceneId: text("scene_id").references(() => scenes.id, {
+    onDelete: "set null",
+  }),
+  /**
+   * 关联场景变体 ID（外键 → scene_variants.id）。
+   * 不为 null 时，生成首帧优先用该变体的 imagePath（而非 scenes.imagePath 主图）。
+   * null = 使用场景主图。
+   */
+  sceneVariantId: text("scene_variant_id").references(() => sceneVariants.id, {
     onDelete: "set null",
   }),
 });
