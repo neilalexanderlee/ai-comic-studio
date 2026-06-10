@@ -133,6 +133,21 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
       .join(" ");
     parts.push(prefix + ",");
     parts.push("");
+
+    // 有场景参考图时，明确告知模型场景图是环境风格参考，需重新渲染而非直接复用背景
+    const hasSceneAsset = assets.some((a) => a.type === "scene");
+    if (hasSceneAsset) {
+      const sceneRefs = assets
+        .filter((a) => a.type === "scene")
+        .map((a) => `@图${assets.indexOf(a) + 1}`)
+        .join("、");
+      parts.push(
+        `【场景参考说明】${sceneRefs} 仅定义该场景的环境风格、氛围与光照基调，` +
+        `须重新渲染整体画面，使角色与场景在透视、光照方向、色温上自然融合。` +
+        `严禁将场景参考图直接作为背景底板使用，严禁将角色贴合/叠加到参考图上。`
+      );
+      parts.push("");
+    }
   }
 
   // ── 2. 主画面文字（startFrameDesc 优先，fallback 到 sceneDescription）────
