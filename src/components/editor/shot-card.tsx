@@ -43,7 +43,6 @@ import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
 import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
 import { RemoteVideoRecoveryHint } from "./remote-video-recovery-hint";
 import { ShotVideoEnhanceButton } from "./shot-video-enhance-button";
-import { SceneSelector } from "./scene-selector";
 
 interface Dialogue {
   id: string;
@@ -107,10 +106,6 @@ interface ShotCardProps {
   isCrowdShot?: boolean;
   /** Track 分组标识（Seedance 多参模式批量生成用） */
   track?: string | null;
-  /** 关联场景 ID */
-  sceneId?: string | null;
-  /** 关联场景角度变体 ID */
-  sceneVariantId?: string | null;
   /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
   namedCharacterCount?: number;
 }
@@ -215,8 +210,6 @@ export function ShotCard({
   chainSourceSequence,
   isCrowdShot = false,
   track,
-  sceneId,
-  sceneVariantId,
   namedCharacterCount = 0,
 }: ShotCardProps) {
   const t = useTranslations();
@@ -265,12 +258,8 @@ export function ShotCard({
 
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
-  const [rewritingText, setRewritingText] = useState(false);
   const [splitingContent, setSplitingContent] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
-  /** LLM 重写后返回的导演注记（如「建议拆分镜头」），手动关闭后清除 */
-  const [directorNote, setDirectorNote] = useState<string | null>(null);
-
   // 台词编辑状态
   type DialogueType = "dialogue" | "os" | "vo";
   type EditDialogue = { id?: string; characterName: string; text: string; type?: DialogueType };
@@ -319,7 +308,7 @@ export function ShotCard({
   const isGenerating = status === "generating";
 
   // Step states
-  const textState: StepState = rewritingText ? "generating" : hasText ? "done" : "idle";
+  const textState: StepState = hasText ? "done" : "idle";
   const frameState: StepState =
     frameActions.generatingFrames ? "generating"
     : status === "failed" && !hasFrame ? "error"
@@ -419,39 +408,6 @@ export function ShotCard({
     }
     setGeneratingVideo(false);
   }
-
-  async function handleRewriteText() {
-    setRewritingText(true);
-    setDirectorNote(null);
-    try {
-      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_shot_rewrite",
-          payload: { shotId: id },
-          modelConfig: getModelConfig(),
-        }),
-      });
-      const data = (await res.json()) as { _director_note?: string; [k: string]: unknown };
-      if (data._director_note?.trim()) {
-        setDirectorNote(data._director_note.trim());
-      }
-      onUpdate();
-      // 若首帧来自继承，提示用户可能需要刷新首帧（新角色不在继承图中）
-      if (chainSourceShotId) {
-        toast.info(
-          `首帧继承自第 ${chainSourceSequence ?? "?"} 镜 — 若本镜引入了新角色，请在下方 Step 2 点「刷新首帧」。`,
-          { duration: 6000 }
-        );
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    } finally {
-      setRewritingText(false);
-    }
-  }
-
   async function handleContentSplit() {
     setSplitingContent(true);
     try {
@@ -850,42 +806,14 @@ export function ShotCard({
               )}
             </div>
 
-            {directorNote && (
-              <div className="mb-2 flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
-                <span className="mt-0.5 text-amber-500 shrink-0">✂️</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-semibold text-amber-700 mb-0.5">导演建议 · AI 拆分分镜</p>
-                  <p className="text-[11px] text-amber-700 leading-relaxed">{directorNote}</p>
-                  <p className="mt-1 text-[10px] text-amber-500">点击下方「AI 拆分分镜」按钮执行拆分</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDirectorNote(null)}
-                  className="shrink-0 text-amber-400 hover:text-amber-600"
-                  title="关闭提示"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            )}
             <div className="flex flex-wrap gap-1.5">
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={handleRewriteText}
-                disabled={rewritingText || splitingContent}
-              >
-                {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                {rewritingText ? t("common.generating") : t("shot.rewriteText")}
-              </Button>
+
               <div className="flex flex-col gap-0.5">
                 <Button
                   size="xs"
-                  variant={directorNote ? "default" : "outline"}
+                  variant="outline"
                   onClick={handleContentSplit}
-                  disabled={splitingContent || rewritingText}
+                  disabled={splitingContent}
                   title="AI 将此分镜拆成两个连续分镜（用于角色中途入镜等首帧锚点问题）"
                 >
                   {splitingContent ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
@@ -899,7 +827,7 @@ export function ShotCard({
                 projectId={projectId}
                 shotId={id}
                 onRestored={onUpdate}
-                disabled={rewritingText || splitingContent}
+                disabled={splitingContent}
               />
             </div>
           </div>
@@ -965,16 +893,7 @@ export function ShotCard({
                 />
               }
             />
-            {/* 场景关联：紧跟生成按钮，让用户在生成画面前直观设置 */}
-            <SceneSelector
-              projectId={projectId}
-              episodeId={episodeId}
-              shotId={id}
-              currentSceneId={sceneId}
-              currentSceneVariantId={sceneVariantId}
-              onUpdate={onUpdate}
-              disabled={frameActions.frameActionsBusy || generatingVideo}
-            />
+
           </div>
         </StepRow>
 

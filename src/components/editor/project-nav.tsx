@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { cn } from "@/lib/utils";
-import { FileText, Users, MapPin, Film, Play, ArrowLeft } from "lucide-react";
+import { FileText, Users, Film, Play, ArrowLeft } from "lucide-react";
 
 interface ProjectNavProps {
   projectId: string;
   episodeId: string;
 }
 
-const icons = [FileText, Users, Film, MapPin, Play];
+const icons = [FileText, Users, Film, Play];
 
 export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
   const t = useTranslations("project");
@@ -25,8 +25,7 @@ export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
     { key: "script", href: `${basePath}/script`, num: 1 },
     { key: "characters", href: `${basePath}/characters`, num: 2 },
     { key: "storyboard", href: `${basePath}/storyboard`, num: 3 },
-    { key: "scenes", href: `${basePath}/scenes`, num: 4 },
-    { key: "preview", href: `${basePath}/preview`, num: 5 },
+    { key: "preview", href: `${basePath}/preview`, num: 4 },
   ] as const;
 
   return (

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { shots, dialogues, characters, scenes } from "@/lib/db/schema";
+import { shots, dialogues, characters } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { normalizeCharacterName } from "@/lib/storyboard/normalize-character-name";
@@ -21,10 +21,6 @@ export async function PATCH(
     anchorFirst: string | null;
     anchorLastAi: string | null;
     videoPrompt: string | null;
-    /** 关联场景 ID（null = 取消关联） */
-    sceneId: string | null;
-    /** 关联场景角度变体 ID（null = 使用主图） */
-    sceneVariantId: string | null;
     /** 台词更新：传入完整列表，后端全量替换 */
     dialogues: Array<{
       /** 已有台词的 id（传则更新 text），不传则视为新增 */
@@ -89,21 +85,6 @@ export async function PATCH(
     if (toInsert.length > 0) {
       await db.insert(dialogues).values(toInsert);
     }
-  }
-
-  // ── sceneId 校验（非 null 时确认场景存在且属于同一 project） ─────────────
-  if (body.sceneId !== undefined && body.sceneId !== null) {
-    const [scene] = await db
-      .select({ id: scenes.id })
-      .from(scenes)
-      .where(eq(scenes.id, body.sceneId));
-    if (!scene) {
-      return NextResponse.json({ error: "Scene not found" }, { status: 400 });
-    }
-  }
-  // sceneId 清空时同步清空 sceneVariantId
-  if (body.sceneId === null && body.sceneVariantId === undefined) {
-    (body as Record<string, unknown>).sceneVariantId = null;
   }
 
   // ── Shot 字段更新 ─────────────────────────────────────────────────────────

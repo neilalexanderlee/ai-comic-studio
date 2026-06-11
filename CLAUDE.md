@@ -78,16 +78,16 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │   │   │       ├── seedance-multi-param.ts  # ★ buildSeedanceMultiParamVideoPrompt()
 │   │   │       ├── frame-generate.ts    # buildFirstFramePrompt / buildLastFramePrompt
 │   │   │       ├── outline-expand-defaults.ts  # 大纲扩写（含 videoDesc 输出规范）
-│   │   │       ├── single-shot-rewrite-defaults.ts  # 单镜重写（含红线校验 + 朝向）
+│   │   │       ├── storyboard-supervision.ts  # ★ 分镜督导 Agent（七律视觉连续性审核）
 │   │   │       └── ...
 │   │   ├── db/
-│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=42）
+│   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=46）
 │   │   │   └── index.ts               # DB 实例 + idempotent migration runner
 │   │   ├── storyboard/                # 分镜工具函数
 │   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
 │   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（10维 videoDesc 组装）
 │   │   │   ├── track-grouping.ts      # ★ groupShotsIntoTracks()（≤15s 分组）
-│   │   │   ├── shot-supervision.ts    # ★ superviseShots()（6红线校验 + LLM judge）
+│   │   │   ├── shot-supervision.ts    # superviseShots()（单镜6红线校验 + LLM judge，generate 路由内部调用）
 │   │   │   ├── detect-structured-storyboard.ts
 │   │   │   ├── extract-shot-script.ts
 │   │   │   └── complete-extracted-shots.ts
@@ -153,9 +153,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 43` — `0043_remove_lighting_atm`
-
-> 注：文档中目录结构里 `schema.ts` 注释写的 `最新 idx=42` 已过期，以此处为准。
+**当前最新迁移索引**：`idx 46` — `0046_drop_scenes`
 
 ### 关键表
 
@@ -164,11 +162,13 @@ VideoProvider    // generateVideo
 | `projects` | 顶层实体，含 `visualStyle`、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；**v0.4 新增**：`track`（`emotion`/`framing`/`lightingAtm` 已于 migration 0042/0043 全部移除，光影/情绪语义完全内嵌进 `startFrameDesc`） |
-| `dialogues` | 台词；**v0.4 新增**：`type`（'dialogue'\|'os'\|'vo'）|
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除） |
+| `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
-| `character_assets` | 角色图片/音频；**v0.4 新增**：`audioPath`（音色参考，用于 Seedance 音色克隆）|
+| `character_assets` | 角色图片/音频；`audioPath`（音色参考，用于 Seedance 音色克隆）|
 | `episode_characters` | 多对多：角色参与哪些剧集 |
+
+**已移除的表**：`scenes`（migration 0046）、`scene_variants`（migration 0045）。场景功能整体废弃，`shots.scene_id` 字段同步移除。
 
 ---
 
@@ -296,7 +296,7 @@ payload.frameReferences = choice.references;  // 数组
 - `MAX_REFERENCE_IMAGES = 14`（与 API 上限对齐）
 - 解析顺序：优先读 `frameReferences[]`（新）；若无，fallback 到 `frameReference`（旧单个）保持向后兼容
 - `resolvedFrameRefs[0]` 作为 `continuityRef`（写 `chainSourceShotId` / `chainSourceType`）
-- refImages 组装顺序：`crossShotRefPaths`（用户手选）→ `charRefImages`（角色定妆图）→ `sceneAsset`（场景图）
+- refImages 组装顺序：`crossShotRefPaths`（用户手选）→ `charRefImages`（角色定妆图）
 
 **动态上限计算**（`use-shot-frame-actions.ts`）：
 
@@ -304,7 +304,7 @@ payload.frameReferences = choice.references;  // 数组
 const API_MAX_REF_IMAGES = 14;
 
 function estimateAutoRefCount(namedCharacterCount: number): number {
-  return namedCharacterCount + 1; // 1 张定妆图/角色 + 1 张场景图
+  return namedCharacterCount; // 1 张定妆图/角色
 }
 
 // 暴露给组件的动态上限
@@ -312,9 +312,9 @@ crossShotRefLimit: Math.max(1, API_MAX_REF_IMAGES - estimateAutoRefCount(namedCh
 ```
 
 **上限示例**（`namedCharacterCount` 来自 `filterShotCharacters()`）：
-- 0 个角色 → 用户可手选 13 张（14 - 1 场景）
-- 1 个角色 → 用户可手选 12 张（14 - 2）
-- 3 个角色 → 用户可手选 10 张（14 - 4）
+- 0 个角色 → 用户可手选 14 张（14 - 0）
+- 1 个角色 → 用户可手选 13 张（14 - 1）
+- 3 个角色 → 用户可手选 11 张（14 - 3）
 
 **组件链路**：`storyboard/page.tsx` → `namedCharacterCount={shotNamedCharacters.length}` → `ShotCard` / `ShotDrawer` → `useShotFrameActions` → `crossShotRefLimit` → `FrameReferencePicker maxSelectable`
 
@@ -363,7 +363,8 @@ startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额
 | AI 自动生成（大纲扩写） | `outline-expand.ts` / `outline_expand` | 故事大纲 → 多集 S 级剧本 |
 | 解析分镜（散文） | `registry` → `shot_split` | 一次 LLM 切镜并写全字段 |
 | 解析分镜（结构化 md） | `finalizeExtractedShotsForDb` | 无 LLM，缺字段保持 null |
-| 单镜「重新生成文本」 | `single-shot-rewrite.ts` / `single_shot_rewrite` | 分镜卡片刷新按钮 |
+| 全集分镜批量重写 | `storyboard-supervision.ts` / `batch_storyboard_rewrite` | 全集七律视觉连续性重写：LLM 一次读入全部分镜，批量重写 startFrameDesc/endFrameDesc/motionScript/cameraDirection 并写回 DB |
+| 全集分镜督导（只读） | `storyboard-supervision.ts` / `storyboard_supervision` | 全集七律视觉连续性审核，仅输出 Markdown 报告，不修改数据 |
 
 ### 不在此范围内的路径
 
@@ -439,6 +440,8 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | Track 分组后视频混乱 | 分镜不连续（有跳号 sequence）| 重新「自动分配 Track」重计算分组 |
 | 视频编辑器字幕未显示 | Canvas 字幕轨道 clip 时间范围不覆盖当前播放头 | 调整字幕 clip 的 startTime / endTime |
 | 参考图只能单选 | `FrameReferenceChoice` 为单值设计，API 实际支持 14 张 | 改为多选数组 `frameReferences[]`；`use-shot-frame-actions` 暴露 `crossShotRefLimit` 动态上限 |
+| 场景图注入首帧导致构图污染 | Diffusion 模型无法分离风格与构图，scene 参考图结构性渗入画面 | migration 0045/0046：完整移除场景图功能，`startFrameDesc` 文本为唯一视觉依据 |
+| 单镜「重新生成文本」无法保证全集一致性 | 逐镜 AI 介入破坏相邻镜头场景词一致性 | 移除 `single_shot_rewrite` action；改用 `batch_storyboard_rewrite`（全集一次性批量重写，保证跨镜一致性） |
 
 ---
 

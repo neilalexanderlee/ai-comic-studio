@@ -25,6 +25,7 @@ import {
   Plus,
   X,
   Clock,
+  ShieldCheck,
 } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
@@ -101,6 +102,10 @@ export default function EpisodeStoryboardPage() {
   const [trackVideoPreviewUrl, setTrackVideoPreviewUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [supervisionReport, setSupervisionReport] = useState<string | null>(null);
+  const [supervisionOpen, setSupervisionOpen] = useState(false);
+  const [supervising, setSupervising] = useState(false);
+  const [rewritingAll, setRewritingAll] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
     mode: string;
     score: number;
@@ -390,6 +395,61 @@ export default function EpisodeStoryboardPage() {
     fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
+  async function handleSupervision() {
+    if (!project) return;
+    if (!textGuard()) return;
+    setSupervising(true);
+    try {
+      const res = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "storyboard_supervision",
+          modelConfig: getModelConfig(),
+          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
+        }),
+      });
+      const data = await res.json() as { report?: string; error?: string };
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "审核失败");
+      }
+      setSupervisionReport(data.report ?? "");
+      setSupervisionOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "分镜督导失败");
+    } finally {
+      setSupervising(false);
+    }
+  }
+
+  async function handleBatchRewrite() {
+    if (!project) return;
+    if (!textGuard()) return;
+    setRewritingAll(true);
+    const episodeId = urlEpisodeId || useProjectStore.getState().currentEpisodeId;
+    try {
+      const res = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_storyboard_rewrite",
+          modelConfig: getModelConfig(),
+          episodeId,
+        }),
+      });
+      const data = await res.json() as { updatedCount?: number; totalCount?: number; status?: string; error?: string };
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "批量重写失败");
+      }
+      toast.success(`已优化 ${data.updatedCount ?? 0}/${data.totalCount ?? 0} 个分镜文本`);
+      fetchProject(project.id, episodeId!);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "批量优化文本失败");
+    } finally {
+      setRewritingAll(false);
+    }
+  }
+
   return (
     <div className="animate-page-in space-y-4">
       {/* Page header */}
@@ -408,6 +468,38 @@ export default function EpisodeStoryboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {totalShots > 0 && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleBatchRewrite}
+                disabled={rewritingAll || supervising}
+                title="按 S 级标准批量重写全集分镜首帧/尾帧描述、运动脚本、镜头朝向"
+              >
+                {rewritingAll ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                {rewritingAll ? "优化中…" : "批量优化文本"}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleSupervision}
+                disabled={supervising || rewritingAll}
+                title="只读督导报告：全集视觉连续性七律检查"
+              >
+                {supervising ? (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5 opacity-60" />
+                )}
+                {supervising ? "审核中…" : "督导报告"}
+              </Button>
+            </>
+          )}
           <PromptEditButton promptKeys="shot_split" projectId={project.id} />
           {totalShots > 0 && (
             <div className="inline-flex gap-1 rounded-xl border border-[--border-subtle] bg-[--surface] p-1">
@@ -868,8 +960,6 @@ export default function EpisodeStoryboardPage() {
               enhancePrompts={enhancePrompts}
               versionId={selectedVersionId}
               track={(shot as { track?: string | null }).track ?? null}
-              sceneId={(shot as { sceneId?: string | null }).sceneId ?? null}
-              sceneVariantId={(shot as { sceneVariantId?: string | null }).sceneVariantId ?? null}
               namedCharacterCount={shotNamedCharacters.length}
             />
             </div>
@@ -1047,6 +1137,29 @@ export default function EpisodeStoryboardPage() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* 分镜督导报告 */}
+      <Dialog open={supervisionOpen} onOpenChange={setSupervisionOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-primary" />
+              分镜督导报告
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto">
+            {supervisionReport ? (
+              <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-[--text-primary] p-1">
+                {supervisionReport}
+              </pre>
+            ) : (
+              <div className="flex items-center justify-center py-12 text-muted-foreground">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

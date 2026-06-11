@@ -316,6 +316,20 @@
       "when": 1779000020000,
       "tag": "0044_scene_variants",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1779000021000,
+      "tag": "0045_drop_scene_variants",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1779000022000,
+      "tag": "0046_drop_scenes",
+      "breakpoints": true
     }
   ]
 }

@@ -51,54 +51,6 @@ export const episodes = sqliteTable("episodes", {
     .$defaultFn(() => new Date()),
 });
 
-/**
- * 场景资产表（对标 Toonflow t_assets type=场景）。
- * 每个场景持久化存储一张参考图（image_path），在生成分镜首帧和 Seedance 多参视频时
- * 作为 @图N / @参考N 注入 prompt，保证同一场景所有分镜视觉一致。
- *
- * 作用域：
- *   - episode_id = null  → 项目级场景（跨集复用，如主角家）
- *   - episode_id = xxx   → 剧集级场景（仅在该集使用）
- */
-export const scenes = sqliteTable("scenes", {
-  id: text("id").primaryKey(),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  episodeId: text("episode_id").references(() => episodes.id, {
-    onDelete: "cascade",
-  }),
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  /** 场景参考图本地路径（生成或上传后存储） */
-  imagePath: text("image_path"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-
-/**
- * 场景角度变体图——每个场景可有多张不同拍摄角度的参考图。
- * scenes.imagePath 是主图（默认），variants 是衍生角度版本。
- * shot.sceneVariantId 指向某条 variant，为 null 时用主图。
- */
-export const sceneVariants = sqliteTable("scene_variants", {
-  id: text("id").primaryKey(),
-  sceneId: text("scene_id")
-    .notNull()
-    .references(() => scenes.id, { onDelete: "cascade" }),
-  projectId: text("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  /** 角度标签，如"横向侧视"、"正面视角"或用户自定义描述 */
-  label: text("label").notNull().default(""),
-  /** 变体图本地路径 */
-  imagePath: text("image_path").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .$defaultFn(() => new Date()),
-});
-
 export const characters = sqliteTable("characters", {
   id: text("id").primaryKey(),
   projectId: text("project_id")
@@ -249,23 +201,6 @@ export const shots = sqliteTable("shots", {
    * 示例："T1" / "T2"。null 表示未分配，按单镜独立生成。
    */
   track: text("track"),
-  /**
-   * 关联场景 ID（外键 → scenes.id）。
-   * 生成首帧时将场景参考图作为 @图N 注入 prompt；
-   * Seedance 多参批量生成时同 track 内去重注入场景资产。
-   * null = 未关联场景。
-   */
-  sceneId: text("scene_id").references(() => scenes.id, {
-    onDelete: "set null",
-  }),
-  /**
-   * 关联场景变体 ID（外键 → scene_variants.id）。
-   * 不为 null 时，生成首帧优先用该变体的 imagePath（而非 scenes.imagePath 主图）。
-   * null = 使用场景主图。
-   */
-  sceneVariantId: text("scene_variant_id").references(() => sceneVariants.id, {
-    onDelete: "set null",
-  }),
 });
 
 /** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */
