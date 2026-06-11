@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { streamText, generateText } from "ai";
+import { streamText, generateText, tool, stepCountIs } from "ai";
+import { jsonSchema } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
@@ -17,7 +18,7 @@ import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, resolveCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
-import { STORYBOARD_SUPERVISION_SYSTEM, STORYBOARD_REWRITE_SYSTEM, buildSupervisionUserPrompt, buildRewriteUserPrompt } from "@/lib/ai/prompts/storyboard-supervision";
+import { STORYBOARD_REWRITE_SYSTEM, buildRewriteUserPrompt } from "@/lib/ai/prompts/storyboard-supervision";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
@@ -444,9 +445,6 @@ export async function POST(
     return handleSingleShotRestoreFromScript(projectId, payload, episodeId);
   }
 
-  if (action === "storyboard_supervision") {
-    return handleStoryboardSupervision(projectId, episodeId, resolvedModelConfig);
-  }
 
   if (action === "batch_storyboard_rewrite") {
     return handleBatchStoryboardRewrite(projectId, episodeId, resolvedModelConfig);
@@ -1405,234 +1403,170 @@ async function handleSingleShotRestoreFromScript(
 }
 
 
-// --- storyboard_supervision: full-episode visual continuity review ---
+// --- batch_storyboard_rewrite: tool-calling approach (Toonflow pattern) ---
+// LLM calls write_shot_rewrite() once per shot → each call writes DB immediately → SSE progress
 
-async function handleStoryboardSupervision(
-  projectId: string,
-  episodeId: string | undefined,
-  modelConfig?: ModelConfig
-) {
-  if (!modelConfig?.text) {
-    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
-  }
-
-  // Fetch all shots for this episode (or project if no episodeId)
-  const shotRows = await db
-    .select({
-      id: shots.id,
-      sequence: shots.sequence,
-      duration: shots.duration,
-      prompt: shots.prompt,
-      startFrameDesc: shots.startFrameDesc,
-      endFrameDesc: shots.endFrameDesc,
-      motionScript: shots.motionScript,
-      cameraDirection: shots.cameraDirection,
-    })
-    .from(shots)
-    .innerJoin(storyboardVersions, eq(shots.versionId, storyboardVersions.id))
-    .where(
-      episodeId
-        ? and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId))
-        : eq(storyboardVersions.projectId, projectId)
-    )
-    .orderBy(shots.sequence);
-
-  if (shotRows.length === 0) {
-    return NextResponse.json({ error: "No shots found for this episode" }, { status: 404 });
-  }
-
-  // Fetch dialogues for all shots
-  const shotIds = shotRows.map((s) => s.id);
-  const dialogueRows = await db
-    .select({
-      shotId: dialogues.shotId,
-      text: dialogues.text,
-      characterName: characters.name,
-    })
-    .from(dialogues)
-    .innerJoin(characters, eq(dialogues.characterId, characters.id))
-    .where(inArray(dialogues.shotId, shotIds))
-    .orderBy(dialogues.sequence);
-
-  const dialoguesByShotId = new Map<string, Array<{ characterName: string; text: string }>>();
-  for (const d of dialogueRows) {
-    if (!d.shotId) continue;
-    if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
-    dialoguesByShotId.get(d.shotId)!.push({ characterName: d.characterName, text: d.text });
-  }
-
-  const shotsWithDialogues = shotRows.map((s) => ({
-    ...s,
-    dialogues: dialoguesByShotId.get(s.id) ?? [],
-  }));
-
-  const model = createLanguageModel(modelConfig.text);
-  const userPrompt = buildSupervisionUserPrompt(shotsWithDialogues);
-
-  console.log(
-    `[StoryboardSupervision] project=${projectId} episode=${episodeId} shots=${shotRows.length} promptLen=${userPrompt.length}`
-  );
-
-  try {
-    const { text } = await generateText({
-      model,
-      system: STORYBOARD_SUPERVISION_SYSTEM,
-      prompt: userPrompt,
-      temperature: 0.3,
-      abortSignal: AbortSignal.timeout(300_000), // 5 min for large episodes
-    });
-
-    return NextResponse.json({ report: text, shotCount: shotRows.length });
-  } catch (err) {
-    const isTimeout =
-      err instanceof Error &&
-      (err.name === "TimeoutError" || err.name === "AbortError");
-    if (isTimeout) {
-      return NextResponse.json({ error: "审核超时，请尝试减少镜头数量或换用更快的文本模型" }, { status: 504 });
-    }
-    return NextResponse.json({ error: extractErrorMessage(err) }, { status: 500 });
-  }
+function sseEvent(data: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(data)}\n\n`;
 }
 
-// --- batch_storyboard_rewrite: full-episode batch rewrite of text fields ---
-
-async function handleBatchStoryboardRewrite(
+function handleBatchStoryboardRewrite(
   projectId: string,
   episodeId: string | undefined,
   modelConfig?: ModelConfig
-) {
+): Response {
   if (!modelConfig?.text) {
-    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
-  }
-
-  // Fetch all shots for this episode
-  const shotRows = await db
-    .select({
-      id: shots.id,
-      sequence: shots.sequence,
-      duration: shots.duration,
-      prompt: shots.prompt,
-      startFrameDesc: shots.startFrameDesc,
-      endFrameDesc: shots.endFrameDesc,
-      motionScript: shots.motionScript,
-      cameraDirection: shots.cameraDirection,
-    })
-    .from(shots)
-    .innerJoin(storyboardVersions, eq(shots.versionId, storyboardVersions.id))
-    .where(
-      episodeId
-        ? and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId))
-        : eq(storyboardVersions.projectId, projectId)
-    )
-    .orderBy(shots.sequence);
-
-  if (shotRows.length === 0) {
-    return NextResponse.json({ error: "No shots found for this episode" }, { status: 404 });
-  }
-
-  // Fetch dialogues
-  const shotIds = shotRows.map((s) => s.id);
-  const dialogueRows = await db
-    .select({ shotId: dialogues.shotId, text: dialogues.text, characterName: characters.name })
-    .from(dialogues)
-    .innerJoin(characters, eq(dialogues.characterId, characters.id))
-    .where(inArray(dialogues.shotId, shotIds))
-    .orderBy(dialogues.sequence);
-
-  const dialoguesByShotId = new Map<string, Array<{ characterName: string; text: string }>>();
-  for (const d of dialogueRows) {
-    if (!d.shotId) continue;
-    if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
-    dialoguesByShotId.get(d.shotId)!.push({ characterName: d.characterName, text: d.text });
-  }
-
-  const shotsWithDialogues = shotRows.map((s) => ({
-    ...s,
-    dialogues: dialoguesByShotId.get(s.id) ?? [],
-  }));
-
-  const model = createLanguageModel(modelConfig.text);
-  const userPrompt = buildRewriteUserPrompt(shotsWithDialogues);
-
-  console.log(
-    `[BatchStoryboardRewrite] project=${projectId} episode=${episodeId} shots=${shotRows.length} promptLen=${userPrompt.length}`
-  );
-
-  try {
-    const { text } = await generateText({
-      model,
-      system: STORYBOARD_REWRITE_SYSTEM,
-      prompt: userPrompt,
-      temperature: 0.5,
-      abortSignal: AbortSignal.timeout(360_000), // 6 min for large episodes
-    });
-
-    type RewriteResult = {
-      shotId: string;
-      startFrameDesc: string;
-      endFrameDesc: string;
-      motionScript: string;
-      cameraDirection: string;
-    };
-
-    const parsed = JSON.parse(extractJSON(text)) as RewriteResult[];
-    if (!Array.isArray(parsed)) throw new Error("LLM returned non-array response");
-
-    // Validate shotIds match
-    const validShotIds = new Set(shotIds);
-    const validResults = parsed.filter(
-      (r) =>
-        r.shotId &&
-        validShotIds.has(r.shotId) &&
-        typeof r.startFrameDesc === "string" &&
-        typeof r.endFrameDesc === "string" &&
-        typeof r.motionScript === "string" &&
-        typeof r.cameraDirection === "string"
+    return new Response(
+      sseEvent({ type: "error", error: "No text model configured" }),
+      { status: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
     );
+  }
 
-    if (validResults.length === 0) {
-      throw new Error("LLM returned no valid shot results");
-    }
+  const encoder = new TextEncoder();
 
-    // Batch update all shots
-    await Promise.all(
-      validResults.map((r) =>
-        db
-          .update(shots)
-          .set({
-            startFrameDesc: r.startFrameDesc,
-            endFrameDesc: r.endFrameDesc,
-            motionScript: r.motionScript,
-            cameraDirection: r.cameraDirection,
-            // Clear stale video prompt — text fields changed
-            videoPrompt: null,
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
+
+      try {
+        // Fetch all shots
+        const shotRows = await db
+          .select({
+            id: shots.id,
+            sequence: shots.sequence,
+            duration: shots.duration,
+            prompt: shots.prompt,
+            startFrameDesc: shots.startFrameDesc,
+            endFrameDesc: shots.endFrameDesc,
+            motionScript: shots.motionScript,
+            cameraDirection: shots.cameraDirection,
           })
-          .where(eq(shots.id, r.shotId))
-      )
-    );
+          .from(shots)
+          .innerJoin(storyboardVersions, eq(shots.versionId, storyboardVersions.id))
+          .where(
+            episodeId
+              ? and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId))
+              : eq(storyboardVersions.projectId, projectId)
+          )
+          .orderBy(shots.sequence);
 
-    console.log(
-      `[BatchStoryboardRewrite] Updated ${validResults.length}/${shotRows.length} shots`
-    );
+        if (shotRows.length === 0) {
+          send({ type: "error", error: "No shots found for this episode" });
+          controller.close();
+          return;
+        }
 
-    return NextResponse.json({
-      updatedCount: validResults.length,
-      totalCount: shotRows.length,
-      status: "ok",
-    });
-  } catch (err) {
-    const isTimeout =
-      err instanceof Error &&
-      (err.name === "TimeoutError" || err.name === "AbortError");
-    if (isTimeout) {
-      return NextResponse.json(
-        { error: "批量重写超时，请尝试减少镜头数量或换用更快的文本模型" },
-        { status: 504 }
-      );
-    }
-    console.error("[BatchStoryboardRewrite] Error:", err);
-    return NextResponse.json({ error: extractErrorMessage(err) }, { status: 500 });
-  }
+        const shotIds = shotRows.map((s) => s.id);
+        const validShotIds = new Set(shotIds);
+
+        // Fetch dialogues
+        const dialogueRows = await db
+          .select({ shotId: dialogues.shotId, text: dialogues.text, characterName: characters.name })
+          .from(dialogues)
+          .innerJoin(characters, eq(dialogues.characterId, characters.id))
+          .where(inArray(dialogues.shotId, shotIds))
+          .orderBy(dialogues.sequence);
+
+        const dialoguesByShotId = new Map<string, Array<{ characterName: string; text: string }>>();
+        for (const d of dialogueRows) {
+          if (!d.shotId) continue;
+          if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
+          dialoguesByShotId.get(d.shotId)!.push({ characterName: d.characterName, text: d.text });
+        }
+
+        const shotsWithDialogues = shotRows.map((s) => ({
+          ...s,
+          dialogues: dialoguesByShotId.get(s.id) ?? [],
+        }));
+
+        const totalCount = shotRows.length;
+        let updatedCount = 0;
+        const writtenShotIds = new Set<string>();
+
+        send({ type: "start", totalCount });
+        console.log(`[BatchStoryboardRewrite] start project=${projectId} episode=${episodeId} shots=${totalCount}`);
+
+        // Tool: LLM calls this once per shot to write rewritten fields to DB
+        const writeShotRewrite = tool({
+          description: "将重写后的分镜视觉字段写入数据库。每个分镜调用一次，按镜头顺序逐一调用。",
+          inputSchema: jsonSchema<{
+            shotId: string;
+            startFrameDesc: string;
+            endFrameDesc: string;
+            motionScript: string;
+            cameraDirection: string;
+          }>({
+            type: "object",
+            properties: {
+              shotId: { type: "string", description: "镜头 ID，必须与输入完全一致" },
+              startFrameDesc: { type: "string", description: "重写后的首帧描述（四要素）" },
+              endFrameDesc: { type: "string", description: "重写后的尾帧描述（四要素，必须与首帧不同）" },
+              motionScript: { type: "string", description: "重写后的运动脚本（四要素，≤80字）" },
+              cameraDirection: { type: "string", description: "重写后的镜头朝向" },
+            },
+            required: ["shotId", "startFrameDesc", "endFrameDesc", "motionScript", "cameraDirection"],
+          }),
+          execute: async ({ shotId, startFrameDesc, endFrameDesc, motionScript, cameraDirection }) => {
+            if (!validShotIds.has(shotId)) return `skipped: unknown shotId ${shotId}`;
+            if (writtenShotIds.has(shotId)) return `skipped: already written ${shotId}`;
+            if (!startFrameDesc || !motionScript) return `skipped: missing required fields for ${shotId}`;
+
+            try {
+              await db
+                .update(shots)
+                .set({ startFrameDesc, endFrameDesc, motionScript, cameraDirection, videoPrompt: null })
+                .where(eq(shots.id, shotId));
+              writtenShotIds.add(shotId);
+              updatedCount++;
+              send({ type: "progress", updatedCount, totalCount });
+              console.log(`[BatchStoryboardRewrite] wrote shot ${shotId} (${updatedCount}/${totalCount})`);
+              return `ok: ${shotId}`;
+            } catch (dbErr) {
+              console.error(`[BatchStoryboardRewrite] DB write failed for shot ${shotId}:`, dbErr);
+              return `error: DB write failed for ${shotId}`;
+            }
+          },
+        });
+
+        try {
+          const result = streamText({
+            model: createLanguageModel(modelConfig.text!),
+            system: STORYBOARD_REWRITE_SYSTEM,
+            prompt: buildRewriteUserPrompt(shotsWithDialogues),
+            temperature: 0.5,
+            tools: { write_shot_rewrite: writeShotRewrite },
+            // Allow up to totalCount tool calls (one per shot) + buffer for retries
+            stopWhen: stepCountIs(totalCount + 5),
+          });
+
+          // Consume the stream to drive tool execution
+          for await (const _ of result.fullStream) { /* tool executions happen inside */ }
+        } catch (streamErr) {
+          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+          console.warn(`[BatchStoryboardRewrite] Stream interrupted (${updatedCount}/${totalCount}):`, errMsg);
+          send({ type: "stream_error", error: errMsg, updatedCount, totalCount });
+        }
+
+        send({ type: "done", updatedCount, totalCount });
+        console.log(`[BatchStoryboardRewrite] Done: ${updatedCount}/${totalCount}`);
+      } catch (err) {
+        console.error("[BatchStoryboardRewrite] Fatal error:", err);
+        send({ type: "error", error: extractErrorMessage(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 async function handleFramePromptPreview(

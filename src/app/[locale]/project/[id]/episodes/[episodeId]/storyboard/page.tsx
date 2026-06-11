@@ -102,10 +102,8 @@ export default function EpisodeStoryboardPage() {
   const [trackVideoPreviewUrl, setTrackVideoPreviewUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [supervisionReport, setSupervisionReport] = useState<string | null>(null);
-  const [supervisionOpen, setSupervisionOpen] = useState(false);
-  const [supervising, setSupervising] = useState(false);
   const [rewritingAll, setRewritingAll] = useState(false);
+  const [rewriteProgress, setRewriteProgress] = useState<{ updated: number; total: number } | null>(null);
   const [extractPreview, setExtractPreview] = useState<{
     mode: string;
     score: number;
@@ -395,37 +393,11 @@ export default function EpisodeStoryboardPage() {
     fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!);
   }
 
-  async function handleSupervision() {
-    if (!project) return;
-    if (!textGuard()) return;
-    setSupervising(true);
-    try {
-      const res = await apiFetch(`/api/projects/${project.id}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "storyboard_supervision",
-          modelConfig: getModelConfig(),
-          episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-        }),
-      });
-      const data = await res.json() as { report?: string; error?: string };
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "审核失败");
-      }
-      setSupervisionReport(data.report ?? "");
-      setSupervisionOpen(true);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "分镜督导失败");
-    } finally {
-      setSupervising(false);
-    }
-  }
-
   async function handleBatchRewrite() {
     if (!project) return;
     if (!textGuard()) return;
     setRewritingAll(true);
+    setRewriteProgress(null);
     const episodeId = urlEpisodeId || useProjectStore.getState().currentEpisodeId;
     try {
       const res = await apiFetch(`/api/projects/${project.id}/generate`, {
@@ -437,16 +409,61 @@ export default function EpisodeStoryboardPage() {
           episodeId,
         }),
       });
-      const data = await res.json() as { updatedCount?: number; totalCount?: number; status?: string; error?: string };
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "批量重写失败");
+      if (!res.ok) {
+        throw new Error(`请求失败 ${res.status}`);
       }
-      toast.success(`已优化 ${data.updatedCount ?? 0}/${data.totalCount ?? 0} 个分镜文本`);
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalUpdated = 0;
+      let finalTotal = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const dataLine = line.replace(/^data: /, "").trim();
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine) as {
+              type: string;
+              updatedCount?: number;
+              totalCount?: number;
+              error?: string;
+              chunkStart?: number;
+              chunkEnd?: number;
+            };
+            if (event.type === "start") {
+              setRewriteProgress({ updated: 0, total: event.totalCount ?? 0 });
+            } else if (event.type === "progress") {
+              setRewriteProgress({ updated: event.updatedCount ?? 0, total: event.totalCount ?? 0 });
+            } else if (event.type === "stream_error") {
+              toast.warning(`内容过滤中断，已保存 ${event.updatedCount ?? 0}/${event.totalCount ?? 0} 个镜头`);
+              finalUpdated = event.updatedCount ?? finalUpdated;
+              finalTotal = event.totalCount ?? finalTotal;
+            } else if (event.type === "error") {
+              throw new Error(event.error ?? "批量重写失败");
+            } else if (event.type === "done") {
+              finalUpdated = event.updatedCount ?? 0;
+              finalTotal = event.totalCount ?? 0;
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
+        }
+      }
+
+      toast.success(`已优化 ${finalUpdated}/${finalTotal} 个分镜文本`);
       fetchProject(project.id, episodeId!);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "批量优化文本失败");
     } finally {
       setRewritingAll(false);
+      setRewriteProgress(null);
     }
   }
 
@@ -469,36 +486,24 @@ export default function EpisodeStoryboardPage() {
         </div>
         <div className="flex items-center gap-2">
           {totalShots > 0 && (
-            <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleBatchRewrite}
-                disabled={rewritingAll || supervising}
-                title="按 S 级标准批量重写全集分镜首帧/尾帧描述、运动脚本、镜头朝向"
-              >
-                {rewritingAll ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
-                )}
-                {rewritingAll ? "优化中…" : "批量优化文本"}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleSupervision}
-                disabled={supervising || rewritingAll}
-                title="只读督导报告：全集视觉连续性七律检查"
-              >
-                {supervising ? (
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <ShieldCheck className="mr-1.5 h-3.5 w-3.5 opacity-60" />
-                )}
-                {supervising ? "审核中…" : "督导报告"}
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleBatchRewrite}
+              disabled={rewritingAll}
+              title="按 S 级标准批量重写全集分镜首帧/尾帧描述、运动脚本、镜头朝向"
+            >
+              {rewritingAll ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {rewritingAll
+                ? rewriteProgress
+                  ? `优化中… ${rewriteProgress.updated}/${rewriteProgress.total}`
+                  : "准备中…"
+                : "批量优化文本"}
+            </Button>
           )}
           <PromptEditButton promptKeys="shot_split" projectId={project.id} />
           {totalShots > 0 && (
@@ -1140,28 +1145,6 @@ export default function EpisodeStoryboardPage() {
         </DialogContent>
       </Dialog>
 
-      {/* 分镜督导报告 */}
-      <Dialog open={supervisionOpen} onOpenChange={setSupervisionOpen}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              分镜督导报告
-            </DialogTitle>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto">
-            {supervisionReport ? (
-              <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed text-[--text-primary] p-1">
-                {supervisionReport}
-              </pre>
-            ) : (
-              <div className="flex items-center justify-center py-12 text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" />
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

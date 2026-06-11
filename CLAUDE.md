@@ -364,7 +364,6 @@ startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额
 | 解析分镜（散文） | `registry` → `shot_split` | 一次 LLM 切镜并写全字段 |
 | 解析分镜（结构化 md） | `finalizeExtractedShotsForDb` | 无 LLM，缺字段保持 null |
 | 全集分镜批量重写 | `storyboard-supervision.ts` / `batch_storyboard_rewrite` | 全集七律视觉连续性重写：LLM 一次读入全部分镜，批量重写 startFrameDesc/endFrameDesc/motionScript/cameraDirection 并写回 DB |
-| 全集分镜督导（只读） | `storyboard-supervision.ts` / `storyboard_supervision` | 全集七律视觉连续性审核，仅输出 Markdown 报告，不修改数据 |
 
 ### 不在此范围内的路径
 
