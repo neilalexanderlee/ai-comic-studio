@@ -91,10 +91,11 @@ export function CharacterCard({
   // 角色级别：任意 asset 有 audioPath 即视为已设置
   const audioAsset = assets.find((a) => !!a.audioPath) ?? null;
 
-  // Sync local state when props change (e.g. after re-extraction)
+  // Sync local state when props change (e.g. after re-extraction or batch voice generate)
   useEffect(() => { setEditName(name); }, [name]);
   useEffect(() => { setEditDesc(description); }, [description]);
   useEffect(() => { setEditVisualHint(visualHint ?? ""); }, [visualHint]);
+  useEffect(() => { setEditVoiceHint(voiceHint ?? ""); }, [voiceHint]);
   const [generating, setGenerating] = useState(false);
   const [expandingAssetId, setExpandingAssetId] = useState<string | null>(null);
   const [uploadingField, setUploadingField] = useState<string | null>(null);

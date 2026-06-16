@@ -104,6 +104,7 @@ export default function EpisodeStoryboardPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [rewritingAll, setRewritingAll] = useState(false);
   const [rewriteProgress, setRewriteProgress] = useState<{ updated: number; total: number } | null>(null);
+  const [rewriteIsThinking, setRewriteIsThinking] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
     mode: string;
     score: number;
@@ -216,6 +217,18 @@ export default function EpisodeStoryboardPage() {
   const shotsWithFrameAny = project.shots.filter(
     (s) => s.anchorFirst || s.anchorLastAi || s.cutPoint
   ).length;
+  // 有台词但 motionScript 尚未内嵌台词（未执行批量重写）的分镜数量。
+  // 两种来源：① dialogues 表有记录（LLM 拆分路径）② prompt 含对白特征但 motionScript 无内嵌（结构化路径）
+  const shotsWithUnembeddedDialogues = project.shots.filter((s) => {
+    const motionHasDialogue = s.motionScript?.includes("「");
+    if (motionHasDialogue) return false;
+    if (s.dialogues.length > 0) return true;
+    // 结构化路径：台词写在场景描述里，dialogues 表为空
+    const promptHasDialogue = /「|说[：:]/.test(s.prompt ?? "");
+    return promptHasDialogue;
+  }).length;
+  // 总台词数（用于判断是否显示导出 SRT 按钮）
+  const totalDialogueCount = project.shots.reduce((sum, s) => sum + s.dialogues.length, 0);
 
   const anyGenerating = generating || generatingVideoPrompts;
 
@@ -438,7 +451,11 @@ export default function EpisodeStoryboardPage() {
             };
             if (event.type === "start") {
               setRewriteProgress({ updated: 0, total: event.totalCount ?? 0 });
+            } else if (event.type === "thinking") {
+              // 模型正在推理中（reasoning 阶段），心跳保活
+              setRewriteIsThinking(true);
             } else if (event.type === "progress") {
+              setRewriteIsThinking(false); // 第一个工具调用完成，推理结束
               setRewriteProgress({ updated: event.updatedCount ?? 0, total: event.totalCount ?? 0 });
             } else if (event.type === "stream_error") {
               toast.warning(`内容过滤中断，已保存 ${event.updatedCount ?? 0}/${event.totalCount ?? 0} 个镜头`);
@@ -464,6 +481,7 @@ export default function EpisodeStoryboardPage() {
     } finally {
       setRewritingAll(false);
       setRewriteProgress(null);
+      setRewriteIsThinking(false);
     }
   }
 
@@ -500,9 +518,28 @@ export default function EpisodeStoryboardPage() {
               )}
               {rewritingAll
                 ? rewriteProgress
-                  ? `优化中… ${rewriteProgress.updated}/${rewriteProgress.total}`
-                  : "准备中…"
+                  ? `${rewriteIsThinking ? "AI分析中" : "优化中"}… ${rewriteProgress.updated}/${rewriteProgress.total}`
+                  : rewriteIsThinking
+                    ? `AI 全集分析中…`
+                    : "准备中…"
                 : "批量优化文本"}
+            </Button>
+          )}
+          {totalDialogueCount > 0 && urlEpisodeId && (
+            <Button
+              size="sm"
+              variant="outline"
+              title="将台词表导出为 SRT 字幕文件，时间戳基于分镜时长自动计算"
+              onClick={() => {
+                const srtUrl = `/api/projects/${project.id}/episodes/${urlEpisodeId}/srt${selectedVersionId ? `?versionId=${selectedVersionId}` : ""}`;
+                const a = document.createElement("a");
+                a.href = srtUrl;
+                a.download = "dialogue.srt";
+                a.click();
+              }}
+            >
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+              导出 SRT
             </Button>
           )}
           <PromptEditButton promptKeys="shot_split" projectId={project.id} />
@@ -715,9 +752,27 @@ export default function EpisodeStoryboardPage() {
           onUpdate={() => fetchProject(project.id, (urlEpisodeId || useProjectStore.getState().currentEpisodeId)!)}
         />
 
+        {/* 台词提示：有台词但未执行批量重写时显示 */}
+        {shotsWithUnembeddedDialogues > 0 && (
+          <div className="flex items-center gap-2.5 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] text-blue-700">
+            <span className="text-base leading-none">💬</span>
+            <span>
+              <span className="font-semibold">{shotsWithUnembeddedDialogues} 个镜头</span>有台词尚未进入视频提示词——建议先执行
+              <button
+                onClick={handleBatchRewrite}
+                disabled={rewritingAll || anyGenerating}
+                className="mx-1 font-semibold underline decoration-dotted hover:decoration-solid disabled:opacity-50"
+              >
+                批量优化文本
+              </button>
+              让台词内嵌到运动脚本。
+            </span>
+          </div>
+        )}
+
         {/* Batch operations */}
         {viewMode === "list" && (
-        <div className="space-y-2">
+        <div className="space-y-2 sticky top-[56px] z-20 bg-[--bg] pb-1 pt-0.5">
 
           {/* Global generation settings strip */}
           <div className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/60 px-3 py-2 flex-wrap">
@@ -822,7 +877,7 @@ export default function EpisodeStoryboardPage() {
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">2</span>
             <Button
               onClick={handleBatchGenerateVideoPrompts}
-              disabled={anyGenerating || shotsWithFrameAny === 0}
+              disabled={anyGenerating || totalShots === 0}
               variant={shotsWithVideoPrompts === totalShots && totalShots > 0 ? "outline" : "default"}
               size="sm"
             >

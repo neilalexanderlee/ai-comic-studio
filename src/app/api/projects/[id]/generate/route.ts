@@ -64,7 +64,7 @@ import {
   pickLastFramePromptBuildParams,
 } from "@/lib/storyboard/frame-prompt-context";
 import {
-  generateAndPersistVisionVideoPrompt,
+  generateAndPersistDirectVideoPrompt,
   syncVideoPromptIfStale,
 } from "@/lib/storyboard/shot-video-prompt-sync.server";
 import { resolveDeprecatedGenerateAction } from "@/lib/storyboard/generate-route-deprecations";
@@ -193,52 +193,6 @@ function stripBgmContent(text: string, bgmNote?: string | null): string {
 
 // 向后兼容别名：旧调用点逐步迁移到带 bgmNote 参数的版本
 const stripBgmFromScript = (text: string) => stripBgmContent(text);
-
-/**
- * 确保视频提示词中始终包含来自 DB 的最新对白。
- *
- * 当 videoPrompt 是预生成的（Step 6）时，可能：
- * 1. 对白在 DB 中后续被修改，与 videoPrompt 不同步
- * 2. LLM 生成时忘记附加对白
- * 3. 对白生成时系统版本较旧，没有对白注入逻辑
- *
- * 此函数先剥离已有的对白/画外音行，再用最新 dialogueList 重新附加，保证一致性。
- * 若 dialogueList 为空，原样返回。
- */
-function ensureDialoguesInPrompt(
-  prompt: string,
-  dialogueList: Array<{
-    characterName: string;
-    text: string;
-    offscreen?: boolean;
-    visualHint?: string;
-    voiceHint?: string;
-  }>
-): string {
-  if (!dialogueList.length) return prompt;
-  // 剥离已有对白区块（NOTE 行 + 对白行）
-  // 同时清理 LLM 嵌入正文末尾的行中标签（不带前导 \n 的情况）
-  let base = prompt
-    .replace(/\nNOTE: The following are the ONLY lines[^\n]*/g, "")
-    .replace(/【对白口型】[^\n]*/g, "")   // 行中 + 行首均清理
-    .replace(/【画外音】[^\n]*/g, "")     // 行中 + 行首均清理
-    .replace(/\n{3,}/g, "\n\n")           // 清理后可能出现连续空行，合并
-    .trimEnd();
-  // 重新附加最新对白
-  base +=
-    "\n\nNOTE: The following are the ONLY lines of speech. Do not repeat or infer additional dialogue from the scene description above.";
-  for (const d of dialogueList) {
-    if (d.offscreen) {
-      const voiceSuffix = d.voiceHint ? `（${d.voiceHint}）` : "";
-      base += `\n【画外音】${d.characterName}${voiceSuffix}: "${d.text}"`;
-    } else {
-      const visualPart = d.visualHint ? `（${d.visualHint}）` : "";
-      const voicePart = d.voiceHint ? `，声音属性：${d.voiceHint}` : "";
-      base += `\n【对白口型】${d.characterName}${visualPart}${voicePart}: "${d.text}"`;
-    }
-  }
-  return base;
-}
 
 function buildShotCharacterText(shot: {
   prompt?: string | null;
@@ -448,6 +402,10 @@ export async function POST(
 
   if (action === "batch_storyboard_rewrite") {
     return handleBatchStoryboardRewrite(projectId, episodeId, resolvedModelConfig);
+  }
+
+  if (action === "batch_voice_generate") {
+    return handleBatchVoiceGenerate(projectId, resolvedModelConfig);
   }
 
   if (action === "frame_prompt_preview") {
@@ -1403,6 +1361,120 @@ async function handleSingleShotRestoreFromScript(
 }
 
 
+// --- batch_voice_generate: generate 9-dim voice description for characters without voiceHint ---
+
+const VOICE_GENERATE_SYSTEM = `你是一位专业音效导演，负责为动漫角色生成标准化的 9 维音色描述。
+
+根据角色名称和外形/性格描述，按以下固定格式输出音色描述，**只输出描述本身，不输出其他内容**：
+
+格式：{性别}，{年龄音色}，{音调}，{音色质感}，{声音厚度}，{发音方式}，{气息}，{语速}，{特殊质感}
+
+维度说明：
+- 性别：男声 / 女声
+- 年龄音色：童年音色 / 少年音色 / 青年音色 / 中年音色 / 老年音色
+- 音调：音调低沉 / 音调偏低 / 音调中等 / 音调中等偏高 / 音调偏高
+- 音色质感：音色浑厚有力 / 音色干净纯粹 / 音色清亮柔和 / 音色明亮清脆 / 音色沙哑粗粝 / 音色干燥偏暗
+- 声音厚度：声音厚重 / 声音厚度适中 / 声音轻薄 / 声音清亮
+- 发音方式：发音标准 / 发音清晰 / 发音带气声 / 发音有颗粒感
+- 气息：气息极其沉稳 / 气息平稳 / 气息轻盈 / 气息充沛平稳 / 气息充沛
+- 语速：语速极慢 / 语速偏慢 / 语速适中 / 语速偏快
+- 特殊质感（可选，如无则写"无特殊"）：带笑意和感染力 / 带急切感 / 有威胁感 / 带温婉真诚感 / 带沙砾感
+
+示例输出（勿带引号）：
+男声，童年音色，音调偏高，音色干净纯粹，声音轻薄，发音清晰，气息轻盈，语速偏快，带急切感`;
+
+async function handleBatchVoiceGenerate(
+  projectId: string,
+  modelConfig?: ModelConfig
+): Promise<Response> {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
+
+      try {
+        // 查出所有该项目下有 visualHint 的角色（无论是否已有 voiceHint，全量覆盖生成）
+        const charRows = await db
+          .select({ id: characters.id, name: characters.name, visualHint: characters.visualHint })
+          .from(characters)
+          .where(
+            and(
+              eq(characters.projectId, projectId),
+              sql`(${characters.visualHint} IS NOT NULL AND trim(${characters.visualHint}) != '')`
+            )
+          );
+
+        const total = charRows.length;
+        if (total === 0) {
+          send({ type: "done", updatedCount: 0, totalCount: 0 });
+          controller.close();
+          return;
+        }
+
+        send({ type: "start", totalCount: total });
+        console.log(`[BatchVoiceGenerate] start project=${projectId} chars=${total}`);
+
+        let updatedCount = 0;
+        // 记录每个角色写入 DB 的 voiceHint，随 progress 事件回传前端做实时更新
+        const voiceHintMap = new Map<string, string>();
+        for (const char of charRows) {
+          let savedVoiceHint: string | null = null;
+          try {
+            const { text } = await generateText({
+              model: createLanguageModel(modelConfig.text!),
+              system: VOICE_GENERATE_SYSTEM,
+              prompt: `角色名：${char.name}\n外形/性格描述：${char.visualHint}`,
+              temperature: 0.3,
+            });
+
+            // 剥离 <think>...</think> 推理块（扩展模型可能输出），再去除首尾引号
+            const voiceHint = text
+              .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "")
+              .trim()
+              .replace(/^["「『]|["」』]$/g, "");
+            if (voiceHint) {
+              await db
+                .update(characters)
+                .set({ voiceHint })
+                .where(eq(characters.id, char.id));
+              updatedCount++;
+              savedVoiceHint = voiceHint;
+              voiceHintMap.set(char.id, voiceHint);
+              console.log(`[BatchVoiceGenerate] ${char.name} → ${voiceHint}`);
+            }
+          } catch (charErr) {
+            console.warn(`[BatchVoiceGenerate] Failed for ${char.name}:`, charErr);
+          }
+          // 把已写入 DB 的 voiceHint 带回前端，前端实时更新角色卡片（无需额外 API 请求）
+          send({ type: "progress", updatedCount, totalCount: total, characterName: char.name, characterId: char.id, voiceHint: savedVoiceHint });
+        }
+
+        send({ type: "done", updatedCount, totalCount: total });
+        console.log(`[BatchVoiceGenerate] Done: ${updatedCount}/${total}`);
+      } catch (err) {
+        console.error("[BatchVoiceGenerate] Fatal:", err);
+        send({ type: "error", error: extractErrorMessage(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
 // --- batch_storyboard_rewrite: tool-calling approach (Toonflow pattern) ---
 // LLM calls write_shot_rewrite() once per shot → each call writes DB immediately → SSE progress
 
@@ -1461,19 +1533,33 @@ function handleBatchStoryboardRewrite(
         const shotIds = shotRows.map((s) => s.id);
         const validShotIds = new Set(shotIds);
 
-        // Fetch dialogues
+        // Fetch dialogues（含 type 和 voiceHint，供批量重写将台词内嵌进 motionScript）
         const dialogueRows = await db
-          .select({ shotId: dialogues.shotId, text: dialogues.text, characterName: characters.name })
+          .select({
+            shotId: dialogues.shotId,
+            text: dialogues.text,
+            type: dialogues.type,
+            characterName: characters.name,
+            voiceHint: characters.voiceHint,
+          })
           .from(dialogues)
           .innerJoin(characters, eq(dialogues.characterId, characters.id))
           .where(inArray(dialogues.shotId, shotIds))
           .orderBy(dialogues.sequence);
 
-        const dialoguesByShotId = new Map<string, Array<{ characterName: string; text: string }>>();
+        const dialoguesByShotId = new Map<
+          string,
+          Array<{ characterName: string; text: string; type: string | null; voiceHint: string | null }>
+        >();
         for (const d of dialogueRows) {
           if (!d.shotId) continue;
           if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
-          dialoguesByShotId.get(d.shotId)!.push({ characterName: d.characterName, text: d.text });
+          dialoguesByShotId.get(d.shotId)!.push({
+            characterName: d.characterName,
+            text: d.text,
+            type: d.type,
+            voiceHint: d.voiceHint,
+          });
         }
 
         const shotsWithDialogues = shotRows.map((s) => ({
@@ -1488,7 +1574,8 @@ function handleBatchStoryboardRewrite(
         send({ type: "start", totalCount });
         console.log(`[BatchStoryboardRewrite] start project=${projectId} episode=${episodeId} shots=${totalCount}`);
 
-        // Tool: LLM calls this once per shot to write rewritten fields to DB
+        // Tool: LLM calls this once per shot to write rewritten fields to DB.
+        // Shared across all chunks; writtenShotIds prevents double-writes.
         const writeShotRewrite = tool({
           description: "将重写后的分镜视觉字段写入数据库。每个分镜调用一次，按镜头顺序逐一调用。",
           inputSchema: jsonSchema<{
@@ -1530,23 +1617,46 @@ function handleBatchStoryboardRewrite(
           },
         });
 
-        try {
-          const result = streamText({
-            model: createLanguageModel(modelConfig.text!),
-            system: STORYBOARD_REWRITE_SYSTEM,
-            prompt: buildRewriteUserPrompt(shotsWithDialogues),
-            temperature: 0.5,
-            tools: { write_shot_rewrite: writeShotRewrite },
-            // Allow up to totalCount tool calls (one per shot) + buffer for retries
-            stopWhen: stepCountIs(totalCount + 5),
-          });
+        // 分块处理：每次最多 CHUNK_SIZE 个镜头，避免推理模型长时间思考触发 provider 超时。
+        // 每块独立 streamText，某块超时只影响该块，不影响其他块。
+        const CHUNK_SIZE = 5;
+        const chunks: typeof shotsWithDialogues[] = [];
+        for (let i = 0; i < shotsWithDialogues.length; i += CHUNK_SIZE) {
+          chunks.push(shotsWithDialogues.slice(i, i + CHUNK_SIZE));
+        }
 
-          // Consume the stream to drive tool execution
-          for await (const _ of result.fullStream) { /* tool executions happen inside */ }
-        } catch (streamErr) {
-          const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-          console.warn(`[BatchStoryboardRewrite] Stream interrupted (${updatedCount}/${totalCount}):`, errMsg);
-          send({ type: "stream_error", error: errMsg, updatedCount, totalCount });
+        for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+          const chunk = chunks[chunkIdx];
+          const chunkLabel = `chunk ${chunkIdx + 1}/${chunks.length}`;
+          console.log(`[BatchStoryboardRewrite] ${chunkLabel} start (shots ${chunk.map(s => s.sequence).join(",")})`);
+
+          try {
+            const result = streamText({
+              model: createLanguageModel(modelConfig.text!),
+              system: STORYBOARD_REWRITE_SYSTEM,
+              prompt: buildRewriteUserPrompt(chunk, shotsWithDialogues),
+              temperature: 0.5,
+              tools: { write_shot_rewrite: writeShotRewrite },
+              stopWhen: stepCountIs(chunk.length + 5),
+            });
+
+            // 消费流以驱动工具调用；每 2 秒发一次心跳防止 SSE 链路被浏览器视为"断开"。
+            let lastHeartbeat = Date.now();
+            for await (const ch of result.fullStream) {
+              const now = Date.now();
+              if (now - lastHeartbeat > 2000) {
+                send({ type: "thinking", updatedCount, totalCount });
+                lastHeartbeat = now;
+              }
+              void ch;
+            }
+            console.log(`[BatchStoryboardRewrite] ${chunkLabel} done (${updatedCount}/${totalCount})`);
+          } catch (streamErr) {
+            const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+            console.warn(`[BatchStoryboardRewrite] ${chunkLabel} interrupted (${updatedCount}/${totalCount}):`, errMsg);
+            // 发送 stream_error 但继续处理后续块
+            send({ type: "stream_error", error: `${chunkLabel}: ${errMsg}`, updatedCount, totalCount });
+          }
         }
 
         send({ type: "done", updatedCount, totalCount });
@@ -2156,22 +2266,12 @@ async function handleSingleVideoGenerate(
 
     const ratio = (payload?.ratio as string) || "16:9";
 
-    const videoPromptSyncDeps = {
-      stripBgmContent,
-      ensureDialoguesInPrompt,
-      isCharacterOnScreen,
-      stripThinkingBlocks,
-    };
-
     const { videoPrompt: syncedVideoPrompt, refreshed: videoPromptRefreshed } =
       await syncVideoPromptIfStale({
         shot,
-        shotCharacters,
-        shotDialogues,
-        modelConfig,
         userId,
         projectId,
-        deps: videoPromptSyncDeps,
+        deps: { stripBgmContent },
       });
     if (videoPromptRefreshed) {
       console.log(
@@ -2212,6 +2312,7 @@ async function handleSingleVideoGenerate(
         text: d.text,
         offscreen: !onScreen,
         visualHint,
+        voiceHint: char?.voiceHint || undefined,
         type: (d.type as "dialogue" | "os" | "vo") ?? "dialogue",
       };
     });
@@ -2297,11 +2398,9 @@ async function handleSingleVideoGenerate(
       );
     }
     const singleVideoTextProvider = (enhancePrompts && !hasPreGeneratedPrompt) ? resolveAIProvider(modelConfig) : null;
-    const videoPromptEnhanced = enhancePrompts && !hasPreGeneratedPrompt && singleVideoTextProvider
+    const videoPrompt = enhancePrompts && !hasPreGeneratedPrompt && singleVideoTextProvider
       ? await enhanceVideoPrompt(videoPromptBase, modelConfig?.video?.protocol ?? "", singleVideoTextProvider)
       : videoPromptBase;
-    // 始终用 DB 最新对白覆盖 prompt 中的对白区块（处理预生成 prompt 过期的情况）
-    const videoPrompt = ensureDialoguesInPrompt(videoPromptEnhanced, dialogueList);
 
     console.log(
       `\n${"=".repeat(80)}\n[SingleVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${useSingleVideoReferenceMode ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
@@ -2354,6 +2453,7 @@ async function handleSingleVideoGenerate(
           shotId,
           uploadDir: versionedUploadDir,
           existingCutPoint: shot.cutPoint,
+          existingAnchorLastAi: shot.anchorLastAi,
         });
         if (Object.keys(singleLastFrameUpdate).length > 0) {
           console.log(
@@ -2477,45 +2577,23 @@ async function handleSingleVideoPrompt(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
+  _modelConfig?: ModelConfig
 ) {
   const shotId = payload?.shotId as string;
-  console.log(`[SingleVideoPrompt] called, shotId=${shotId}`);
   if (!shotId) return NextResponse.json({ error: "shotId required" }, { status: 400 });
 
   const [shot] = await db.select().from(shots).where(eq(shots.id, shotId)).limit(1);
   if (!shot) return NextResponse.json({ error: "Shot not found" }, { status: 404 });
 
-  const visionFrames = collectVisionFramePaths(shot);
-  console.log(`[SingleVideoPrompt] shot.sequence=${shot.sequence}, frames=${visionFrames.length}`);
-  if (visionFrames.length === 0) {
-    return NextResponse.json({ error: "No frame available. Generate frames first." }, { status: 400 });
-  }
-
-  // 使用集绑定角色（而非全量项目角色），确保幼年集只选幼年变体
-  const shotCharacters = await getEpisodeCharacters(shot.projectId, shot.episodeId);
-  const shotDialogues = await db
-    .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
-    .from(dialogues)
-    .where(eq(dialogues.shotId, shotId))
-    .orderBy(asc(dialogues.sequence));
   try {
-    const videoPrompt = await generateAndPersistVisionVideoPrompt({
+    const videoPrompt = await generateAndPersistDirectVideoPrompt({
       shot,
-      shotCharacters,
-      shotDialogues,
-      modelConfig,
       userId,
       projectId,
-      deps: {
-        stripBgmContent,
-        ensureDialoguesInPrompt,
-        isCharacterOnScreen,
-        stripThinkingBlocks,
-      },
+      deps: { stripBgmContent },
     });
     console.log(
-      `\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+      `\n${"=".repeat(80)}\n[SingleVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
     );
     return NextResponse.json({ shotId, videoPrompt, status: "ok" });
   } catch (err) {
@@ -2530,7 +2608,7 @@ async function handleBatchVideoPrompt(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig,
+  _modelConfig?: ModelConfig,
   episodeId?: string
 ) {
   const batchVersionId = payload?.versionId as string | undefined;
@@ -2540,42 +2618,20 @@ async function handleBatchVideoPrompt(
   if (episodeId) shotWhereConditions.push(eq(shots.episodeId, episodeId));
   const batchShots = await db.select().from(shots).where(and(...shotWhereConditions)).orderBy(asc(shots.sequence));
 
-  const batchCharacters = await getEpisodeCharacters(projectId, episodeId);
-
-  const eligible = batchShots.filter((s) => collectVisionFramePaths(s).length > 0);
-
-  console.log(`[BatchVideoPrompt] Processing ${eligible.length} shots (${batchShots.length} total, ${batchCharacters.length} chars)`);
+  console.log(`[BatchVideoPrompt] processing ${batchShots.length} shots`);
   const bvpStartTime = Date.now();
 
   const results = await Promise.all(
-    eligible.map(async (shot) => {
+    batchShots.map(async (shot) => {
       try {
-        const shotStart = Date.now();
-        const visionFrames = collectVisionFramePaths(shot);
-        if (visionFrames.length === 0) {
-          return { shotId: shot.id, sequence: shot.sequence, status: "error" as const, error: "No frame on disk" };
-        }
-        const shotDialogues = await db
-          .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence })
-          .from(dialogues)
-          .where(eq(dialogues.shotId, shot.id))
-          .orderBy(asc(dialogues.sequence));
-        const videoPrompt = await generateAndPersistVisionVideoPrompt({
+        const videoPrompt = await generateAndPersistDirectVideoPrompt({
           shot,
-          shotCharacters: batchCharacters,
-          shotDialogues,
-          modelConfig,
           userId,
           projectId,
-          deps: {
-            stripBgmContent,
-            ensureDialoguesInPrompt,
-            isCharacterOnScreen,
-            stripThinkingBlocks,
-          },
+          deps: { stripBgmContent },
         });
-        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence} — FINAL VIDEO PROMPT (saved to DB)\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
-        console.log(`[BatchVideoPrompt] Shot ${shot.sequence} done (${((Date.now() - shotStart) / 1000).toFixed(1)}s, ${visionFrames.length} frames)`);
+        console.log(`[BatchVideoPrompt] Shot ${shot.sequence} done`);
+        console.log(`\n${"=".repeat(80)}\n[BatchVideoPrompt] Shot ${shot.sequence}\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`);
         return { shotId: shot.id, status: "ok" };
       } catch (err) {
         console.error(`[BatchVideoPrompt] Shot ${shot.sequence} failed:`, err);
@@ -2959,7 +3015,7 @@ async function handleSplitShot(
   // 解析 JSON
   let splitShots: unknown[];
   try {
-    const extracted = extractJSON(rawResponse);
+    const extracted = JSON.parse(extractJSON(rawResponse));
     if (!Array.isArray(extracted) || extracted.length !== 2) {
       throw new Error("LLM 返回的不是包含 2 个元素的数组");
     }

@@ -86,34 +86,119 @@ export const REF_VIDEO_PROMPT_SYSTEM = SEEDANCE_SYSTEM;
  * script and—worse—can push the model to invent environmental elements like
  * fire walls when it sees combat verbs next to an ambiguous light source.
  */
+/**
+ * 场景描述轻剪枝：保留所有事件/声音/环境/因果节拍，只剥离
+ * "纯外观定格描述"句（以人物外形定语开头、无动词的句子），
+ * 这类句子与帧图矛盾风险高但叙事价值低。
+ *
+ * ⚠️ 不再剥离含动作动词的句子——"停下/往上看/砸落/扑向" 等
+ * 正是 LLM 需要的因果时序节拍，剥除它们会导致 LLM 自己重排顺序。
+ */
 export function pruneSceneDescForVideoPrompt(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
 
-  // Action verbs that indicate character motion / conflict / narrative beats
-  const ACTION_RE =
-    /对抗|战斗|攻击|拼杀|冲向|奔向|扑向|冲去|冲上|冲入|追赶|逃跑|搏斗|格挡|抵挡|砍|刺|射击|踢|格斗|举起|挥动|挥舞|走到|走向|站到|坐到|跑向|跳向|转向|面对|应对|拿着|手持|手握|持着|举着|抱着|拉着|推着|指向|看向|望向|朝向|盯着|凝视着/;
+  // 仅剥离：句首是人物外形标注（括号包裹的外形描述）、句尾无动词的纯外观定格句。
+  // 例：「龙渊（矮小瘦弱黑碎发琥珀眼）」→ 这类句子若没有谓语动词则剥除。
+  // 保留：一切含事件动词、环境变化、声音描述的句子。
+  const APPEARANCE_ONLY_RE = /^[^\s，。]{1,6}（[^）]{1,40}）\s*$/;
 
   const parts = trimmed.split(/[。；！？\n]+/).map((s) => s.trim()).filter(Boolean);
-
-  // Single sentence: drop it entirely if action-heavy, otherwise keep as-is
   if (parts.length <= 1) {
-    return ACTION_RE.test(trimmed) ? undefined : trimmed || undefined;
+    return APPEARANCE_ONLY_RE.test(trimmed) ? undefined : trimmed || undefined;
   }
 
-  const kept = parts.filter((s) => !ACTION_RE.test(s));
-  if (!kept.length) return undefined;
+  const kept = parts.filter((s) => !APPEARANCE_ONLY_RE.test(s));
+  if (!kept.length) return trimmed; // 全是外观句时保底返回原文
   return kept.join("。") + "。";
 }
 
-/** Detect if a motion script contains time-coded stage markers like [0-3s] or [0s-5.5s] */
+/**
+ * Expand bracket-format motionScript into natural prose.
+ *
+ * Format stored in DB:
+ *   `0-3s: [单角色/共同动作] 3-7s: [角色A:动作1→动作2] [角色B:动作3→动作4] | 朝向：xxx`
+ *
+ * Expansion rules:
+ * - `[content]` (no colon prefix) → content as-is, `→` replaced with `、`
+ * - `[角色名:动作1→动作2]` → `角色名动作1、动作2`
+ * - Multiple `[]` in same stage → joined with `；随后`
+ * - Old format without `[]` passes through unchanged (backward compatibility)
+ *
+ * opts.prose = true（直出模式）：去除时间码前缀，跨段用「，随后」衔接，输出纯散文。
+ *   示例："龙渊回头望向灵瑶、迈步走近，随后灵瑶嘴唇微颤无声"
+ *
+ * opts.prose = false / 默认：保留时间码，供 LLM 精炼时理解分段意图。
+ *   示例："0-3s: 龙渊回头望向灵瑶 3-7s: 灵瑶嘴唇微颤无声"
+ */
+export function expandMotionScriptBrackets(motionScript: string, opts?: { prose?: boolean }): string {
+  const trimmed = motionScript.trim();
+  if (!trimmed.includes('[')) return trimmed; // old format — pass through
+
+  // Separate camera direction suffix  `| 朝向：xxx`
+  const dirMatch = trimmed.match(/\s*[|｜]\s*朝向\s*[:：]\s*(.+)$/);
+  const dirSuffix = dirMatch ? dirMatch[1].trim() : undefined;
+  const body = dirSuffix ? trimmed.slice(0, dirMatch!.index!).trim() : trimmed;
+
+  /** 展开单个时间段里的 bracket 内容为文字列表 */
+  function expandBracketSection(bracketSection: string): string[] {
+    return [...bracketSection.matchAll(/\[([^\]]*)\]/g)]
+      .map((m) => m[1].trim())
+      .filter(Boolean)
+      .map((content) => {
+        const colonIdx = content.search(/[:：]/);
+        if (colonIdx > 0) {
+          const potentialName = content.slice(0, colonIdx).trim();
+          // Character names are short (≤8 chars) and contain no punctuation
+          if (potentialName.length <= 8 && !/[，。、\s]/.test(potentialName)) {
+            const actions = content.slice(colonIdx + 1).trim().replace(/→/g, '、');
+            return `${potentialName}${actions}`;
+          }
+        }
+        return content.replace(/→/g, '、');
+      });
+  }
+
+  // Match each time stage: `Xs-Ys:` followed by one or more `[...]` blocks
+  const stageRe = /(\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*[:：]\s*)((?:\[[^\]]*\]\s*)*)/g;
+
+  if (opts?.prose) {
+    // 散文直出模式：去掉时间码，跨段用「，随后」衔接
+    const stageTexts: string[] = [];
+    let match: RegExpExecArray | null;
+    const re = new RegExp(stageRe.source, 'g');
+    while ((match = re.exec(body)) !== null) {
+      const parts = expandBracketSection(match[2]);
+      if (parts.length) stageTexts.push(parts.join('；随后'));
+    }
+    if (!stageTexts.length) {
+      // 没有匹配到时间段，原文直通
+      return dirSuffix ? `${body}，朝向${dirSuffix}` : body;
+    }
+    const proseBody = stageTexts.join('，随后');
+    return dirSuffix ? `${proseBody}，朝向${dirSuffix}` : proseBody;
+  }
+
+  // 默认模式：保留时间码（给 LLM 看的结构化输入）
+  const expanded = body.replace(stageRe, (_match, timeCode: string, bracketSection: string) => {
+    const parts = expandBracketSection(bracketSection);
+    if (!parts.length) return timeCode;
+    return `${timeCode}${parts.join('；随后')}`;
+  });
+
+  const result = expanded.replace(/\s{2,}/g, ' ').trim();
+  return dirSuffix ? `${result} | 朝向：${dirSuffix}` : result;
+}
+
+/** Detect if a motion script contains time-coded stage markers.
+ *  Supports both old `[0-3s]` format and new `0-3s:` format. */
 function hasTimeCodes(motionScript: string): boolean {
-  return /\[\s*\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*\]/.test(motionScript);
+  return /\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*[:：\]]/.test(motionScript);
 }
 
 /** Count the number of time-coded stages in a motion script */
 function countStages(motionScript: string): number {
-  return (motionScript.match(/\[\s*\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*\]/g) ?? []).length;
+  return (motionScript.match(/\d+(?:\.\d+)?s?\s*[-–]\s*\d+(?:\.\d+)?s\s*[:：\]]/g) ?? []).length;
 }
 
 /**
@@ -149,10 +234,13 @@ export function buildRefVideoPromptRequest(params: {
   duration: number;
   frameCount?: number; // 1 = only first frame; 2 = both frames
   characters?: Array<{ name: string; visualHint?: string | null }>;
-  dialogues?: Array<{ characterName: string; text: string; offscreen?: boolean; visualHint?: string }>;
+  dialogues?: Array<{ characterName: string; text: string; offscreen?: boolean; visualHint?: string; voiceHint?: string }>;
   /** 项目视觉风格标签，锁定生成风格（如"日本现代2D动漫风格，8K高清，赛璐珞渲染，清晰线稿——"）。无此参数时由 LLM 使用系统提示词中的默认值。 */
   visualStyleTag?: string;
 }): string {
+  // Expand bracket-format motionScript → ordered natural prose before LLM sees it
+  const motionScript = expandMotionScriptBrackets(params.motionScript);
+
   const frameCount = params.frameCount ?? 2;
   const frameIntro = frameCount === 1
     ? `ONE image provided: the FIRST FRAME (starting state). No last frame — infer motion from the screenplay action below.`
@@ -204,24 +292,29 @@ export function buildRefVideoPromptRequest(params: {
   }
 
   if (params.sceneDescription?.trim()) {
-    lines.push(`Scene description (supplemental only; include only beats compatible with the frame anchors and screenplay action): ${params.sceneDescription.trim()}`);
+    lines.push(`叙事事件序列（因果时序骨架——事件必须严格按此顺序发生，禁止跳过或重排任何节拍）: ${params.sceneDescription.trim()}`);
     lines.push(``);
   }
-  lines.push(`Screenplay action: ${params.motionScript}`);
+  lines.push(`Screenplay action: ${motionScript}`);
   lines.push(`⚠️ LOCKED Camera direction — translate INTENT into natural prose, NEVER copy field notation verbatim (dissolve any brackets/slashes into sentences): ${params.cameraDirection}`);
   lines.push(`Duration: ${params.duration}s`);
 
-  if (hasTimeCodes(params.motionScript)) {
-    const n = countStages(params.motionScript);
+  if (hasTimeCodes(motionScript)) {
+    const n = countStages(motionScript);
     lines.push(`⚠️ MULTI-STAGE SHOT (${n} stages): Write one sentence per stage connected with 随后/接着/最终 (or then/next/finally). Do NOT merge stages. Do NOT include [Xs-Ys] markers in your output.`);
   }
 
   if (params.dialogues?.length) {
-    const dialogueLines = params.dialogues.map((d) => {
-      const type = d.offscreen ? "OS/VO · silent lips" : "dialogue · lip-sync active";
-      return `${d.characterName}: "${d.text}" (${type})`;
-    });
-    lines.push(`Dialogue: ${dialogueLines.join("; ")}`);
+    lines.push(`台词（在动作叙事中台词自然发生的时机处内嵌，勿独立成行）:`);
+    for (const d of params.dialogues) {
+      if (d.offscreen) {
+        const voicePart = d.voiceHint ? `音色：${d.voiceHint}，` : "";
+        lines.push(`  ${d.characterName} 画外音VO：「${d.text}」${voicePart}（画面外，角色嘴型静止）`);
+      } else {
+        const voicePart = d.voiceHint ? `音色：${d.voiceHint}，` : "";
+        lines.push(`  ${d.characterName} 说：「${d.text}」${voicePart}（嘴型口型同步）`);
+      }
+    }
   }
 
   if (params.visualStyleTag?.trim()) {

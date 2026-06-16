@@ -47,4 +47,29 @@ describe("buildVideoCutPointUpdate", () => {
     expect(update).toEqual({});
     expect(fs.writeFileSync).not.toHaveBeenCalled();
   });
+
+  it("deletes old cutPoint when it differs from anchorLastAi", async () => {
+    await buildVideoCutPointUpdate({
+      remoteLastFrameUrl: "https://cdn.example/last.png",
+      shotId: "shot-1",
+      uploadDir: "/tmp/uploads",
+      existingCutPoint: "/tmp/uploads/frames/shot-1_seedance_lastframe_111.png",
+      existingAnchorLastAi: "/tmp/uploads/frames/shot-1_lastframe_999.png",
+    });
+    expect(fs.unlinkSync).toHaveBeenCalledWith("/tmp/uploads/frames/shot-1_seedance_lastframe_111.png");
+  });
+
+  it("does NOT delete old cutPoint when it is the same file as anchorLastAi (历史 bug 防回归)", async () => {
+    // 旧版代码曾将 anchorLastAi 和 cutPoint 写成同一路径
+    // 新版不得在替换 cutPoint 时连带删掉 anchorLastAi 的物理文件
+    const sharedPath = "/tmp/uploads/frames/shot-1_lastframe_1779764547330.png";
+    await buildVideoCutPointUpdate({
+      remoteLastFrameUrl: "https://cdn.example/last.png",
+      shotId: "shot-1",
+      uploadDir: "/tmp/uploads",
+      existingCutPoint: sharedPath,
+      existingAnchorLastAi: sharedPath,
+    });
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
 });

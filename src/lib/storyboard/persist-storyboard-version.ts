@@ -40,23 +40,12 @@ export interface PersistableShot {
 
 export async function getShotCharacters(
   projectId: string,
-  episodeId?: string | null
+  // episodeId is kept for API compatibility but no longer used for filtering:
+  // always return ALL project characters so dialogue matching never silently drops
+  // a character who hasn't been linked to the episode yet.
+  // episodeCharacters links are updated automatically after a successful match.
+  _episodeId?: string | null
 ): Promise<CharacterRow[]> {
-  if (episodeId) {
-    const linkedIds = await db
-      .select({ characterId: episodeCharacters.characterId })
-      .from(episodeCharacters)
-      .where(eq(episodeCharacters.episodeId, episodeId));
-    if (linkedIds.length > 0) {
-      return db
-        .select()
-        .from(characters)
-        .where(inArray(characters.id, linkedIds.map((r) => r.characterId)));
-    }
-    // Fallback: no episode-character links (structural import path sets characters:[])
-    // Use all project characters so dialogue matching still works
-  }
-
   return db.select().from(characters).where(eq(characters.projectId, projectId));
 }
 

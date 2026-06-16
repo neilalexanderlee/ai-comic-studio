@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { ArrowLeft, Loader2, ImageIcon } from "lucide-react";
+import { ArrowLeft, Loader2, ImageIcon, Mic } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { CharacterCard } from "@/components/editor/character-card";
 import Link from "next/link";
@@ -55,6 +55,8 @@ export default function CharactersPage({
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
   const [generatingImages, setGeneratingImages] = useState(false);
+  const [generatingVoices, setGeneratingVoices] = useState(false);
+  const [voiceProgress, setVoiceProgress] = useState<{ done: number; total: number } | null>(null);
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const imageGuard = useModelGuard("image");
 
@@ -93,6 +95,61 @@ export default function CharactersPage({
       toast.error(tc("generationFailed"));
     }
     setGeneratingImages(false);
+    fetchData();
+  }
+
+  async function handleBatchGenerateVoices() {
+    setGeneratingVoices(true);
+    setVoiceProgress(null);
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_voice_generate",
+          modelConfig: getModelConfig(),
+        }),
+      });
+      if (!response.body) throw new Error("No stream");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.replace(/^data: /, "").trim();
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.type === "start") setVoiceProgress({ done: 0, total: evt.totalCount });
+            if (evt.type === "progress") {
+              setVoiceProgress({ done: evt.updatedCount, total: evt.totalCount });
+              // 实时更新角色卡片的 voiceHint，无需等批量完成
+              if (evt.characterId && evt.voiceHint) {
+                setCharacters((prev) =>
+                  prev.map((c) => c.id === evt.characterId ? { ...c, voiceHint: evt.voiceHint } : c)
+                );
+              }
+            }
+            if (evt.type === "done") {
+              toast.success(`已生成 ${evt.updatedCount}/${evt.totalCount} 个角色音色描述`);
+              setVoiceProgress(null);
+              fetchData(); // done 时全量刷新确保数据一致
+            }
+            if (evt.type === "error") toast.error(evt.error ?? "生成失败");
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.error("Batch voice generate error:", err);
+      toast.error(tc("generationFailed"));
+    }
+    setGeneratingVoices(false);
+    setVoiceProgress(null);
     fetchData();
   }
 
@@ -138,6 +195,23 @@ export default function CharactersPage({
         </div>
         {characters.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleBatchGenerateVoices}
+              disabled={generatingVoices}
+              size="sm"
+              variant="outline"
+            >
+              {generatingVoices ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Mic className="h-3.5 w-3.5" />
+              )}
+              {generatingVoices
+                ? voiceProgress
+                  ? `${voiceProgress.done}/${voiceProgress.total}`
+                  : tc("generating")
+                : "批量生成音色"}
+            </Button>
             <InlineModelPicker capability="image" />
             <Button
               onClick={handleBatchGenerateImages}

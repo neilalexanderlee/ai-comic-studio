@@ -24,9 +24,9 @@ import {
   CheckCircle2,
   Circle,
   XCircle,
-  Trash2,
+
   History,
-  Plus,
+
 } from "lucide-react";
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { FrameReferencePicker } from "./frame-reference-picker";
@@ -260,32 +260,6 @@ export function ShotCard({
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
   const [splitingContent, setSplitingContent] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
-  // 台词编辑状态
-  type DialogueType = "dialogue" | "os" | "vo";
-  type EditDialogue = { id?: string; characterName: string; text: string; type?: DialogueType };
-  const [editingDialogues, setEditingDialogues] = useState(false);
-  const [editDialogues, setEditDialogues] = useState<EditDialogue[]>(
-    dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text, type: (d as { type?: DialogueType }).type ?? "dialogue" }))
-  );
-  const [savingDialogues, setSavingDialogues] = useState(false);
-  useEffect(() => {
-    setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text, type: (d as { type?: DialogueType }).type ?? "dialogue" })));
-  }, [dialogues]);
-
-  async function handleSaveDialogues() {
-    setSavingDialogues(true);
-    try {
-      await patchShot({ dialogues: editDialogues });
-      setEditingDialogues(false);
-      onUpdate();
-      toast.success("台词已保存");
-    } catch (err) {
-      toast.error("保存台词失败：" + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setSavingDialogues(false);
-    }
-  }
-
   // UI state
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -703,108 +677,29 @@ export function ShotCard({
                 placeholder="static / pan-left / zoom-in ..."
               />
             </div>
-            {/* 台词区域 */}
-            <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 space-y-2">
-              <div className="flex items-center justify-between">
+            {/* 台词：只读展示，由剧本解析写入，不支持手动编辑 */}
+            {dialogues.length > 0 && (
+              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 space-y-1.5">
                 <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
                   <MessageCircle className="h-3 w-3" />
                   台词
                 </p>
-                {!editingDialogues ? (
-                  <button
-                    onClick={() => {
-                      setEditDialogues(dialogues.map((d) => ({ id: d.id, characterName: d.characterName, text: d.text })));
-                      setEditingDialogues(true);
-                    }}
-                    className="text-[10px] text-primary hover:underline"
-                  >
-                    编辑
-                  </button>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={() => setEditingDialogues(false)} className="text-[10px] text-[--text-muted] hover:underline">取消</button>
-                    <button onClick={handleSaveDialogues} disabled={savingDialogues} className="text-[10px] text-primary font-semibold hover:underline disabled:opacity-50">
-                      {savingDialogues ? "保存中…" : "保存"}
-                    </button>
-                  </div>
-                )}
+                {dialogues.map((d) => {
+                  const dtype = (d as { type?: string }).type ?? "dialogue";
+                  const typeLabel: Record<string, string> = { dialogue: "对白", os: "OS", vo: "VO" };
+                  return (
+                    <p key={d.id} className="text-[12px]">
+                      <span className="font-semibold text-primary">{d.characterName}</span>
+                      {dtype !== "dialogue" && (
+                        <span className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">{typeLabel[dtype]}</span>
+                      )}
+                      <span className="mx-1.5 text-[--text-muted]">—</span>
+                      <span className="text-[--text-secondary]">{d.text}</span>
+                    </p>
+                  );
+                })}
               </div>
-              {!editingDialogues ? (
-                dialogues.length > 0 ? (
-                  dialogues.map((d) => {
-                    const dtype = (d as { type?: string }).type ?? "dialogue";
-                    const typeLabel: Record<string, string> = { dialogue: "对白", os: "OS", vo: "VO" };
-                    return (
-                      <p key={d.id} className="text-[12px]">
-                        <span className="font-semibold text-primary">{d.characterName}</span>
-                        {dtype !== "dialogue" && (
-                          <span className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">{typeLabel[dtype]}</span>
-                        )}
-                        <span className="mx-1.5 text-[--text-muted]">—</span>
-                        <span className="text-[--text-secondary]">{d.text}</span>
-                      </p>
-                    );
-                  })
-                ) : (
-                  <p className="text-[11px] text-[--text-muted]">无台词，点「编辑」可添加</p>
-                )
-              ) : (
-                <div className="space-y-2">
-                  {editDialogues.map((d, i) => (
-                    <div key={i} className="flex items-start gap-1.5">
-                      <input
-                        value={d.characterName}
-                        onChange={(e) => {
-                          const next = [...editDialogues];
-                          next[i] = { ...next[i], characterName: e.target.value };
-                          setEditDialogues(next);
-                        }}
-                        placeholder="角色名"
-                        className="w-20 shrink-0 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] font-semibold text-primary outline-none focus:border-primary/50"
-                      />
-                      <select
-                        value={d.type ?? "dialogue"}
-                        onChange={(e) => {
-                          const next = [...editDialogues];
-                          next[i] = { ...next[i], type: e.target.value as DialogueType };
-                          setEditDialogues(next);
-                        }}
-                        className="w-16 shrink-0 rounded border border-[--border-subtle] bg-white px-1 py-1 text-[10px] text-[--text-secondary] outline-none focus:border-primary/50"
-                        title="台词类型：对白（嘴部开合）/ OS（内心独白，嘴不动）/ VO（画外音）"
-                      >
-                        <option value="dialogue">对白</option>
-                        <option value="os">OS</option>
-                        <option value="vo">VO</option>
-                      </select>
-                      <textarea
-                        value={d.text}
-                        onChange={(e) => {
-                          const next = [...editDialogues];
-                          next[i] = { ...next[i], text: e.target.value };
-                          setEditDialogues(next);
-                        }}
-                        rows={2}
-                        placeholder="台词内容"
-                        className="flex-1 rounded border border-[--border-subtle] bg-white px-1.5 py-1 text-[11px] text-[--text-secondary] outline-none focus:border-primary/50 resize-none"
-                      />
-                      <button
-                        onClick={() => setEditDialogues(editDialogues.filter((_, j) => j !== i))}
-                        className="mt-1 text-red-400 hover:text-red-600"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    onClick={() => setEditDialogues([...editDialogues, { characterName: "", text: "", type: "dialogue" }])}
-                    className="flex items-center gap-1 text-[11px] text-[--text-muted] hover:text-primary"
-                  >
-                    <Plus className="h-3 w-3" />
-                    添加台词
-                  </button>
-                </div>
-              )}
-            </div>
+            )}
 
             <div className="flex flex-wrap gap-1.5">
 
@@ -925,7 +820,7 @@ export function ShotCard({
             size="xs"
             variant={nextStep === "prompt" ? "default" : "outline"}
             onClick={handleGenerateVideoPrompt}
-            disabled={generatingPrompt || batchGeneratingVideoPrompts || !hasFrame}
+            disabled={generatingPrompt || batchGeneratingVideoPrompts}
           >
             {(generatingPrompt || batchGeneratingVideoPrompts) ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
             {(generatingPrompt || batchGeneratingVideoPrompts)

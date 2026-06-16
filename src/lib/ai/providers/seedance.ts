@@ -211,7 +211,8 @@ export class SeedanceProvider implements VideoProvider {
    */
   private resolveDuration(duration: number): number | undefined {
     if (duration === -1) return undefined;   // auto
-    if (duration > 0) return duration;
+    // Seedance API 只接受整数秒，向上取整避免视频被截断
+    if (duration > 0) return Math.ceil(duration);
     return 5;                                 // fallback
   }
 

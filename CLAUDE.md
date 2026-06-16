@@ -87,6 +87,7 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
 │   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（10维 videoDesc 组装）
 │   │   │   ├── track-grouping.ts      # ★ groupShotsIntoTracks()（≤15s 分组）
+│   │   │   ├── shot-video-prompt-sync.server.ts  # ★ buildDirectVideoPrompt / syncVideoPromptIfStale（直出架构）
 │   │   │   ├── shot-supervision.ts    # superviseShots()（单镜6红线校验 + LLM judge，generate 路由内部调用）
 │   │   │   ├── detect-structured-storyboard.ts
 │   │   │   ├── extract-shot-script.ts
@@ -320,7 +321,87 @@ crossShotRefLimit: Math.max(1, API_MAX_REF_IMAGES - estimateAutoRefCount(namedCh
 
 **FrameReferencePicker UI**：checkbox 多选（替代原 radio 单选），第一张选中标「主参考」角标；达上限其余选项置灰。
 
-### 11. startFrameDesc — 帧生成唯一事实来源
+### 11. motionScript — bracket 多角色动作链格式
+
+DB 中 `motionScript` 字段统一使用以下格式（migration 后全面推广）：
+
+```
+Xs-Ys: [单一主体/共同动作] Ys-Zs: [角色A:动作1→动作2] [角色B:动作3→动作4] | 朝向：角色A正面面朝镜头
+```
+
+**格式规则**：
+- `[内容]` 无冒号 → 单一主体或共同动作，`→` 替换为 `、`
+- `[角色名:动作1→动作2]` → 具名角色动作链（名字 ≤8 字，无标点）
+- 同一时间段多个 `[]` → 叙事先后顺序，第一个先发生
+- `| 朝向：角色名+方位词` → 结尾必填（有具名角色时）
+- 时间段求和必须精确等于 `shot.duration`
+
+**`expandMotionScriptBrackets(motionScript, opts?)`**（`src/lib/ai/prompts/ref-video-prompt-generate.ts`）：
+
+```typescript
+// 默认模式：保留时间码（给 LLM / 结构化展示用）
+// "0-3s: 龙渊转身、迈步 3-7s: 灵瑶嘴唇微颤、眼睑下垂"
+expandMotionScriptBrackets(motionScript)
+
+// prose 模式（直出视频提示词用）：去掉时间码，跨段用「，随后」衔接
+// "龙渊转身、迈步，随后灵瑶嘴唇微颤、眼睑下垂"
+expandMotionScriptBrackets(motionScript, { prose: true })
+```
+
+旧格式（无 `[]` 包裹）原样透传，向后兼容。
+
+### 12. 视频提示词直出架构 — 不再使用 LLM
+
+**架构决策（不可逆）**：视频提示词生成已完全移除 Vision-LLM 精炼模式，统一为直出模式。
+
+**原因**：Seedance API 直接接收帧图（`anchorFirst` / `anchorLastAi`），让 LLM「描述帧图」放进文字 prompt 是循环冗余；直出模式零幻觉、零动作重排、零 API 费用、不依赖帧图。
+
+**核心函数**（`src/lib/storyboard/shot-video-prompt-sync.server.ts`）：
+
+```typescript
+// 组装：Duration 头 + startFrameDesc + expandedMotionScript(prose) + cameraDirection + visualStyleTag
+export function buildDirectVideoPrompt(params: {
+  shot: Pick<ShotRow, "duration"|"startFrameDesc"|"endFrameDesc"|"motionScript"|"prompt"|"cameraDirection"|"bgmNote">;
+  visualStyleTag?: string;
+  stripBgmContent: (text: string, bgmNote?: string | null) => string;
+}): string
+
+// 写入 DB（videoPromptFrameFingerprint 置 null）
+export async function generateAndPersistDirectVideoPrompt(params): Promise<string>
+
+// 确保 videoPrompt 存在（空时自动直出生成，非空时直接返回）
+export async function syncVideoPromptIfStale(params): Promise<{ videoPrompt: string | null; refreshed: boolean }>
+```
+
+**已删除的函数**：`generateAndPersistVisionVideoPrompt`、`shouldRefreshVideoPrompt`。禁止恢复 Vision-LLM 路径。
+
+**输出格式**（对齐 Toonflow videoDesc）：
+```
+Duration: 7s.
+
+近景平视，李明站在画面左三分之一，左侧冷调月光侧逆光。李明转身、迈步，随后推开门。固定镜头缓推。日本2D动漫风格。
+```
+
+### 13. 台词注入 — Toonflow 内联格式
+
+台词注入架构已从旧版 NOTE 块迁移为 Toonflow 内联格式（`generate/route.ts` 的 `ensureDialoguesInPrompt`）。
+
+**旧格式（已废弃）**：
+```
+NOTE: The following are the ONLY lines of speech...
+【对白口型】李明（视觉描述）: "台词"
+【画外音】角色名（音色）: "台词"
+```
+
+**新格式（Toonflow 内联）**：
+```
+李明（视觉描述）说：「台词」音色：男声，青年，音调低沉...（嘴型口型同步）
+角色名 画外音VO：「台词」音色：...（画面外，角色嘴型静止）
+```
+
+**机制**：LLM 被要求在叙事中台词自然发生的时机处内嵌台词。`ensureDialoguesInPrompt` 仅做兜底——检测哪些台词原文未出现在正文中，只对缺失的补充追加，不覆盖 LLM 已自然内嵌的台词。
+
+### 14. startFrameDesc — 帧生成唯一事实来源
 
 `startFrameDesc` / `endFrameDesc` 是图像生成的唯一画面依据，必须自包含四要素（景别/角色姿态/主光/情绪身体解剖）。`emotion`、`framing`、`lightingAtm` 三个冗余字段已于 migration 0042/0043 从数据库完全移除，所有信息统一写入 `startFrameDesc`。
 
@@ -369,7 +450,17 @@ startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额
 
 - `handleAiOptimizeText` — 通用文字优化，执行用户自定义指令，不生成分镜结构
 - `import/split/route.ts` — 剧集级文本分割，不涉及分镜字段
-- `ref-video-prompt-generate.ts` — 视频 prompt 精炼，有独立的模型专属系统
+- `ref-video-prompt-generate.ts` — 现在是**直出工具函数库**（`expandMotionScriptBrackets`、`buildRefVideoPromptRequest` 等），不再包含 LLM 视频精炼系统
+
+### batch_voice_generate — 批量生成音色描述
+
+`action = "batch_voice_generate"` → `handleBatchVoiceGenerate`：为项目中所有有 `visualHint` 的角色批量生成 9 维标准化音色描述，写入 `characters.voiceHint`。
+
+**9 维格式**：`{性别}，{年龄音色}，{音调}，{音色质感}，{声音厚度}，{发音方式}，{气息}，{语速}，{特殊质感}`
+
+示例：`女声，少女音色，音调偏高，音色干净纯粹，声音轻薄，发音清晰，气息轻盈，语速适中，带温婉真诚感`
+
+SSE 事件序列：`start` → `progress`（每角色一条，含 `voiceHint` 字段供前端实时更新角色卡） → `done`。前端无需额外请求即可更新 UI。
 
 ### S 级核心规范速查
 
@@ -410,6 +501,8 @@ pnpm test              # 运行所有单测
 pnpm test:watch        # 监听模式
 pnpm test:integration  # API 集成测试（需要测试 DB）
 pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
+pnpm eval -- --suite char     # 只跑角色路由 suite（无需 API key）
+pnpm eval -- --suite prompt   # 只跑 prompt 增强 suite（需要 API key）
 ```
 
 ### 测试文件位置
@@ -417,6 +510,40 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 - 单元测试：`src/__tests__/unit/`，与被测文件路径对应
 - 集成测试：`src/__tests__/integration/`
 - Eval 用例：`src/lib/evals/cases/`
+- Eval fixtures（共享测试数据）：`src/lib/evals/fixtures/shots.ts`
+- 占位角色名（禁止用真实剧情角色）：`src/lib/test-fixtures/placeholder-characters.ts`
+
+### Eval Harness 架构
+
+```
+src/lib/evals/
+├── index.ts              # 入口：注册并分发 suite
+├── runner.ts             # 框架核心：EvalCase / EvalSuite 类型 + runSuite / runAllSuites
+│                         # 包含 llmJudge() / assertContains() / assertMinLength() 等 helper
+├── cases/
+│   ├── character-routing.ts     # Suite：filterShotCharacters 角色过滤行为（确定性，无 API）
+│   └── prompt-enhancement.ts   # Suite：enhanceVideoPrompt / enhanceImagePrompt（需 API key）
+└── fixtures/
+    └── shots.ts          # 标准镜头/角色/prompt fixture（用 FIXTURE_CHAR_* 占位符）
+```
+
+**关键设计**：
+
+- `EvalCase.run()` 抛出异常 = fail；返回 `"skip"` = 跳过；返回 `void` = pass
+- `llmJudge(output, criteria, provider)` 以 YES/NO 格式评估输出质量（temperature=0）
+- Eval 失败退出码非零，可接入 CI scheduled job（不加入 PR CI 以避免 API 费用）
+- 环境变量：优先 `ARK_API_KEY`（便宜），fallback `OPENAI_API_KEY`
+
+**新增 Eval Suite 步骤**：
+1. 在 `fixtures/shots.ts` 添加测试数据（角色用 `FIXTURE_CHAR_*` 占位符）
+2. 在 `cases/` 新建 suite 文件，export `XxxSuite: EvalSuite`
+3. 在 `index.ts` 的 `allSuites` 数组注册
+4. 运行 `pnpm eval -- --suite <name>` 验证
+
+**不变量（任何情况下必须 pass）**：
+- `crowd-scene-returns-empty`：群演 `filterShotCharacters` 返回 `[]`
+- `fallback-on-api-error`：增强失败时原样返回原始 prompt
+- `fallback-on-empty-prompt`：空 prompt 不触发 API 调用
 
 ---
 
@@ -441,6 +568,10 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 参考图只能单选 | `FrameReferenceChoice` 为单值设计，API 实际支持 14 张 | 改为多选数组 `frameReferences[]`；`use-shot-frame-actions` 暴露 `crossShotRefLimit` 动态上限 |
 | 场景图注入首帧导致构图污染 | Diffusion 模型无法分离风格与构图，scene 参考图结构性渗入画面 | migration 0045/0046：完整移除场景图功能，`startFrameDesc` 文本为唯一视觉依据 |
 | 单镜「重新生成文本」无法保证全集一致性 | 逐镜 AI 介入破坏相邻镜头场景词一致性 | 移除 `single_shot_rewrite` action；改用 `batch_storyboard_rewrite`（全集一次性批量重写，保证跨镜一致性） |
+| Seedance 400 错误：duration=7.5 | AI 拆分分镜产生小数时长（如 15/2=7.5），Seedance API 仅接受整数秒 | `seedance.ts` `resolveDuration()` 改为 `Math.ceil(duration)`；`split/route.ts` 先 `Math.ceil(totalDuration)` 再拆分 |
+| 视频提示词 LLM 模式循环冗余 | Vision-LLM「描述帧图」放入 prompt，但 Seedance 已直接收到帧图参数（`anchorFirst`/`anchorLastAi`），描述等于无效二次编码 | 删除 `generateAndPersistVisionVideoPrompt`；统一为 `buildDirectVideoPrompt`（直出架构，零 API 费用） |
+| 台词注入 NOTE 块被 LLM 误解 | 旧 NOTE 块格式要求 LLM「不重复」台词，实践中 LLM 经常忽略或放错位置 | 改为 Toonflow 内联格式：`ensureDialoguesInPrompt` 只补充缺失台词，LLM 自然内嵌的不重复追加 |
+| motionScript 多角色动作顺序被 LLM 重排 | 散文描述无法锁定发声先后顺序 | 改为显式 bracket 格式 `[角色A:动作→动作] [角色B:动作]`，`[]` 顺序即叙事铁律；`expandMotionScriptBrackets` 展开为散文 |
 
 ---
 

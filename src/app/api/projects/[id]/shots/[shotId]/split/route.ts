@@ -42,10 +42,12 @@ export async function POST(
   }
 
   // 2. Calculate split: how many sub-shots, and each duration
-  const n = Math.ceil(totalDuration / maxDuration);
+  // 先将 totalDuration 取整（Seedance 只接受整数秒）
+  const totalDurationInt = Math.ceil(totalDuration);
+  const n = Math.ceil(totalDurationInt / maxDuration);
   // Distribute evenly; last shot gets the remainder
-  const baseDuration = Math.floor(totalDuration / n);
-  const remainder = totalDuration - baseDuration * n;
+  const baseDuration = Math.floor(totalDurationInt / n);
+  const remainder = totalDurationInt - baseDuration * n;
 
   // 3. Shift all later shots' sequence up by (n - 1) to make room
   const slotsNeeded = n - 1; // we replace 1 shot with n shots

@@ -63,7 +63,9 @@ export function sanitizeEnhancedPromptOutput(
   if (options?.requiredPrefix) {
     const idx = stripped.indexOf(options.requiredPrefix);
     if (idx >= 0) {
-      const candidate = takeFirstPromptChunk(stripped.slice(idx));
+      // 从前缀起取全部剩余内容，折叠换行为空格
+      // （部分模型如 MiniMax M3 会在 prompt 中间插入 \n\n，takeFirstPromptChunk 会错误截断）
+      const candidate = stripped.slice(idx).replace(/\s+/g, " ").trim();
       if (candidate && !looksLikeChainOfThought(candidate)) {
         return candidate;
       }

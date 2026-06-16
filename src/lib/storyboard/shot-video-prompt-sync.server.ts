@@ -2,50 +2,17 @@ import fs from "fs";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { shots, projects } from "@/lib/db/schema";
-import type { ModelConfigPayload } from "@/lib/provider-secrets";
-import { resolveAIProvider } from "@/lib/ai/provider-factory";
-import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
-import {
-  buildRefVideoPromptRequest,
-  pruneSceneDescForVideoPrompt,
-  resolveRefVideoPromptSystem,
-  resolveVideoMotionAndScene,
-} from "@/lib/ai/prompts/ref-video-prompt-generate";
+import { expandMotionScriptBrackets } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { collectVisionFramePaths } from "@/lib/storyboard/shot-video-readiness.server";
 
 type ShotRow = typeof shots.$inferSelect;
 
-type EpisodeCharacter = {
-  id: string;
-  name: string;
-  description?: string | null;
-  visualHint?: string | null;
-};
-
-type DialogueRow = { text: string; characterId: string; sequence: number };
-
-export type DialoguePromptEntry = {
-  characterName: string;
-  text: string;
-  offscreen?: boolean;
-  visualHint?: string;
-  voiceHint?: string;
-};
-
 export type VideoPromptSyncDeps = {
   stripBgmContent: (text: string, bgmNote?: string | null) => string;
-  ensureDialoguesInPrompt: (prompt: string, dialogueList: DialoguePromptEntry[]) => string;
-  isCharacterOnScreen: (
-    characterName: string,
-    motionText: string,
-    startFrameDesc: string | null | undefined
-  ) => boolean;
-  stripThinkingBlocks?: (text: string) => string;
 };
 
-/** 当前磁盘上首帧 / AI 尾帧的路径 + mtime 指纹 */
+/** 当前磁盘上首帧 / AI 尾帧的路径 + mtime 指纹（保留用于兼容旧逻辑） */
 export function computeVideoPromptFrameFingerprint(shot: {
   anchorFirst?: string | null;
   anchorLastAi?: string | null;
@@ -65,63 +32,67 @@ export function computeVideoPromptFrameFingerprint(shot: {
   return parts.join("|");
 }
 
-/** 哨兵值：用户手动编辑过 videoPrompt，禁止自动刷新覆盖 */
-const MANUAL_FINGERPRINT = "__manual__";
+/**
+ * 直出模式：完全跳过 LLM，直接从分镜字段拼接视频提示词。
+ *
+ * 模板（对齐 Toonflow videoDesc 架构）：
+ *   {startFrameDesc}。{expandMotionScriptBrackets(prose)}。{cameraDirection}。{visualStyleTag}。
+ *
+ * 优点：零幻觉、零动作顺序重排、即时输出、零 API 费用、不依赖帧图。
+ */
+export function buildDirectVideoPrompt(params: {
+  shot: Pick<
+    ShotRow,
+    | "duration"
+    | "startFrameDesc"
+    | "endFrameDesc"
+    | "motionScript"
+    | "prompt"
+    | "cameraDirection"
+    | "bgmNote"
+  >;
+  visualStyleTag?: string;
+  stripBgmContent: (text: string, bgmNote?: string | null) => string;
+}): string {
+  const { shot, visualStyleTag, stripBgmContent } = params;
 
-export function shouldRefreshVideoPrompt(shot: {
-  videoPrompt?: string | null;
-  videoPromptFrameFingerprint?: string | null;
-  anchorFirst?: string | null;
-  anchorLastAi?: string | null;
-}): boolean {
-  // 用户手动编辑过的提示词，无论帧是否变化都不覆盖
-  // 例外：videoPrompt 已被清空（如重写文字后），此时应允许重新生成
-  if (shot.videoPromptFrameFingerprint === MANUAL_FINGERPRINT) {
-    if (!shot.videoPrompt?.trim()) return true; // prompt 已清空，允许重生
-    return false; // 有手动编辑内容，保护
-  }
-  const fingerprint = computeVideoPromptFrameFingerprint(shot);
-  if (!fingerprint) return false;
-  if (!shot.videoPrompt?.trim()) return true;
-  return shot.videoPromptFrameFingerprint !== fingerprint;
-}
+  // 1. 起幅画面描述（首帧静止状态）
+  const startFrame = shot.startFrameDesc?.trim() ?? "";
 
-function defaultStripThinkingBlocks(text: string): string {
-  return text
-    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "")
-    .replace(/<think>[\s\S]*?<\/redacted_thinking>/gi, "")
-    .trim();
+  // 2. 动作脚本展开（bracket 格式 → 纯散文；旧格式直通）
+  //    若 motionScript 里已有内联台词（如 [铁狼:说：「...」音色：...]），
+  //    expandMotionScriptBrackets 会在正确时间位置展开，无需末尾追加。
+  const rawMotion = (shot.motionScript || shot.prompt || "").trim();
+  const motionClean = stripBgmContent(rawMotion, shot.bgmNote);
+  // prose: true — 去掉时间码前缀，跨段用「，随后」衔接，对齐 Toonflow 散文格式
+  const expandedMotion = expandMotionScriptBrackets(motionClean, { prose: true });
+
+  // 3. 运镜意图
+  const cameraDir = (shot.cameraDirection || "").trim();
+
+  // 4. 组装
+  const parts: string[] = [];
+  if (startFrame) parts.push(startFrame);
+  if (expandedMotion) parts.push(expandedMotion);
+  if (cameraDir) parts.push(cameraDir);
+  if (visualStyleTag) parts.push(visualStyleTag);
+
+  const body = parts.join("。");
+  const duration = shot.duration ?? 10;
+  return `Duration: ${duration}s.\n\n${body}`;
 }
 
 /**
- * Vision 精炼视频 prompt（与 single_video_prompt 同源），写入 DB 并更新帧指纹。
+ * 直出模式写入 DB。
  */
-export async function generateAndPersistVisionVideoPrompt(params: {
+export async function generateAndPersistDirectVideoPrompt(params: {
   shot: ShotRow;
-  shotCharacters: EpisodeCharacter[];
-  shotDialogues: DialogueRow[];
-  modelConfig?: ModelConfigPayload;
   userId: string;
   projectId: string;
   deps: VideoPromptSyncDeps;
 }): Promise<string> {
-  const { shot, shotCharacters, shotDialogues, modelConfig, deps } = params;
-  const stripThinking = deps.stripThinkingBlocks ?? defaultStripThinkingBlocks;
+  const { shot, deps } = params;
 
-  const visionFrames = collectVisionFramePaths(shot);
-  if (visionFrames.length === 0) {
-    throw new Error("No frame available. Generate frames first.");
-  }
-
-  const videoMaxDuration = getModelMaxDuration(modelConfig?.video?.modelId);
-  const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
-  const textProvider = resolveAIProvider(modelConfig);
-  const refVideoSystem = await resolveRefVideoPromptSystem(modelConfig?.video?.protocol, {
-    userId: params.userId,
-    projectId: params.projectId,
-  });
-
-  // 查询项目风格标签，传给 LLM 以锁定视觉风格
   const [projectRow] = await db
     .select({ visualStyle: projects.visualStyle })
     .from(projects)
@@ -132,86 +103,42 @@ export async function generateAndPersistVisionVideoPrompt(params: {
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
 
-  const videoContextForDialogue = shot.motionScript || shot.prompt || "";
-  const dialogueList: DialoguePromptEntry[] = shotDialogues.map((d) => {
-    const char = shotCharacters.find((c) => c.id === d.characterId);
-    const characterName = char?.name ?? "Unknown";
-    const onScreen = deps.isCharacterOnScreen(
-      characterName,
-      videoContextForDialogue,
-      shot.startFrameDesc
-    );
-    const visualHint = onScreen ? (char?.visualHint || undefined) : undefined;
-    return {
-      characterName,
-      text: d.text,
-      offscreen: !onScreen,
-      visualHint,
-    };
-  });
-
-  const { motionText, sceneDescription: sceneDescRaw } = resolveVideoMotionAndScene(shot);
-  const motionContext = deps.stripBgmContent(motionText || shot.prompt || "", shot.bgmNote);
-  const sceneDescription = sceneDescRaw
-    ? pruneSceneDescForVideoPrompt(deps.stripBgmContent(sceneDescRaw, shot.bgmNote))
-    : undefined;
-  const allShotText = [shot.prompt, shot.startFrameDesc, shot.endFrameDesc, shot.motionScript]
-    .filter(Boolean)
-    .join(" ");
-  const filteredCharsForPrompt = filterShotCharacters(allShotText, shotCharacters, {
-    contextText: shot.startFrameDesc ?? undefined,
-  });
-
-  const promptRequest = buildRefVideoPromptRequest({
-    motionScript: motionContext,
-    sceneDescription,
-    startFrameDesc: shot.startFrameDesc,
-    endFrameDesc: shot.endFrameDesc,
-    cameraDirection: shot.cameraDirection || "static",
-    duration: effectiveDuration,
-    frameCount: visionFrames.length,
-    characters: filteredCharsForPrompt,
-    dialogues: dialogueList.length > 0 ? dialogueList : undefined,
+  const videoPrompt = buildDirectVideoPrompt({
+    shot,
     visualStyleTag,
+    stripBgmContent: deps.stripBgmContent,
   });
-
-  const rawPrompt = await textProvider.generateText(promptRequest, {
-    systemPrompt: refVideoSystem,
-    images: visionFrames,
-  });
-
-  const videoPromptRaw = `Duration: ${effectiveDuration}s.\n\n${stripThinking(rawPrompt)}`;
-  const videoPrompt = deps.ensureDialoguesInPrompt(videoPromptRaw, dialogueList);
-  const fingerprint = computeVideoPromptFrameFingerprint(shot);
 
   await db
     .update(shots)
-    .set({
-      videoPrompt,
-      videoPromptFrameFingerprint: fingerprint,
-    })
+    .set({ videoPrompt, videoPromptFrameFingerprint: null })
     .where(eq(shots.id, shot.id));
 
   return videoPrompt;
 }
 
-/** B2：帧变更或尚无 videoPrompt 时自动 vision 精炼 */
+/**
+ * 确保 videoPrompt 存在（为空时自动直出生成）。
+ * 视频生成前调用，保证 prompt 不为空。
+ */
 export async function syncVideoPromptIfStale(params: {
   shot: ShotRow;
-  shotCharacters: EpisodeCharacter[];
-  shotDialogues: DialogueRow[];
-  modelConfig?: ModelConfigPayload;
   userId: string;
   projectId: string;
   deps: VideoPromptSyncDeps;
+  // 以下参数保留签名兼容性，实际不再使用
+  shotCharacters?: unknown;
+  shotDialogues?: unknown;
+  modelConfig?: unknown;
 }): Promise<{ videoPrompt: string | null; refreshed: boolean }> {
-  if (!shouldRefreshVideoPrompt(params.shot)) {
+  if (params.shot.videoPrompt?.trim()) {
     return { videoPrompt: params.shot.videoPrompt, refreshed: false };
   }
-  if (!params.modelConfig?.text) {
-    return { videoPrompt: params.shot.videoPrompt, refreshed: false };
-  }
-
-  const videoPrompt = await generateAndPersistVisionVideoPrompt(params);
+  const videoPrompt = await generateAndPersistDirectVideoPrompt({
+    shot: params.shot,
+    userId: params.userId,
+    projectId: params.projectId,
+    deps: params.deps,
+  });
   return { videoPrompt, refreshed: true };
 }
