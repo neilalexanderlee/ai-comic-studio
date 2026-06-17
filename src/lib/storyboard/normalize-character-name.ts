@@ -41,3 +41,39 @@ export function normalizeCharacterName(name: string): string {
 
   return result.replace(/\s+/g, "").toLowerCase();
 }
+
+/**
+ * Normalize keeping age qualifiers (e.g. "10岁") but stripping emotion/state.
+ * Used for the first-pass exact match in dialogue-to-character resolution,
+ * so "龙渊（10岁）" matches the 10-year-old variant and "龙渊" matches the adult.
+ *
+ * Examples:
+ *   龙渊（10岁）       → 龙渊(10岁)
+ *   龙渊（10岁·愤怒）  → 龙渊(10岁)
+ *   魔王(人形态·愤怒)  → 魔王(人形态)
+ *   林小白(紧张)       → 林小白
+ */
+export function normalizeCharacterNameWithAge(name: string): string {
+  let result = name
+    .trim()
+    .replace(/[（]/g, "(")
+    .replace(/[）]/g, ")")
+    .replace(/[：:]\s*$/, "");
+
+  result = result.replace(/[（(]([^)）]*)[)）]/g, (_match, content: string) => {
+    const trimmed = content.trim();
+    // Keep pure age qualifiers: "10岁", "8岁" etc.
+    if (/^\d+\s*岁$/.test(trimmed)) return `(${trimmed})`;
+    // Keep age with emotion suffix stripped: "10岁·愤怒" → "(10岁)"
+    const ageWithSuffix = trimmed.match(/^(\d+\s*岁)[·•]/);
+    if (ageWithSuffix) return `(${ageWithSuffix[1].trim()})`;
+    // Keep form identifiers (existing logic)
+    const formMatch = content.match(/^([^·•]*形态)[·•]/);
+    if (formMatch) return `(${formMatch[1].trim()})`;
+    if (/形态$/.test(trimmed)) return `(${trimmed})`;
+    // Strip everything else (emotion, state)
+    return "";
+  });
+
+  return result.replace(/\s+/g, "").toLowerCase();
+}

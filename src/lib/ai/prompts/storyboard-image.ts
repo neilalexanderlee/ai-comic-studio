@@ -15,32 +15,112 @@ const FRAMING_MAP: Record<string, string> = {
 };
 
 /**
- * 从 startFrameDesc 中提取光影关键词（如"月光""火光""侧逆光""逆光""顺光"等）。
- * 规范要求 startFrameDesc 写"主光（颜色+方向+来源）"，此函数把它抠出来复用到【光影】段，
- * 避免重复写、确保光影信息单一来源（startFrameDesc）。
- * 找不到时返回空字符串，调用方 fallback 到通用默认光影。
+ * 从 startFrameDesc 中提取主光叙述句，用于【光影】段。
+ *
+ * 对齐 Toonflow storyboard-techniques.md 规范：【光影】段应承载完整的打光叙述
+ * （方向+铺洒质感+对场景/角色的受光效果），而非仅一个光源短词。
+ *
+ * 提取策略（优先级）：
+ * 1. 按"；"分句——四要素标准分隔符，找包含光影关键词的完整子句（最可靠）
+ * 2. 按"。"分句兜底——部分描述用句号分隔四要素
+ * 3. 找关键词并向前后扩展——适配逗号分隔的老格式，最多扩展 60 字
+ * 4. 提取冷暖调关键词——最后兜底
  */
 function extractLightingHintFromDesc(desc: string): string {
   if (!desc) return "";
 
-  // 1. 优先提取"主光为/是...侧光/逆光/..."紧凑短语（S级标准写法）
-  //    如"橙红侧光"、"冷调侧逆光"、"月光冷蓝侧逆光"
-  const mainLightMatch = desc.match(/主光[为是：:]\s*([^\n，；。]{3,20}(?:侧逆光|侧光|逆光|顺光|背光|漫射光|轮廓光|月光|火光|烛光)[一-龥]{0,4})/);
-  if (mainLightMatch) return mainLightMatch[1].trim();
+  const LIGHT_KEYWORDS = [
+    "侧逆光", "逆光", "侧光", "顺光", "背光", "漫射光", "轮廓光",
+    "月光", "火光", "烛光", "晨光", "夕光", "余晖", "阳光", "霓虹", "烈焰", "雪光",
+  ] as const;
 
-  // 2. 提取"颜色+光类型"紧凑词组（最多3+1=4字）
-  const colorLightMatch = desc.match(/[一-龥]{1,3}(侧逆光|逆光|顺光|侧光|背光|漫射光|轮廓光)/);
-  if (colorLightMatch) return colorLightMatch[0].trim();
+  const hasLightKeyword = (text: string) => LIGHT_KEYWORDS.some((kw) => text.includes(kw));
 
-  // 3. 提取光源词（月光/火光等）
-  const sourceLightMatch = desc.match(/(月光|火光|烛光|晨光|夕光|阳光|霓虹)[^\s，。]{0,6}/);
-  if (sourceLightMatch) return sourceLightMatch[0].trim();
+  // 1. 按"；"分句（四要素标准分隔符）
+  const semicolonClauses = desc.split(/；/);
+  if (semicolonClauses.length > 1) {
+    for (const clause of semicolonClauses) {
+      if (hasLightKeyword(clause)) {
+        return clause.replace(/^[，,\s]+|[，,。！？\s]+$/g, "").trim();
+      }
+    }
+  }
 
-  // 4. 提取冷暖调
-  const toneMatch = desc.match(/(冷调|暖调|冷蓝|暖黄)[^\s，。]{0,6}/);
+  // 2. 按"。"分句兜底
+  const sentenceClauses = desc.split(/。/);
+  if (sentenceClauses.length > 1) {
+    for (const clause of sentenceClauses) {
+      if (hasLightKeyword(clause)) {
+        return clause.replace(/^[，,\s]+|[，,。！？\s]+$/g, "").trim();
+      }
+    }
+  }
+
+  // 3. 找关键词后向前后扩展（老格式，无；分隔，光影描述在逗号子句里）
+  for (const kw of LIGHT_KEYWORDS) {
+    const idx = desc.indexOf(kw);
+    if (idx === -1) continue;
+
+    // 往前找子句起点（遇到；/——/。停止，或超过 40 字）
+    let start = idx;
+    while (start > 0 && idx - start < 40 && !/[；。——\n]/.test(desc[start - 1])) {
+      start--;
+    }
+
+    // 往后找子句终点（遇到；/——/。停止，或超过 60 字）
+    let end = idx + kw.length;
+    while (end < desc.length && end - idx < 60 && !/[；。——\n]/.test(desc[end])) {
+      end++;
+    }
+
+    const clause = desc.slice(start, end).replace(/^[，,\s]+|[，,。！？\s]+$/g, "").trim();
+    if (clause.length >= 4) return clause;
+  }
+
+  // 4. 最后兜底：提取冷暖调词
+  const toneMatch = desc.match(/(冷[调蓝]|暖[调黄])[^\s，。；]{0,8}/);
   if (toneMatch) return toneMatch[0].trim();
 
   return "";
+}
+
+/**
+ * 根据提取到的光影词，返回 Toonflow 风格的氛围限定词。
+ * 对齐 storyboard.md 光影表「补充约束」列：光源词单独出现会让模型渲染硬打光光柱，
+ * 加上氛围词后模型理解为整体光效氛围而非聚光灯。
+ */
+function getLightingAtmosphere(lightHint: string): string {
+  if (lightHint.includes("侧逆光") || lightHint.includes("逆光")) {
+    return "轮廓光勾勒，光影幽深，边缘光精准";
+  }
+  if (lightHint.includes("侧光")) {
+    if (lightHint.includes("冷") || lightHint.includes("月")) {
+      return "明暗分割明显，阴影硬朗，冷调氛围";
+    }
+    return "明暗层次分明，立体感清晰";
+  }
+  if (lightHint.includes("月光")) {
+    return "冷蓝调，光影幽深，明暗强对比";
+  }
+  if (lightHint.includes("烛光") || lightHint.includes("灯光")) {
+    return "暖色局部点缀，光晕柔和，明暗对比";
+  }
+  if (lightHint.includes("烈焰") || lightHint.includes("火光")) {
+    return "暖色局部跳动，光晕柔和，明暗对比丰富";
+  }
+  if (lightHint.includes("晨光") || lightHint.includes("夕光") || lightHint.includes("余晖")) {
+    return "斜射散光，长影拉伸，光感诗意";
+  }
+  if (lightHint.includes("阳光")) {
+    return "光影斑驳，层次分明，自然光感";
+  }
+  if (lightHint.includes("漫射") || lightHint.includes("散射")) {
+    return "光影柔和均匀，无强主光，空气感";
+  }
+  if (lightHint.includes("霓虹")) {
+    return "彩色光晕，冷暖交织，明暗强对比";
+  }
+  return "光影层次分明，电影感氛围";
 }
 
 // ── 首帧识别规则（从分镜描述类型推断首帧处理方式）──
@@ -189,12 +269,21 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
   parts.push("");
 
   // ── 6. 组装【光影】段（从 startFrameDesc 提取光影关键词，否则通用默认）──
-  // 光影信息完全来自 startFrameDesc，不依赖任何外部字段
+  // 光影信息完全来自 startFrameDesc，不依赖任何外部字段。
+  // 对齐 Toonflow 光影表：光线类型后追加氛围限定词（光影幽深/轮廓光勾勒/明暗层次分明等），
+  // 避免模型把光源词理解为硬打光渲染出一道明显光柱。
   const lightingHint = extractLightingHintFromDesc(mainDesc);
-  parts.push(lightingHint
-    ? `【光影】${lightingHint}。`
-    : "【光影】自然光照，光影层次清晰，电影感光效。"
-  );
+  // 完整叙述句（>15字，含铺洒/受光效果）直接作为【光影】内容——对齐 Toonflow 格式；
+  // 短词说明 startFrameDesc 光影描述较简，追加 getLightingAtmosphere 氛围词兜底。
+  let lightLine: string;
+  if (!lightingHint) {
+    lightLine = "【光影】散射自然光，光影层次柔和，电影感氛围。";
+  } else if (lightingHint.length > 15) {
+    lightLine = `【光影】${lightingHint}。`;
+  } else {
+    lightLine = `【光影】${lightingHint}，${getLightingAtmosphere(lightingHint)}。`;
+  }
+  parts.push(lightLine);
   parts.push("");
 
   // ── 9. 组装【风格】段（从 art-styles 文件获取风格词）──

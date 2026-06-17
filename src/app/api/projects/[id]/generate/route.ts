@@ -1503,6 +1503,25 @@ function handleBatchStoryboardRewrite(
       };
 
       try {
+        // Fetch project visualStyle for art-style aware lighting vocabulary
+        const [rewriteProject] = await db
+          .select({ visualStyle: projects.visualStyle })
+          .from(projects)
+          .where(eq(projects.id, projectId));
+        const rewriteVisualStyle = rewriteProject?.visualStyle ?? "anime_2d";
+
+        // Extract style-specific lighting vocabulary from storyboard.md (sections II & IV)
+        // to anchor the LLM's lighting vocabulary to the project's art style
+        let visualStyleContext: string | undefined;
+        const storyboardMd = getArtStylePrompt(rewriteVisualStyle, "storyboard");
+        if (storyboardMd) {
+          // Extract "光影氛围词库" (section II) and "固定风格锚定词" (section IV) as style context
+          const lightingSection = storyboardMd.match(/##\s*[二2]、[\s\S]*?(?=\n##\s*[三3四4]、)/)?.[0] ?? "";
+          const styleSection = storyboardMd.match(/##\s*[四4]、[\s\S]*?(?=\n##\s*[五5]、)/)?.[0] ?? "";
+          const combined = [lightingSection, styleSection].filter(Boolean).join("\n\n").trim();
+          if (combined.length > 0) visualStyleContext = combined;
+        }
+
         // Fetch all shots
         const shotRows = await db
           .select({
@@ -1570,6 +1589,10 @@ function handleBatchStoryboardRewrite(
         const totalCount = shotRows.length;
         let updatedCount = 0;
         const writtenShotIds = new Set<string>();
+        // 本次 session 中工具写入的最新 startFrameDesc，供后续 chunk compact 模式展示可信内容。
+        // 内存中的 shotsWithDialogues[].startFrameDesc 是 session 开始时从 DB 读入的旧值，
+        // 不会随工具写入自动更新；这个 Map 是跨 chunk 传递新值的唯一来源。
+        const writtenShotFrames = new Map<string, string>();
 
         send({ type: "start", totalCount });
         console.log(`[BatchStoryboardRewrite] start project=${projectId} episode=${episodeId} shots=${totalCount}`);
@@ -1606,6 +1629,7 @@ function handleBatchStoryboardRewrite(
                 .set({ startFrameDesc, endFrameDesc, motionScript, cameraDirection, videoPrompt: null })
                 .where(eq(shots.id, shotId));
               writtenShotIds.add(shotId);
+              writtenShotFrames.set(shotId, startFrameDesc);
               updatedCount++;
               send({ type: "progress", updatedCount, totalCount });
               console.log(`[BatchStoryboardRewrite] wrote shot ${shotId} (${updatedCount}/${totalCount})`);
@@ -1634,7 +1658,7 @@ function handleBatchStoryboardRewrite(
             const result = streamText({
               model: createLanguageModel(modelConfig.text!),
               system: STORYBOARD_REWRITE_SYSTEM,
-              prompt: buildRewriteUserPrompt(chunk, shotsWithDialogues),
+              prompt: buildRewriteUserPrompt(chunk, shotsWithDialogues, visualStyleContext, writtenShotFrames),
               temperature: 0.5,
               tools: { write_shot_rewrite: writeShotRewrite },
               stopWhen: stepCountIs(chunk.length + 5),
@@ -1653,9 +1677,41 @@ function handleBatchStoryboardRewrite(
             console.log(`[BatchStoryboardRewrite] ${chunkLabel} done (${updatedCount}/${totalCount})`);
           } catch (streamErr) {
             const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-            console.warn(`[BatchStoryboardRewrite] ${chunkLabel} interrupted (${updatedCount}/${totalCount}):`, errMsg);
-            // 发送 stream_error 但继续处理后续块
+            console.warn(`[BatchStoryboardRewrite] ${chunkLabel} failed (${updatedCount}/${totalCount}): ${errMsg}`);
             send({ type: "stream_error", error: `${chunkLabel}: ${errMsg}`, updatedCount, totalCount });
+
+            // 降级：逐个 shot 单独重试，跳过真正触发内容审核的单个 shot，其余正常写入
+            const unwritten = chunk.filter((s) => !writtenShotIds.has(s.id));
+            if (unwritten.length > 0) {
+              console.log(`[BatchStoryboardRewrite] ${chunkLabel} fallback: retrying ${unwritten.length} shots one by one`);
+              for (const singleShot of unwritten) {
+                const singleLabel = `shot ${singleShot.sequence}`;
+                try {
+                  const singleResult = streamText({
+                    model: createLanguageModel(modelConfig.text!),
+                    system: STORYBOARD_REWRITE_SYSTEM,
+                    prompt: buildRewriteUserPrompt([singleShot], shotsWithDialogues, visualStyleContext, writtenShotFrames),
+                    temperature: 0.5,
+                    tools: { write_shot_rewrite: writeShotRewrite },
+                    stopWhen: stepCountIs(6),
+                  });
+                  let lastHeartbeat = Date.now();
+                  for await (const ch of singleResult.fullStream) {
+                    const now = Date.now();
+                    if (now - lastHeartbeat > 2000) {
+                      send({ type: "thinking", updatedCount, totalCount });
+                      lastHeartbeat = now;
+                    }
+                    void ch;
+                  }
+                  console.log(`[BatchStoryboardRewrite] ${chunkLabel} fallback ${singleLabel} done (${updatedCount}/${totalCount})`);
+                } catch (singleErr) {
+                  const singleErrMsg = singleErr instanceof Error ? singleErr.message : String(singleErr);
+                  console.warn(`[BatchStoryboardRewrite] ${chunkLabel} fallback ${singleLabel} skipped: ${singleErrMsg}`);
+                  send({ type: "stream_error", error: `${singleLabel} skipped: ${singleErrMsg}`, updatedCount, totalCount });
+                }
+              }
+            }
           }
         }
 

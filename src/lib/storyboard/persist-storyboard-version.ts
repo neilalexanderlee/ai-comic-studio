@@ -6,7 +6,7 @@ import {
   shots,
   storyboardVersions,
 } from "@/lib/db/schema";
-import { normalizeCharacterName } from "./normalize-character-name";
+import { normalizeCharacterName, normalizeCharacterNameWithAge } from "./normalize-character-name";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import fs from "fs";
@@ -131,6 +131,24 @@ export async function persistStoryboardVersion(params: {
     });
   }
 
+  // Two-step character lookup maps:
+  //
+  // Pass 1 — exact match WITH age qualifier preserved:
+  //   "龙渊（10岁）" → key "龙渊(10岁)"  matches 10-year-old variant
+  //   "龙渊"         → key "龙渊"         matches adult variant
+  // This prevents cross-episode contamination when both "龙渊" and "龙渊（10岁）"
+  // exist in the project and the LLM output includes the age qualifier for Ep1
+  // but omits it for Ep2.
+  //
+  // Pass 2 — base-name fallback (strips age/emotion, current behavior):
+  //   Used only when Pass 1 finds no match (e.g. LLM writes "龙渊" but the project
+  //   only has "龙渊（10岁）" — pick the only available variant).
+  const charByExactName = new Map(
+    shotCharacters.map((character) => [
+      normalizeCharacterNameWithAge(character.name),
+      character,
+    ])
+  );
   const charByName = new Map(
     shotCharacters.map((character) => [
       normalizeCharacterName(character.name),
@@ -163,9 +181,11 @@ export async function persistStoryboardVersion(params: {
 
     for (let i = 0; i < shot.dialogues.length; i += 1) {
       const dialogue = shot.dialogues[i];
-      const matchedChar = charByName.get(
-        normalizeCharacterName(dialogue.character)
-      );
+      // Pass 1: exact match keeping age qualifier (e.g. "龙渊（10岁）" → 10-year-old)
+      // Pass 2: base-name fallback (e.g. "龙渊" when only "龙渊（10岁）" exists)
+      const matchedChar =
+        charByExactName.get(normalizeCharacterNameWithAge(dialogue.character)) ??
+        charByName.get(normalizeCharacterName(dialogue.character));
       if (!matchedChar) continue;
 
       matchedCharacterIds.add(matchedChar.id);
@@ -181,34 +201,26 @@ export async function persistStoryboardVersion(params: {
     }
   }
 
-  // Auto-update episodeCharacters based on who actually spoke in this episode.
-  // This replaces the unreliable text-match associations from the import step:
-  // - Guest characters with dialogue → linked to this episode
-  // - Main characters always appear in all episodes (no need to track per-episode)
-  // We only update when episodeId is set and at least one dialogue was matched,
-  // so a storyboard with no dialogue (e.g. pure action) doesn't wipe existing links.
-  // Auto-update episodeCharacters for ALL characters with matched dialogue.
-  // scope (main/guest) is now a pure UI label, so we track every character that
-  // actually speaks in this episode regardless of their label.
-  if (episodeId && matchedCharacterIds.size > 0) {
-    const matchedIds = [...matchedCharacterIds];
-
-    // Delete existing links for these characters in this episode, then re-insert
+  // Rebuild episodeCharacters for this episode based on who actually spoke.
+  // Full replace: first wipe ALL existing links for this episode, then insert
+  // only the characters matched in this parse. This prevents stale links from
+  // a previous (possibly incorrect) parse from persisting across re-parses.
+  // Note: this intentionally overwrites manually-added episode links — storyboard
+  // parsing is a full reset of the episode's character roster.
+  if (episodeId) {
     await db
       .delete(episodeCharacters)
-      .where(
-        and(
-          eq(episodeCharacters.episodeId, episodeId),
-          inArray(episodeCharacters.characterId, matchedIds)
-        )
+      .where(eq(episodeCharacters.episodeId, episodeId));
+
+    if (matchedCharacterIds.size > 0) {
+      await db.insert(episodeCharacters).values(
+        [...matchedCharacterIds].map((charId) => ({
+          id: ulid(),
+          episodeId,
+          characterId: charId,
+        }))
       );
-    await db.insert(episodeCharacters).values(
-      matchedIds.map((charId) => ({
-        id: ulid(),
-        episodeId,
-        characterId: charId,
-      }))
-    );
+    }
   }
 
   return { versionId, shotCount: params.shots.length };

@@ -872,6 +872,12 @@ export default function EpisodeStoryboardPage() {
             </Button>
           </div>
 
+          {/* Row 1.5: Image model (for frame generation) */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]" />
+            <InlineModelPicker capability="image" />
+          </div>
+
           {/* Row 2: Video prompts */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">2</span>

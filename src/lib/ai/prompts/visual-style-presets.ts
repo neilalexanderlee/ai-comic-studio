@@ -9,7 +9,7 @@ export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string; 
   anime_2d: {
     label: "日本2D动漫",
     description: "现代日本2D动漫 · 赛璐璐上色 · 电影级质感",
-    tag: "日本现代2D动漫风格，8K高清，赛璐璐渲染，清晰线稿，电影级光影质感",
+    tag: "日本现代2D动漫风格，赛璐璐上色，清晰线条，电影级构图，戏剧化低调光影",
   },
   anime_2d_retro: {
     label: "复古日系动漫",
@@ -19,22 +19,22 @@ export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string; 
   realistic: {
     label: "写实真人",
     description: "现代都市写实 · 影视级纪实 · 强对比度",
-    tag: "真人写实都市风格，影视级摄影质感，强对比度，自然光照，极致细节",
+    tag: "真人写实摄影，都市写实纪实，影视级摄影质感，强对比度，极致细节",
   },
   cg_3d: {
     label: "写实3D CG",
     description: "3D动画渲染 · 赛璐珞质感 · 电影级光影",
-    tag: "3D动画渲染风格，赛璐珞质感，电影级光影层次，清晰轮廓线，高细节材质",
+    tag: "3D动画渲染风格，赛璐珞质感，电影级打光，柔和光影层次，清晰轮廓线，高细节材质",
   },
   chinese_ink: {
     label: "国风二次元",
     description: "新国潮 · 赛璐璐平涂 · 东方古韵 · 电影构图",
-    tag: "国风二次元新国潮，赛璐璐平涂，日式渲染，东方古韵，新国潮美学，电影质感",
+    tag: "国风二次元新国潮，赛璐璐平涂，日式渲染，细腻笔触，东方古韵，新国潮美学，电影质感",
   },
   western_cartoon: {
     label: "欧美卡通",
     description: "2D扁平风 · 几何造型 · 纯色色块 · 简约现代",
-    tag: "2D扁平设计风格，几何造型，纯色填充，简洁线条，无阴影无渐变，色块对比鲜明",
+    tag: "2D扁平风格，Flat Design，几何造型，纯色填充，简洁线条，无阴影无渐变，色块对比鲜明",
   },
   auto: {
     label: "AI自动检测",
