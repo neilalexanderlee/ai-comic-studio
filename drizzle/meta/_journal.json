@@ -330,6 +330,13 @@
       "when": 1779000022000,
       "tag": "0046_drop_scenes",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1779000023000,
+      "tag": "0047_drop_enhance_prompts_link_shots",
+      "breakpoints": true
     }
   ]
 }

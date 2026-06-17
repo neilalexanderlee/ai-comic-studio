@@ -144,8 +144,6 @@ export async function GET(
     // Project-level settings needed by the client store
     visualStyle: project.visualStyle,
     useProjectPrompts: project.useProjectPrompts,
-    enhancePrompts: project.enhancePrompts,
-    linkShotsViaCutPoint: project.linkShotsViaCutPoint,
     characters: epCharacters,
     shots: enrichedShots,
     versions: allVersions.map((v) => ({

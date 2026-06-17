@@ -67,8 +67,6 @@ interface Project {
   status: string;
   finalVideoUrl: string | null;
   useProjectPrompts?: number;
-  enhancePrompts?: number;
-  linkShotsViaCutPoint?: number;
   visualStyle: string;
   characters: Character[];
   shots: Shot[];

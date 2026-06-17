@@ -26,6 +26,7 @@ import {
   X,
   Clock,
   ShieldCheck,
+  Info,
 } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { VideoRatioPicker } from "@/components/editor/video-ratio-picker";
@@ -96,8 +97,6 @@ export default function EpisodeStoryboardPage() {
   const [newVersionDialogOpen, setNewVersionDialogOpen] = useState(false);
   const [deleteVersionId, setDeleteVersionId] = useState<string | null>(null);
   const [deletingVersion, setDeletingVersion] = useState(false);
-  const [enhancePrompts, setEnhancePrompts] = useState(true); // AI prompt 增强，默认开
-  const [linkShotsViaCutPoint, setLinkShotsViaCutPoint] = useState(false);
   const [trackVideoMap, setTrackVideoMap] = useState<Record<string, { videoUrl: string; totalDuration: number; shotCount: number }>>({});
   const [trackVideoPreviewUrl, setTrackVideoPreviewUrl] = useState<string | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -170,14 +169,7 @@ export default function EpisodeStoryboardPage() {
     if (!project?.id) return;
     const stored = localStorage.getItem(`storyboardView:${project.id}`);
     if (stored === "list" || stored === "kanban") setViewMode(stored);
-    // Sync enhancePrompts from DB (project.enhancePrompts: 1 = on, 0 = off; default on)
-    if (project.enhancePrompts !== undefined) {
-      setEnhancePrompts(project.enhancePrompts !== 0);
-    }
-    if (project.linkShotsViaCutPoint !== undefined) {
-      setLinkShotsViaCutPoint(project.linkShotsViaCutPoint !== 0);
-    }
-  }, [project?.id, project?.enhancePrompts, project?.linkShotsViaCutPoint]);
+  }, [project?.id]);
 
   useEffect(() => {
     if (!project?.versions) return;
@@ -280,7 +272,6 @@ export default function EpisodeStoryboardPage() {
           },
           modelConfig: getModelConfig(),
           episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
         }),
       });
 
@@ -390,7 +381,6 @@ export default function EpisodeStoryboardPage() {
           payload: { versionId: selectedVersionId },
           modelConfig: getModelConfig(),
           episodeId: urlEpisodeId || useProjectStore.getState().currentEpisodeId,
-          enhancePrompts,
         }),
       });
       const data = await response.json() as { results: Array<{ status: string }> };
@@ -778,52 +768,8 @@ export default function EpisodeStoryboardPage() {
           <div className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/60 px-3 py-2 flex-wrap">
             <span className="text-[11px] font-semibold text-[--text-muted] uppercase tracking-wide shrink-0">生成设置</span>
             <div className="h-3.5 w-px bg-[--border-subtle] shrink-0" />
-            {/* AI Prompt 增强开关 — 影响所有生成步骤 */}
-            <label
-              className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none"
-              title="开启后，每次生成前用文本模型对图像/视频 prompt 进行模型专属优化，提升生成质量"
-            >
-              <input
-                type="checkbox"
-                checked={enhancePrompts}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setEnhancePrompts(next);
-                  apiFetch(`/api/projects/${project.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ enhancePrompts: next ? 1 : 0 }),
-                  }).catch(() => {});
-                }}
-                className="accent-primary h-3.5 w-3.5"
-                disabled={anyGenerating}
-              />
-              <span className={enhancePrompts ? "text-[--text-primary] font-medium" : ""}>AI 增强</span>
-            </label>
-            <label
-              className="flex items-center gap-1.5 text-xs text-[--text-secondary] cursor-pointer select-none"
-              title="视频生成成功后，将本镜视频尾帧（cut_point）直拷为同集下一镜首帧；群演→主角切换时自动跳过"
-            >
-              <input
-                type="checkbox"
-                checked={linkShotsViaCutPoint}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  setLinkShotsViaCutPoint(next);
-                  apiFetch(`/api/projects/${project.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ linkShotsViaCutPoint: next ? 1 : 0 }),
-                  }).catch(() => {});
-                }}
-                className="accent-primary h-3.5 w-3.5"
-                disabled={anyGenerating}
-              />
-              <span className={linkShotsViaCutPoint ? "text-[--text-primary] font-medium" : ""}>
-                镜头衔接（视频尾帧）
-              </span>
-            </label>
-            <div className="h-3.5 w-px bg-[--border-subtle] shrink-0" />
+            <InlineModelPicker capability="text" />
+            <InlineModelPicker capability="image" />
             <InlineModelPicker capability="video" />
             <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
             <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
@@ -847,7 +793,6 @@ export default function EpisodeStoryboardPage() {
           {/* Row 1: Generate text / shots */}
           <div className="flex items-center gap-2 flex-wrap">
             <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">1</span>
-            <InlineModelPicker capability="text" />
             <Button
               onClick={handleGenerateShots}
               disabled={anyGenerating}
@@ -870,12 +815,6 @@ export default function EpisodeStoryboardPage() {
               <Play className="h-3.5 w-3.5" />
               {t("project.previewExtract")}
             </Button>
-          </div>
-
-          {/* Row 1.5: Image model (for frame generation) */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]" />
-            <InlineModelPicker capability="image" />
           </div>
 
           {/* Row 2: Video prompts */}
@@ -1023,7 +962,6 @@ export default function EpisodeStoryboardPage() {
                 anchorLastAi: s.anchorLastAi,
                 cutPoint: s.cutPoint,
               }))}
-              enhancePrompts={enhancePrompts}
               versionId={selectedVersionId}
               track={(shot as { track?: string | null }).track ?? null}
               namedCharacterCount={shotNamedCharacters.length}
@@ -1057,7 +995,6 @@ export default function EpisodeStoryboardPage() {
             videoRatio={videoRatio}
             selectedVersionId={selectedVersionId}
             anyGenerating={anyGenerating}
-            enhancePrompts={enhancePrompts}
             videoGenerationResolution={videoGenerationResolution}
             showAdoptPrevEpisode={drawerIndex === 0 && canAdoptPrevEpisode}
             prevCutPoint={drawerIndex > 0 ? project.shots[drawerIndex - 1]?.cutPoint : null}

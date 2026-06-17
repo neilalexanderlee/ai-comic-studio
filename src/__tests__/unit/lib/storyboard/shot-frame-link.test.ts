@@ -1,10 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { shots } from "@/lib/db/schema";
+import { describe, it, expect, vi } from "vitest";
+import type { shots, episodes } from "@/lib/db/schema";
 
 type ShotRow = typeof shots.$inferSelect;
 
 const mockLimit = vi.fn();
-const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -15,11 +14,6 @@ vi.mock("@/lib/db", () => ({
             limit: mockLimit,
           })),
         })),
-      })),
-    })),
-    update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: mockUpdateWhere,
       })),
     })),
   },
@@ -41,10 +35,7 @@ vi.mock("@/lib/storyboard/frame-reference.server", async (importOriginal) => {
   };
 });
 
-import {
-  isCrowdToCharacterCut,
-  linkNextShotAnchorFromCutPoint,
-} from "@/lib/storyboard/shot-frame-link";
+import { resolvePreviousEpisodeTailFrame } from "@/lib/storyboard/shot-frame-link";
 
 function makeShot(partial: Partial<ShotRow> & { sequence: number }): ShotRow {
   return {
@@ -67,95 +58,41 @@ function makeShot(partial: Partial<ShotRow> & { sequence: number }): ShotRow {
   } as ShotRow;
 }
 
-const characters = [
-  { id: "c1", name: "角色甲", description: "主角" },
-  { id: "c2", name: "角色乙", description: "女主" },
-];
-
-describe("isCrowdToCharacterCut", () => {
-  it("上一镜群演、下一镜有命名角色 → true", () => {
-    const prev = makeShot({ sequence: 1, prompt: "大殿全景，人群涌动" });
-    const next = makeShot({ sequence: 2, prompt: "角色甲站在殿中央" });
-    expect(isCrowdToCharacterCut(prev, next, characters)).toBe(true);
+describe("resolvePreviousEpisodeTailFrame", () => {
+  it("第一集（sequence=1）返回空对象", async () => {
+    mockLimit.mockResolvedValueOnce([{ sequence: 1 }]); // currentEp
+    const result = await resolvePreviousEpisodeTailFrame({
+      projectId: "proj-1",
+      episodeId: "ep-1",
+    });
+    expect(result).toEqual({});
   });
 
-  it("两镜都有角色 → false", () => {
-    const prev = makeShot({ sequence: 1, prompt: "角色甲在门口" });
-    const next = makeShot({ sequence: 2, prompt: "角色乙转身" });
-    expect(isCrowdToCharacterCut(prev, next, characters)).toBe(false);
+  it("找不到上一集 → 返回空对象", async () => {
+    mockLimit
+      .mockResolvedValueOnce([{ sequence: 2 }])  // currentEp
+      .mockResolvedValueOnce([]);                 // prevEp not found
+    const result = await resolvePreviousEpisodeTailFrame({
+      projectId: "proj-1",
+      episodeId: "ep-2",
+    });
+    expect(result).toEqual({});
   });
 
-  it("无上一镜 → false", () => {
-    const next = makeShot({ sequence: 1, prompt: "角色甲" });
-    expect(isCrowdToCharacterCut(null, next, characters)).toBe(false);
-  });
-});
-
-describe("linkNextShotAnchorFromCutPoint", () => {
-  beforeEach(() => {
-    mockLimit.mockReset();
-    mockUpdateWhere.mockClear();
+  it("上一集最后一镜有 cut_point → 返回路径和 sourceType=cut_point", async () => {
+    const lastShot = makeShot({ sequence: 5, cutPoint: "/uploads/cut-5.png" });
+    mockLimit
+      .mockResolvedValueOnce([{ sequence: 2 }])         // currentEp
+      .mockResolvedValueOnce([{ id: "ep-1" }])          // prevEp
+      .mockResolvedValueOnce([lastShot]);                // lastShot
+    resolveChainFramePath.mockReturnValueOnce("/uploads/cut-5.png");
     shotFrameFileOnDisk.mockReturnValue(true);
-    resolveChainFramePath.mockImplementation(
-      (shot: { cutPoint?: string | null }) => shot.cutPoint ?? undefined
-    );
-  });
 
-  it("有效 cut_point 且存在下一镜 → 直拷并 linked", async () => {
-    const source = makeShot({ sequence: 1, cutPoint: "/uploads/cut-1.png", prompt: "角色甲站在殿中" });
-    const next = makeShot({ sequence: 2, id: "shot-2", prompt: "角色乙侧身" });
-    mockLimit.mockResolvedValueOnce([next]);
-
-    const result = await linkNextShotAnchorFromCutPoint({
-      sourceShot: source,
-      characters,
+    const result = await resolvePreviousEpisodeTailFrame({
+      projectId: "proj-1",
+      episodeId: "ep-2",
     });
-
-    expect(result).toEqual({
-      linked: true,
-      nextShotId: "shot-2",
-      nextSequence: 2,
-    });
-    expect(mockUpdateWhere).toHaveBeenCalled();
-  });
-
-  it("无 cut_point 文件 → no_valid_cut_point", async () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
-    const source = makeShot({ sequence: 1, cutPoint: "/missing.png" });
-
-    const result = await linkNextShotAnchorFromCutPoint({
-      sourceShot: source,
-      characters,
-    });
-
-    expect(result).toEqual({ linked: false, reason: "no_valid_cut_point" });
-    expect(mockUpdateWhere).not.toHaveBeenCalled();
-  });
-
-  it("同集最后一镜 → no_next_shot", async () => {
-    const source = makeShot({ sequence: 5, cutPoint: "/uploads/cut-5.png" });
-    mockLimit.mockResolvedValueOnce([]);
-
-    const result = await linkNextShotAnchorFromCutPoint({
-      sourceShot: source,
-      characters,
-    });
-
-    expect(result).toEqual({ linked: false, reason: "no_next_shot" });
-  });
-
-  it("群演→主角 → crowd_to_character_cut", async () => {
-    const source = makeShot({ sequence: 1, cutPoint: "/uploads/cut-1.png", prompt: "人群散去" });
-    const next = makeShot({ sequence: 2, id: "shot-2", prompt: "角色甲抬头" });
-    mockLimit.mockResolvedValueOnce([next]);
-
-    const result = await linkNextShotAnchorFromCutPoint({
-      sourceShot: source,
-      characters,
-    });
-
-    expect(result).toEqual({ linked: false, reason: "crowd_to_character_cut" });
-    expect(mockUpdateWhere).not.toHaveBeenCalled();
+    expect(result.sourceShotId).toBe(lastShot.id);
+    expect(result.sourceType).toBe("cut_point");
   });
 });
-

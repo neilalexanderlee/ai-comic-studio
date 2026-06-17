@@ -31,7 +31,6 @@ import {
 import { AiOptimizeButton } from "./ai-optimize-button";
 import { FrameReferencePicker } from "./frame-reference-picker";
 import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
-import { describeShotAutoLinkToast, type ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { Scissors } from "lucide-react";
@@ -89,8 +88,6 @@ interface ShotCardProps {
   prevCutPoint?: string | null;
   /** 上一镜 AI 尾帧 anchor_last_ai（参考用） */
   prevAnchorLastAi?: string | null;
-  /** 是否开启 AI Prompt 增强（透传给生成 API） */
-  enhancePrompts?: boolean;
   /** 同版本其他分镜（用于首帧参考图选择器） */
   frameRefShots?: Array<{
     id: string;
@@ -203,7 +200,6 @@ export function ShotCard({
   videoGenerationResolution,
   prevCutPoint,
   prevAnchorLastAi,
-  enhancePrompts = false,
   frameRefShots = [],
   chainSourceShotId,
   chainSourceType,
@@ -226,7 +222,6 @@ export function ShotCard({
     episodeId,
     videoRatio,
     versionId,
-    enhancePrompts,
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
@@ -361,20 +356,11 @@ export function ShotCard({
             ...(videoGenerationResolution && { resolution: videoGenerationResolution }),
           },
           modelConfig: getModelConfig(),
-          enhancePrompts,
         }),
       });
-      const data = (await res.json()) as {
-        error?: string;
-        shotLink?: ShotAutoLinkResult;
-      };
+      const data = (await res.json()) as { error?: string };
       if (!res.ok) {
         throw new Error(data.error || t("common.generationFailed"));
-      }
-      const linkToast = describeShotAutoLinkToast(data.shotLink, sequence);
-      if (linkToast) {
-        if (linkToast.variant === "success") toast.success(linkToast.message);
-        else toast.info(linkToast.message);
       }
       onUpdate();
     } catch (err) {

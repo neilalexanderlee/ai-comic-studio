@@ -3,7 +3,7 @@
  *
  * 两层实现：
  * 1. 确定性规则校验（纯逻辑，无 LLM，始终执行）
- * 2. LLM 语义判断（当 enhancePrompts=true 时启用）
+ * 2. LLM 语义判断（分镜生成时启用）
  *
  * 评分标准：
  * - A级：严重问题 0，中等问题 ≤ 2 → 直接通过
@@ -231,7 +231,7 @@ function buildSummary(
   return parts.join("，");
 }
 
-// ── LLM 监督层（enhancePrompts=true 时启用）─────────────────
+// ── LLM 监督层 ────────────────────────────────────────────────
 
 export const SUPERVISION_LLM_SYSTEM = `你是专业分镜质量审核 Agent，负责对 AI 生成的分镜进行语义层面的深度审核。
 

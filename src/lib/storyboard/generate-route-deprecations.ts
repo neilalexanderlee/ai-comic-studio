@@ -13,7 +13,7 @@ export function resolveDeprecatedGenerateAction(action: string): DeprecatedRespo
   }
   if (action === "batch_video_generate") {
     return {
-      error: "批量生成视频已移除，请逐镜生成视频；连续镜头可开启「镜头衔接（视频尾帧）」",
+      error: "批量生成视频已移除，请逐镜生成视频",
       status: 410,
     };
   }

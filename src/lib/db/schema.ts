@@ -13,9 +13,6 @@ export const projects = sqliteTable("projects", {
     .default("draft"),
   finalVideoUrl: text("final_video_url"),
   useProjectPrompts: integer("use_project_prompts").notNull().default(0),
-  enhancePrompts: integer("enhance_prompts").notNull().default(1),
-  /** 视频完成后将 cut_point 直拷为同集下一镜 anchor_first（0=关） */
-  linkShotsViaCutPoint: integer("link_shots_via_cut_point").notNull().default(0),
   visualStyle: text("visual_style").notNull().default("anime_2d"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

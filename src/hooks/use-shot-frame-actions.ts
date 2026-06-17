@@ -25,7 +25,6 @@ export type UseShotFrameActionsOptions = {
   episodeId?: string;
   videoRatio: string;
   versionId: string | null;
-  enhancePrompts?: boolean;
   frameRefShots?: FrameRefPickerShot[];
   prevCutPoint?: string | null;
   prevAnchorLastAi?: string | null;
@@ -40,7 +39,6 @@ export function useShotFrameActions({
   episodeId,
   videoRatio,
   versionId,
-  enhancePrompts = false,
   frameRefShots = [],
   prevCutPoint = null,
   prevAnchorLastAi = null,
@@ -91,7 +89,6 @@ export function useShotFrameActions({
         action: "single_frame_generate",
         payload,
         modelConfig: getModelConfig(),
-        enhancePrompts,
       }),
     });
     onUpdate();

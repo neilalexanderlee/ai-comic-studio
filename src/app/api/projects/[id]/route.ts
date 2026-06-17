@@ -149,12 +149,10 @@ export async function PATCH(
     script: string;
     status: "draft" | "processing" | "completed";
     useProjectPrompts: number;
-    enhancePrompts: number;
-    linkShotsViaCutPoint: number;
     visualStyle: string;
   }>;
 
-  const { title, idea, script, status, useProjectPrompts, enhancePrompts, linkShotsViaCutPoint, visualStyle } = body;
+  const { title, idea, script, status, useProjectPrompts, visualStyle } = body;
 
   const [updated] = await db
     .update(projects)
@@ -164,8 +162,6 @@ export async function PATCH(
       ...(script !== undefined && { script }),
       ...(status !== undefined && { status }),
       ...(useProjectPrompts !== undefined && { useProjectPrompts }),
-      ...(enhancePrompts !== undefined && { enhancePrompts }),
-      ...(linkShotsViaCutPoint !== undefined && { linkShotsViaCutPoint }),
       ...(visualStyle !== undefined && { visualStyle }),
       updatedAt: new Date(),
     })

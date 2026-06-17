@@ -23,7 +23,6 @@ import {
   History,
 } from "lucide-react";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
-import { describeShotAutoLinkToast, type ShotAutoLinkResult } from "@/lib/storyboard/shot-auto-link-messages";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
 import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
@@ -77,7 +76,6 @@ interface ShotDrawerProps {
   videoRatio: string;
   selectedVersionId: string | null;
   anyGenerating: boolean;
-  enhancePrompts?: boolean;
   videoGenerationResolution?: "480p" | "720p";
   showAdoptPrevEpisode?: boolean;
   prevCutPoint?: string | null;
@@ -99,7 +97,6 @@ export function ShotDrawer({
   videoRatio,
   selectedVersionId,
   anyGenerating,
-  enhancePrompts = false,
   videoGenerationResolution,
   episodeId,
   showAdoptPrevEpisode = false,
@@ -166,7 +163,6 @@ export function ShotDrawer({
     episodeId,
     videoRatio,
     versionId: selectedVersionId,
-    enhancePrompts,
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
@@ -264,16 +260,10 @@ export function ShotDrawer({
             ...(videoGenerationResolution && { resolution: videoGenerationResolution }),
           },
           modelConfig: getModelConfig(),
-          enhancePrompts,
         }),
       });
-      const data = (await res.json()) as { error?: string; shotLink?: ShotAutoLinkResult };
+      const data = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(data.error || t("common.generationFailed"));
-      const linkToast = describeShotAutoLinkToast(data.shotLink, shot?.sequence);
-      if (linkToast) {
-        if (linkToast.variant === "success") toast.success(linkToast.message);
-        else toast.info(linkToast.message);
-      }
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
