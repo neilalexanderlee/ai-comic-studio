@@ -14,6 +14,7 @@ import Link from "next/link";
 interface Character {
   id: string;
   name: string;
+  voiceHint?: string | null;
   assets: {
     id: string;
     imagePath: string | null;
@@ -171,6 +172,17 @@ export function CharactersInlinePanel({
                 </div>
                 {/* Name */}
                 <span className="max-w-[80px] truncate text-[11px] text-[--text-muted]">{char.name}</span>
+                {/* Voice hint badge */}
+                {char.voiceHint ? (
+                  <span
+                    className="max-w-[80px] truncate rounded bg-violet-100 px-1 py-0.5 text-[9px] text-violet-600"
+                    title={char.voiceHint}
+                  >
+                    🎙 {char.voiceHint.split("，")[0]}
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-[--text-muted] opacity-50">无音色</span>
+                )}
                 {/* Generate button (only when no image) */}
                 {!getDisplayImage(char) && (
                   <button

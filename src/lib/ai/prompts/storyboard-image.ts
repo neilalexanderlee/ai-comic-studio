@@ -22,16 +22,24 @@ const FRAMING_MAP: Record<string, string> = {
  */
 function extractLightingHintFromDesc(desc: string): string {
   if (!desc) return "";
-  // 匹配常见光影关键词片段（保持简短，不整句提取）
-  const patterns = [
-    /[^\s，。]{1,4}(侧逆光|逆光|顺光|侧光|背光|漫射光|环境光|轮廓光)[^\s，。]{0,6}/,
-    /(月光|火光|烛光|灯光|晨光|夕光|阳光|霓虹|闪光)[^\s，。]{0,10}/,
-    /(冷调|暖调|高调|低调)[^\s，。]{0,10}(光|打光|照射)?/,
-  ];
-  for (const p of patterns) {
-    const m = desc.match(p);
-    if (m) return m[0].trim();
-  }
+
+  // 1. 优先提取"主光为/是...侧光/逆光/..."紧凑短语（S级标准写法）
+  //    如"橙红侧光"、"冷调侧逆光"、"月光冷蓝侧逆光"
+  const mainLightMatch = desc.match(/主光[为是：:]\s*([^\n，；。]{3,20}(?:侧逆光|侧光|逆光|顺光|背光|漫射光|轮廓光|月光|火光|烛光)[一-龥]{0,4})/);
+  if (mainLightMatch) return mainLightMatch[1].trim();
+
+  // 2. 提取"颜色+光类型"紧凑词组（最多3+1=4字）
+  const colorLightMatch = desc.match(/[一-龥]{1,3}(侧逆光|逆光|顺光|侧光|背光|漫射光|轮廓光)/);
+  if (colorLightMatch) return colorLightMatch[0].trim();
+
+  // 3. 提取光源词（月光/火光等）
+  const sourceLightMatch = desc.match(/(月光|火光|烛光|晨光|夕光|阳光|霓虹)[^\s，。]{0,6}/);
+  if (sourceLightMatch) return sourceLightMatch[0].trim();
+
+  // 4. 提取冷暖调
+  const toneMatch = desc.match(/(冷调|暖调|冷蓝|暖黄)[^\s，。]{0,6}/);
+  if (toneMatch) return toneMatch[0].trim();
+
   return "";
 }
 
@@ -172,9 +180,11 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
     ? sceneAssets.map((a) => `@图${assets.indexOf(a) + 1}`).join("、") + "，"
     : "";
 
+  // 去除末尾标点再统一加句号，避免 "。。" 重复
+  const paintBodyClean = paintBody.replace(/[。！？\.]+$/, "");
   const paintLine = orientationNote
-    ? `【画面】${sceneAnchor}${paintBody}，朝向：${orientationNote}。`
-    : `【画面】${sceneAnchor}${paintBody}。`;
+    ? `【画面】${sceneAnchor}${paintBodyClean}，朝向：${orientationNote}。`
+    : `【画面】${sceneAnchor}${paintBodyClean}。`;
   parts.push(paintLine);
   parts.push("");
 
@@ -215,48 +225,24 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
  * 找不到时 fallback 到 visualStyleTag。
  */
 function buildStyleSection(visualStyle: string, fallbackTag: string): string {
+  // visualStyleTag 是最直接、最准确的风格描述，优先使用
+  if (fallbackTag) return fallbackTag;
+
   if (!visualStyle || visualStyle === "auto") {
-    return fallbackTag || "高清画质，线条清晰，上色均匀，色彩柔和，画面无杂色无噪点";
+    return "高清画质，线条清晰，上色均匀，色彩柔和，画面无杂色无噪点";
   }
 
-  // 从 storyboard.md 提取画质锁定词（模式A中文版）
+  // fallback: 从 storyboard.md 提取模式A画质锁定词
   const storyboardContent = getArtStylePrompt(visualStyle, "storyboard");
   if (storyboardContent) {
-    // 提取固定风格锚定词
-    const anchorMatch = storyboardContent.match(
-      /固定风格锚定词[^（]*?[\r\n]+([\s\S]*?)(?=\n##|\n---|\n\*\*线条|\n\*\*上色|\n\*\*光影|\n\*\*氛围|\z)/
-    );
-
-    // 提取「模式A（中文）——默认:」后的画质锁定词
+    // 提取"默认（...）：\n超清4K..." 或 "默认：\n高清..." 模式A锁定词
     const qualityMatch = storyboardContent.match(
-      /模式A（中文）——默认：[\r\n]+(高清[^\r\n]+)/
+      /默认[^：\n]*：\s*[\r\n]+((?:超清|高清)[^\r\n]+)/
     );
-
-    const anchorWords = anchorMatch
-      ? anchorMatch[1]
-          .split("\n")
-          .filter((l) => l.trim() && !l.startsWith("#") && !l.startsWith("|"))
-          .map((l) => l.replace(/^\*\*[^*]+\*\*[（(][^)）]+[)）]：/, "").trim())
-          .filter(Boolean)
-          .slice(0, 3)
-          .join("，")
-      : "";
-
-    const qualityWords = qualityMatch ? qualityMatch[1].trim() : "";
-
-    if (anchorWords || qualityWords) {
-      return [anchorWords, qualityWords].filter(Boolean).join("，");
-    }
+    if (qualityMatch) return qualityMatch[1].trim();
   }
 
-  // fallback: prefix.md 里的必守规则
-  const prefixContent = getArtStylePrompt(visualStyle, "prefix");
-  if (prefixContent) {
-    const ruleMatch = prefixContent.match(/R1[^|]*\|([^|]+)\|/);
-    if (ruleMatch) return ruleMatch[1].trim();
-  }
-
-  return fallbackTag || "高清画质，线条清晰，色彩柔和，画面无杂色无噪点";
+  return "高清画质，线条清晰，色彩柔和，画面无杂色无噪点";
 }
 
 

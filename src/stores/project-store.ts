@@ -13,6 +13,7 @@ interface Character {
     isDefault: number;
   }[];
   visualHint?: string | null;
+  voiceHint?: string | null;
   scope?: string;
   episodeId?: string | null;
 }

@@ -1040,6 +1040,7 @@ export const SPLIT_SHOT_SINGLE_SYSTEM = `你是一位资深商业动画导演，
 - motionScript 格式：0-Xs: [...]. Xs-Ys: [...]. ｜朝向：...
 - motionScript 总时长精确等于该分镜 duration
 - 有具名角色的分镜：该角色必须出现在 startFrame 中
+- dialogues【必须保留所有原始台词，禁止丢弃】：根据叙事节奏将原始台词分配到两个子分镜；每条台词放入叙事上最合适发生的那个分镜；dialogues 字段格式：[{"character": "角色名（必须与原台词中角色名完全一致）", "text": "台词原文（完整保留）", "type": "dialogue|os|vo"}]
 - 仅输出 JSON 数组，无任何其他文字`;
 
 // ─── 9. frame_generate_first ────────────────────────────

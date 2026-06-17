@@ -283,6 +283,7 @@ export default function EpisodeCharactersPage() {
                 name={char.name}
                 description={char.description}
                 visualHint={char.visualHint ?? null}
+                voiceHint={char.voiceHint ?? null}
                 assets={char.assets}
                 onUpdate={() => fetchProject(project.id, episodeId)}
                 batchGenerating={generatingImages}

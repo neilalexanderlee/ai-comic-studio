@@ -2986,6 +2986,26 @@ async function handleSplitShot(
     return NextResponse.json({ error: "分镜不存在" }, { status: 404 });
   }
 
+  // 查询原始分镜的台词（带角色名）
+  const originalDialogues = await db
+    .select({
+      text: dialogues.text,
+      type: dialogues.type,
+      characterName: characters.name,
+      sequence: dialogues.sequence,
+    })
+    .from(dialogues)
+    .innerJoin(characters, eq(dialogues.characterId, characters.id))
+    .where(eq(dialogues.shotId, shotId))
+    .orderBy(dialogues.sequence);
+
+  const dialoguesBlock = originalDialogues.length > 0
+    ? `- 台词列表（必须分配到两个子分镜中，禁止丢弃）：\n` +
+      originalDialogues
+        .map((d) => `  [${d.type}] ${d.characterName}："${d.text}"`)
+        .join("\n")
+    : `- 台词：（无）`;
+
   // 构建用户消息
   const userMessage = [
     `原始分镜（需要拆分为两个）：`,
@@ -2996,6 +3016,7 @@ async function handleSplitShot(
     `- 时长：${shot.duration}s`,
     `- 运镜：${shot.cameraDirection || "（无）"}`,
     `- 音效：${shot.soundEffectNote || "（无）"}`,
+    dialoguesBlock,
     ``,
     `拆分提示：${(payload?.hint as string | undefined) || "请在合适的叙事转折点拆分，确保每个分镜的首帧都包含该分镜主要角色。"}`,
   ].join("\n");
