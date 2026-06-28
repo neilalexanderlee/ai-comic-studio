@@ -141,6 +141,21 @@ export async function POST(request: Request) {
       });
     }
 
+    // ── MiniMax 音乐生成 ────────────────────────────────────────────────
+    // 有效 model 值来自官方文档，不支持动态拉取（无 /v1/models 端点）。
+    // music-2.6 / music-cover 仅限 Token Plan 及付费用户；-free 后缀版对所有用户开放。
+    // 文档：https://platform.minimaxi.com/docs/api-reference/music-generation
+    if (body.protocol === "minimax") {
+      return NextResponse.json({
+        models: [
+          { id: "music-2.6-free",   name: "Music 2.6 Free（所有用户可用）" },
+          { id: "music-2.6",        name: "Music 2.6（付费/Token Plan）" },
+          { id: "music-cover-free", name: "Music Cover Free（翻唱，所有用户）" },
+          { id: "music-cover",      name: "Music Cover（翻唱，付费）" },
+        ],
+      });
+    }
+
     // ── 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容）─────────────
     // 参考文档：https://www.volcengine.com/docs/82379/1541523
     if (body.protocol === "doubao") {

@@ -104,6 +104,9 @@ export default function EpisodeStoryboardPage() {
   const [rewritingAll, setRewritingAll] = useState(false);
   const [rewriteProgress, setRewriteProgress] = useState<{ updated: number; total: number } | null>(null);
   const [rewriteIsThinking, setRewriteIsThinking] = useState(false);
+  const [optimizingPlot, setOptimizingPlot] = useState(false);
+  const [plotOptimizeProgress, setPlotOptimizeProgress] = useState<{ updated: number; total: number } | null>(null);
+  const [plotOptimizeIsThinking, setPlotOptimizeIsThinking] = useState(false);
   const [extractPreview, setExtractPreview] = useState<{
     mode: string;
     score: number;
@@ -209,15 +212,11 @@ export default function EpisodeStoryboardPage() {
   const shotsWithFrameAny = project.shots.filter(
     (s) => s.anchorFirst || s.anchorLastAi || s.cutPoint
   ).length;
-  // 有台词但 motionScript 尚未内嵌台词（未执行批量重写）的分镜数量。
-  // 两种来源：① dialogues 表有记录（LLM 拆分路径）② prompt 含对白特征但 motionScript 无内嵌（结构化路径）
+  // 有台词但 motionScript 尚未内嵌台词 bracket 的分镜数量。
+  // 检测：prompt 含对白特征（「或说：）但 motionScript 尚无 bracket 台词。
   const shotsWithUnembeddedDialogues = project.shots.filter((s) => {
-    const motionHasDialogue = s.motionScript?.includes("「");
-    if (motionHasDialogue) return false;
-    if (s.dialogues.length > 0) return true;
-    // 结构化路径：台词写在场景描述里，dialogues 表为空
-    const promptHasDialogue = /「|说[：:]/.test(s.prompt ?? "");
-    return promptHasDialogue;
+    if (s.motionScript?.includes("「")) return false;
+    return /「|说[：:]/.test(s.prompt ?? "");
   }).length;
   // 总台词数（用于判断是否显示导出 SRT 按钮）
   const totalDialogueCount = project.shots.reduce((sum, s) => sum + s.dialogues.length, 0);
@@ -475,6 +474,81 @@ export default function EpisodeStoryboardPage() {
     }
   }
 
+  async function handlePlotOptimize() {
+    if (!project) return;
+    if (!textGuard()) return;
+    setOptimizingPlot(true);
+    setPlotOptimizeProgress(null);
+    const episodeId = urlEpisodeId || useProjectStore.getState().currentEpisodeId;
+    try {
+      const res = await apiFetch(`/api/projects/${project.id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_plot_optimize",
+          modelConfig: getModelConfig(),
+          episodeId,
+        }),
+      });
+      if (!res.ok) throw new Error(`请求失败 ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalUpdated = 0;
+      let finalTotal = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          const dataLine = line.replace(/^data: /, "").trim();
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine) as {
+              type: string;
+              updatedCount?: number;
+              totalCount?: number;
+              error?: string;
+            };
+            if (event.type === "start") {
+              setPlotOptimizeProgress({ updated: 0, total: event.totalCount ?? 0 });
+            } else if (event.type === "thinking") {
+              setPlotOptimizeIsThinking(true);
+            } else if (event.type === "progress") {
+              setPlotOptimizeIsThinking(false);
+              setPlotOptimizeProgress({ updated: event.updatedCount ?? 0, total: event.totalCount ?? 0 });
+            } else if (event.type === "stream_error") {
+              toast.warning(`内容过滤中断，已保存 ${event.updatedCount ?? 0}/${event.totalCount ?? 0} 个场景描述`);
+              finalUpdated = event.updatedCount ?? finalUpdated;
+              finalTotal = event.totalCount ?? finalTotal;
+            } else if (event.type === "error") {
+              throw new Error(event.error ?? "剧情优化失败");
+            } else if (event.type === "done") {
+              finalUpdated = event.updatedCount ?? 0;
+              finalTotal = event.totalCount ?? 0;
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
+        }
+      }
+
+      toast.success(`已优化 ${finalUpdated}/${finalTotal} 个场景描述`);
+      fetchProject(project.id, episodeId!);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "剧情优化失败");
+    } finally {
+      setOptimizingPlot(false);
+      setPlotOptimizeProgress(null);
+      setPlotOptimizeIsThinking(false);
+    }
+  }
+
   return (
     <div className="animate-page-in space-y-4">
       {/* Page header */}
@@ -493,6 +567,28 @@ export default function EpisodeStoryboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {totalShots > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePlotOptimize}
+              disabled={optimizingPlot || rewritingAll}
+              title="将整集场景描述重写为有血有肉的剧本内容：修复叙事跳跃、补充人物动机、情感深度、因果逻辑"
+            >
+              {optimizingPlot ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              {optimizingPlot
+                ? plotOptimizeProgress
+                  ? `${plotOptimizeIsThinking ? "AI 编剧中" : "优化中"}… ${plotOptimizeProgress.updated}/${plotOptimizeProgress.total}`
+                  : plotOptimizeIsThinking
+                    ? "AI 全集编剧中…"
+                    : "准备中…"
+                : "优化剧情"}
+            </Button>
+          )}
           {totalShots > 0 && (
             <Button
               size="sm"
@@ -568,15 +664,7 @@ export default function EpisodeStoryboardPage() {
               {t("project.preview")}
             </Link>
           )}
-          {totalShots > 0 && (
-            <Link
-              href={`/${locale}/project/${project!.id}/episodes/${urlEpisodeId || useProjectStore.getState().currentEpisodeId}/editor`}
-              className="inline-flex items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-3 py-1.5 text-sm font-medium text-primary shadow-xs hover:bg-primary/10"
-            >
-              <Layers className="h-3.5 w-3.5" />
-              视频编辑器
-            </Link>
-          )}
+
           {totalShots > 0 && (
             <Button
               variant="outline"

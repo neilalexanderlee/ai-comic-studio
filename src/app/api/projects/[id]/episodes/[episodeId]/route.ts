@@ -6,11 +6,11 @@ import {
   shots,
   characters,
   characterAssets,
-  dialogues,
   storyboardVersions,
   episodeCharacters,
 } from "@/lib/db/schema";
 import { eq, asc, and, or, isNull, desc, inArray } from "drizzle-orm";
+import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
@@ -113,24 +113,17 @@ export async function GET(
         .orderBy(asc(shots.sequence))
     : [];
 
-  // Enrich each shot with its dialogues (including character name)
-  const enrichedShots = await Promise.all(
-    episodeShots.map(async (shot) => {
-      const shotDialogues = await db
-        .select({
-          id: dialogues.id,
-          text: dialogues.text,
-          characterId: dialogues.characterId,
-          characterName: characters.name,
-          sequence: dialogues.sequence,
-        })
-        .from(dialogues)
-        .innerJoin(characters, eq(dialogues.characterId, characters.id))
-        .where(eq(dialogues.shotId, shot.id))
-        .orderBy(asc(dialogues.sequence));
-      return { ...shot, dialogues: shotDialogues };
-    })
-  );
+  const enrichedShots = episodeShots.map((shot) => ({
+    ...shot,
+    dialogues: extractDialoguesFromMotionScript(shot.motionScript ?? "").map((d) => ({
+      id: `${shot.id}-${d.sequence}`,
+      text: d.text,
+      characterName: d.characterName,
+      character: d.characterName,
+      type: d.type,
+      sequence: d.sequence,
+    })),
+  }));
 
   return NextResponse.json({
     ...episode,

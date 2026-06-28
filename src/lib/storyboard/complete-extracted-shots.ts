@@ -1,5 +1,6 @@
 import type { ExtractedShot } from "./extract-shot-script";
 import type { PersistableShot } from "./persist-storyboard-version";
+import { extractDialoguesFromMotionScript } from "./extract-dialogues-from-motion-script";
 
 /**
  * 根据台词字数和文本节奏线索计算最低时长（秒）。
@@ -50,18 +51,39 @@ export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): Persistable
       }
     }
 
-    // 台词时长校正：有台词时确保 duration 足够念完
+    // 台词处理：从 motionScript bracket 提取台词；
+    // 结构化 markdown 路径（【对白】块）的台词暂不注入 motionScript——位置由 LLM 决定。
+    // 将台词追加到 prompt 作为「对白参考」，供：
+    //   ① banner 检测（promptHasDialogue = /「/.test(prompt)）
+    //   ② 批量重写时 LLM 读取并在合适时机嵌入 motionScript bracket
     let duration = shot.duration ?? 10;
-    if (shot.dialogues.length > 0) {
-      const minDuration = calcMinDurationForDialogue(shot.dialogues);
-      if (minDuration > duration) {
-        duration = minDuration;
-      }
+    const motionScriptText = shot.motionScript ?? shot.prompt ?? "";
+    const parsedDialogues = extractDialoguesFromMotionScript(motionScriptText);
+    const structuredDialogues = shot.dialogues ?? [];
+
+    let basePrompt = (shot.prompt?.trim() || shot.motionScript?.trim() || "").trim();
+    if (parsedDialogues.length === 0 && structuredDialogues.length > 0) {
+      const dialogueRef = structuredDialogues
+        .map((d) => `${d.character}：「${d.text}」`)
+        .join("　");
+      basePrompt = basePrompt
+        ? `${basePrompt}\n【对白参考】${dialogueRef}`
+        : `【对白参考】${dialogueRef}`;
+    }
+
+    // 时长校正：有台词时确保 duration 足够念完
+    const dialoguesForDuration =
+      parsedDialogues.length > 0
+        ? parsedDialogues
+        : structuredDialogues.map((d) => ({ text: d.text }));
+    if (dialoguesForDuration.length > 0) {
+      const minDuration = calcMinDurationForDialogue(dialoguesForDuration);
+      if (minDuration > duration) duration = minDuration;
     }
 
     return {
       sequence: shot.sequence,
-      prompt: (shot.prompt?.trim() || shot.motionScript?.trim() || "").trim(),
+      prompt: basePrompt,
       startFrameDesc,
       endFrameDesc,
       motionScript: shot.motionScript ?? shot.prompt ?? null,
@@ -69,11 +91,6 @@ export function finalizeExtractedShotsForDb(shots: ExtractedShot[]): Persistable
       duration,
       bgmNote: shot.bgmNote ?? null,
       soundEffectNote: shot.soundEffectNote ?? null,
-      dialogues: shot.dialogues.map((d, i) => ({
-        character: d.character,
-        text: d.text,
-        sequence: i,
-      })),
     };
   });
 }

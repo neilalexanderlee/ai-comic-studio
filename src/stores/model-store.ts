@@ -12,8 +12,10 @@ export type Protocol =
   /** 即梦AI 视频生成（火山引擎 Visual API，AK/SK 认证） */
   | "jimeng-video"
   /** 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容） */
-  | "doubao";
-export type Capability = "text" | "image" | "video";
+  | "doubao"
+  /** MiniMax 音乐生成（music-2.6，is_instrumental BGM） */
+  | "minimax";
+export type Capability = "text" | "image" | "video" | "music";
 
 export interface Model {
   id: string;
@@ -43,12 +45,14 @@ export type ModelStorePersistPayload = {
   defaultTextModel: ModelRef | null;
   defaultImageModel: ModelRef | null;
   defaultVideoModel: ModelRef | null;
+  defaultMusicModel: ModelRef | null;
 };
 
 export interface ModelConfig {
   text: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; secretKey?: string; modelId: string } | null;
   image: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; secretKey?: string; modelId: string } | null;
   video: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; secretKey?: string; modelId: string } | null;
+  music: { providerId: string; protocol: Protocol; baseUrl: string; apiKey: string; modelId: string } | null;
 }
 
 interface ModelStore {
@@ -56,6 +60,7 @@ interface ModelStore {
   defaultTextModel: ModelRef | null;
   defaultImageModel: ModelRef | null;
   defaultVideoModel: ModelRef | null;
+  defaultMusicModel: ModelRef | null;
 
   addProvider: (provider: Omit<Provider, "id" | "models">) => string;
   updateProvider: (id: string, updates: Partial<Omit<Provider, "id">>) => void;
@@ -67,6 +72,7 @@ interface ModelStore {
   setDefaultTextModel: (ref: ModelRef | null) => void;
   setDefaultImageModel: (ref: ModelRef | null) => void;
   setDefaultVideoModel: (ref: ModelRef | null) => void;
+  setDefaultMusicModel: (ref: ModelRef | null) => void;
   getModelConfig: () => ModelConfig;
 }
 
@@ -77,6 +83,7 @@ export const useModelStore = create<ModelStore>()(
       defaultTextModel: null,
       defaultImageModel: null,
       defaultVideoModel: null,
+      defaultMusicModel: null,
 
       addProvider: (provider) => {
         const id = ulid();
@@ -103,6 +110,8 @@ export const useModelStore = create<ModelStore>()(
             state.defaultImageModel?.providerId === id ? null : state.defaultImageModel,
           defaultVideoModel:
             state.defaultVideoModel?.providerId === id ? null : state.defaultVideoModel,
+          defaultMusicModel:
+            state.defaultMusicModel?.providerId === id ? null : state.defaultMusicModel,
         }));
       },
 
@@ -158,6 +167,7 @@ export const useModelStore = create<ModelStore>()(
       setDefaultTextModel: (ref) => set({ defaultTextModel: ref }),
       setDefaultImageModel: (ref) => set({ defaultImageModel: ref }),
       setDefaultVideoModel: (ref) => set({ defaultVideoModel: ref }),
+      setDefaultMusicModel: (ref) => set({ defaultMusicModel: ref }),
 
       getModelConfig: () => {
         const state = get();
@@ -178,6 +188,7 @@ export const useModelStore = create<ModelStore>()(
           text: resolve(state.defaultTextModel),
           image: resolve(state.defaultImageModel),
           video: resolve(state.defaultVideoModel),
+          music: resolve(state.defaultMusicModel),
         };
       },
     }),
@@ -195,6 +206,7 @@ export const useModelStore = create<ModelStore>()(
         defaultTextModel: state.defaultTextModel,
         defaultImageModel: state.defaultImageModel,
         defaultVideoModel: state.defaultVideoModel,
+        defaultMusicModel: state.defaultMusicModel,
       }),
       migrate: (persistedState: unknown, fromVersion: number) => {
         // Called only when stored data has an explicit version number that differs from 2.

@@ -3,7 +3,7 @@
 import { Label } from "@/components/ui/label";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
 import { useTranslations } from "next-intl";
-import { Type, ImageIcon, VideoIcon } from "lucide-react";
+import { Type, ImageIcon, VideoIcon, Music } from "lucide-react";
 
 interface PickerRowProps {
   label: string;
@@ -75,9 +75,11 @@ export function DefaultModelPicker() {
     defaultTextModel,
     defaultImageModel,
     defaultVideoModel,
+    defaultMusicModel,
     setDefaultTextModel,
     setDefaultImageModel,
     setDefaultVideoModel,
+    setDefaultMusicModel,
   } = useModelStore();
 
   function getOptions(capability: string) {
@@ -103,7 +105,7 @@ export function DefaultModelPicker() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <PickerRow
         label={t("defaultTextModel")}
         icon={<Type className="h-4 w-4" />}
@@ -127,6 +129,14 @@ export function DefaultModelPicker() {
         options={getOptions("video")}
         value={defaultVideoModel}
         onChange={setDefaultVideoModel}
+      />
+      <PickerRow
+        label="默认音乐模型"
+        icon={<Music className="h-4 w-4" />}
+        color="bg-pink-500/10 text-pink-600"
+        options={getOptions("music")}
+        value={defaultMusicModel}
+        onChange={setDefaultMusicModel}
       />
     </div>
   );

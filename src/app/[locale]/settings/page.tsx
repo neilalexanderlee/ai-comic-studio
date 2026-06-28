@@ -6,7 +6,7 @@ import { AiMediaKitSection } from "@/components/settings/ai-mediakit-section";
 import { AuthSection } from "@/components/settings/auth-section";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers } from "lucide-react";
+import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music } from "lucide-react";
 import Link from "next/link";
 
 export default function SettingsPage() {
@@ -85,6 +85,15 @@ export default function SettingsPage() {
             icon={<VideoIcon className="h-3.5 w-3.5" />}
             defaultProtocol="kling"
             defaultBaseUrl="https://api.klingai.com"
+          />
+
+          {/* Music Models section */}
+          <ProviderSection
+            capability="music"
+            label="音乐生成模型"
+            icon={<Music className="h-3.5 w-3.5" />}
+            defaultProtocol="minimax"
+            defaultBaseUrl="https://api.minimaxi.com"
           />
 
           {/* AI 多媒体套件（AI MediaKit）分类标题 */}

@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations, useLocale } from "next-intl";
 import { cn } from "@/lib/utils";
-import { FileText, Users, Film, Play, ArrowLeft } from "lucide-react";
+import { FileText, Users, Film, Clapperboard, ArrowLeft } from "lucide-react";
 
 interface ProjectNavProps {
   projectId: string;
   episodeId: string;
 }
 
-const icons = [FileText, Users, Film, Play];
+const icons = [FileText, Users, Film, Clapperboard];
 
 export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
   const t = useTranslations("project");
@@ -25,7 +25,7 @@ export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
     { key: "script", href: `${basePath}/script`, num: 1 },
     { key: "characters", href: `${basePath}/characters`, num: 2 },
     { key: "storyboard", href: `${basePath}/storyboard`, num: 3 },
-    { key: "preview", href: `${basePath}/preview`, num: 4 },
+    { key: "edit", href: `${basePath}/editor`, num: 4 },
   ] as const;
 
   return (
@@ -44,7 +44,7 @@ export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
             Workflow
           </p>
           {tabs.map((tab, i) => {
-            const isActive = pathname === tab.href;
+            const isActive = pathname === tab.href || pathname.startsWith(tab.href + "/");
             const Icon = icons[i];
             return (
               <Link
@@ -82,7 +82,7 @@ export function ProjectNav({ projectId, episodeId }: ProjectNavProps) {
       <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-[--border-subtle] bg-white/95 backdrop-blur-md lg:hidden">
         <div className="flex items-center justify-around py-1.5">
           {tabs.map((tab, i) => {
-            const isActive = pathname === tab.href;
+            const isActive = pathname === tab.href || pathname.startsWith(tab.href + "/");
             const Icon = icons[i];
             return (
               <Link

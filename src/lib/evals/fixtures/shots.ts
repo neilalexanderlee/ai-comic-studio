@@ -89,6 +89,47 @@ export const SHOT_SINGLE_CHARACTER = {
   duration: 4,
 };
 
+// ── Motion script fixtures ────────────────────────────────────────────────────
+
+/** bracket 格式 motionScript：多角色动作链 */
+export const MOTION_SCRIPT_BRACKET_MULTI = `0-3s: [${FIXTURE_CHAR_A}:转身→迈步] [${FIXTURE_CHAR_D_BASE}:嘴唇微颤→眼睑下垂] 3-7s: [${FIXTURE_CHAR_A}:推开门] | 朝向：${FIXTURE_CHAR_A}正面面朝镜头`;
+
+/** bracket 格式：单角色 */
+export const MOTION_SCRIPT_BRACKET_SINGLE = `0-5s: [${FIXTURE_CHAR_C}:奔跑→刹停] 5-8s: [${FIXTURE_CHAR_C}:回望]`;
+
+/** 旧格式 motionScript（无 []，向后兼容） */
+export const MOTION_SCRIPT_LEGACY = `${FIXTURE_CHAR_A}走向窗边，回望来时路，随后推开门`;
+
+// ── Storyboard quality fixtures（五要素 + cameraDirection 格式）────────────────
+
+/**
+ * 符合规范的 startFrameDesc（五要素齐全）
+ * 1. 机位空间坐标  2. 景别/视角+取景范围  3. 角色精确位置/姿态
+ * 4. 主光完整叙述句  5. 情绪身体解剖+场景锚定词
+ */
+export const FRAME_DESC_FIVE_ELEMENTS_VALID =
+  `摄影机在${FIXTURE_CHAR_A}正前方约1.5米，镜头高度胸口平视；近景平视，取景胸口以上；` +
+  `${FIXTURE_CHAR_A}站在画面左三分之一，左手扶额，右臂垂落；` +
+  `左侧柔和月光冷蓝侧逆光均匀铺洒，轮廓光勾勒肩线，面部半逆光阴影留存；` +
+  `嘴角绷紧眼眸下垂——书房烛光`;
+
+/**
+ * 缺少机位空间坐标（第一要素缺失）— 质量不合规
+ */
+export const FRAME_DESC_MISSING_CAMERA_POSITION =
+  `近景平视，${FIXTURE_CHAR_A}站在画面左三分之一，左手扶额；冷调月光侧逆光；嘴角绷紧`;
+
+/**
+ * 符合规范的 cameraDirection（含叙事目的）
+ */
+export const CAMERA_DIRECTION_WITH_PURPOSE =
+  `全景 → 缓慢dolly out拉远 → 大全景，目的：揭示${FIXTURE_CHAR_A}孤立于空旷环境`;
+
+/**
+ * 不合规的 cameraDirection（只有运镜词，无叙事目的）
+ */
+export const CAMERA_DIRECTION_NO_PURPOSE = `缓慢推近`;
+
 // ── Prompt enhancement fixtures ───────────────────────────────────────────────
 
 export const RAW_VIDEO_PROMPTS = {

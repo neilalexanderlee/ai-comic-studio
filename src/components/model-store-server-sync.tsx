@@ -15,6 +15,7 @@ function toPayload(state: ReturnType<typeof useModelStore.getState>): ModelStore
     defaultTextModel: state.defaultTextModel,
     defaultImageModel: state.defaultImageModel,
     defaultVideoModel: state.defaultVideoModel,
+    defaultMusicModel: state.defaultMusicModel,
   };
 }
 
@@ -23,7 +24,8 @@ function hasPayloadContent(p: ModelStorePersistPayload) {
     p.providers.length > 0 ||
     !!p.defaultTextModel ||
     !!p.defaultImageModel ||
-    !!p.defaultVideoModel
+    !!p.defaultVideoModel ||
+    !!p.defaultMusicModel
   );
 }
 
@@ -50,6 +52,7 @@ export function ModelStoreServerSync() {
             defaultTextModel: data.defaultTextModel ?? null,
             defaultImageModel: data.defaultImageModel ?? null,
             defaultVideoModel: data.defaultVideoModel ?? null,
+            defaultMusicModel: data.defaultMusicModel ?? null,
           });
         }
       } catch {

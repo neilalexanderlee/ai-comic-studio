@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, episodes, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
+import { projects, episodes, shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import fs from "fs";
@@ -90,10 +90,7 @@ export async function DELETE(
     .from(shots)
     .where(eq(shots.versionId, versionId));
 
-  // Delete DB records: dialogues → shots → version
-  for (const shot of versionShots) {
-    await db.delete(dialogues).where(eq(dialogues.shotId, shot.id));
-  }
+  // Delete DB records: shots → version
   await db.delete(shots).where(eq(shots.versionId, versionId));
   await db.delete(storyboardVersions).where(eq(storyboardVersions.id, versionId));
 

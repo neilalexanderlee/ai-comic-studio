@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { Layers, Plus, Loader2, Users, X, Upload, FileUp, Merge, Download, Timer } from "lucide-react";
+import { Layers, Plus, Loader2, Users, X, Upload, FileUp, Merge, Download, Timer, Image as ImageIcon } from "lucide-react";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { EpisodeCard } from "@/components/editor/episode-card";
 import { EpisodeDialog } from "@/components/editor/episode-dialog";
+import { CoverImageDialog } from "@/components/editor/cover-image-dialog";
 import { useEpisodeStore, type Episode } from "@/stores/episode-store";
 import { apiFetch } from "@/lib/api-fetch";
 import Link from "next/link";
@@ -31,6 +32,7 @@ export default function EpisodesPage({
   } = useEpisodeStore();
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [coverImageOpen, setCoverImageOpen] = useState(false);
   const [editingEpisode, setEditingEpisode] = useState<Episode | null>(null);
   const [playingEpisode, setPlayingEpisode] = useState<Episode | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -168,6 +170,13 @@ export default function EpisodesPage({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCoverImageOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"
+          >
+            <ImageIcon className="h-4 w-4" />
+            生成封面图
+          </button>
           <button
             onClick={handleRecalcDuration}
             disabled={recalculating || episodes.length === 0}
@@ -391,6 +400,13 @@ export default function EpisodesPage({
           </div>
         </div>
       )}
+
+      {/* Cover image dialog */}
+      <CoverImageDialog
+        open={coverImageOpen}
+        onOpenChange={setCoverImageOpen}
+        projectId={projectId}
+      />
     </div>
   );
 }

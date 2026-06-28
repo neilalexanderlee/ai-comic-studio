@@ -11,6 +11,7 @@ const messageKeys: Record<Capability, string> = {
   text: "notConfiguredText",
   image: "notConfiguredImage",
   video: "notConfiguredVideo",
+  music: "notConfiguredVideo", // fallback，BGM 生成在 UI 层已有单独提示
 };
 
 /**

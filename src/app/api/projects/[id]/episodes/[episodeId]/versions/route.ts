@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { projects, episodes, shots, dialogues, storyboardVersions } from "@/lib/db/schema";
+import { projects, episodes, shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { ulid } from "ulid";
@@ -109,22 +109,7 @@ export async function POST(
         warnings: null,
       });
 
-      // Copy dialogues if copying text
-      if (body.copyText) {
-        const srcDialogues = await db
-          .select()
-          .from(dialogues)
-          .where(eq(dialogues.shotId, s.id));
-        for (const d of srcDialogues) {
-          await db.insert(dialogues).values({
-            id: ulid(),
-            shotId: newShotId,
-            characterId: d.characterId,
-            text: d.text,
-            sequence: d.sequence,
-          });
-        }
-      }
+      // Dialogues are embedded in motionScript brackets; no separate table copy needed
     }
   }
 

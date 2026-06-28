@@ -33,12 +33,19 @@ export interface Clip {
   url?: string;
   shotId?: string;
   thumbnailUrl?: string;
+  bgmNote?: string;       // 来自分镜的 bgmNote，用于多选后自动填 BGM prompt
+  /** 素材内部裁剪起点（秒），默认 0 */
+  trimStart?: number;
+  /** 素材内部裁剪终点（秒），默认 = 素材总时长 */
+  trimEnd?: number;
 
   // 音频 / BGM clip
   audioUrl?: string;
   volume?: number;     // 0-2, default 1
   fadeIn?: number;     // seconds
   fadeOut?: number;    // seconds
+  /** 波形采样数据（0-1 归一化），由 Web Audio API 生成，用于时间线可视化 */
+  waveformData?: number[];
 
   // 字幕 clip
   text?: string;
@@ -46,6 +53,9 @@ export interface Clip {
 
   // 转场 clip（夹在两个视频 clip 之间）
   transitionType?: TransitionType;
+
+  // 画面特效（应用于视频 clip 整个时长）
+  effectType?: "fadeIn" | "fadeOut" | "flash" | "shake" | "zoomIn" | "zoomOut" | "pulse" | "rotateIn";
 }
 
 export interface Track {

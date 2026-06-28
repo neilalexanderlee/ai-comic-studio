@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, characterAssets, shots, dialogues, storyboardVersions, shotVideoHistory } from "@/lib/db/schema";
+import { projects, episodes, characters, characterAssets, shots, storyboardVersions, shotVideoHistory } from "@/lib/db/schema";
 import { eq, asc, and, desc, inArray } from "drizzle-orm";
+import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
@@ -82,32 +83,16 @@ export async function GET(
         .orderBy(asc(shots.sequence))
     : [];
 
-  // Batch fetch all dialogues for all shots in one query
-  const shotIds = projectShots.map((s) => s.id);
-  const allDialogues = shotIds.length > 0
-    ? await db
-        .select({
-          id: dialogues.id,
-          shotId: dialogues.shotId,
-          text: dialogues.text,
-          characterId: dialogues.characterId,
-          characterName: characters.name,
-          sequence: dialogues.sequence,
-        })
-        .from(dialogues)
-        .innerJoin(characters, eq(dialogues.characterId, characters.id))
-        .where(inArray(dialogues.shotId, shotIds))
-        .orderBy(asc(dialogues.sequence))
-    : [];
-  const dialoguesByShotId = new Map<string, typeof allDialogues>();
-  for (const d of allDialogues) {
-    const list = dialoguesByShotId.get(d.shotId) ?? [];
-    list.push(d);
-    dialoguesByShotId.set(d.shotId, list);
-  }
   const enrichedShots = projectShots.map((shot) => ({
     ...shot,
-    dialogues: dialoguesByShotId.get(shot.id) ?? [],
+    dialogues: extractDialoguesFromMotionScript(shot.motionScript ?? "").map((d) => ({
+      id: `${shot.id}-${d.sequence}`,
+      text: d.text,
+      characterName: d.characterName,
+      character: d.characterName,
+      type: d.type,
+      sequence: d.sequence,
+    })),
   }));
 
   // Fetch episodes for this project

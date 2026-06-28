@@ -18,8 +18,9 @@ AI漫剧工坊（英文 **AI Comic Studio**，仓库名 `ai-comic-studio`）是�
 2. 将剧本解析为分镜版本（storyboard versions），含结构化字段（startFrameDesc / endFrameDesc / motionScript / 朝向 / 台词类型等）
 3. 为每个分镜生成首帧/尾帧（三段式 Toonflow 提示词 + @图N 角色绑定）
 4. Seedance 多参模式批量生成连贯视频（@参考N 编号 + 音色克隆 + Track 分组）
-5. 浏览器端视频编辑器（时间线 + 字幕 + BGM + 转场 + 导出 WebM）
-6. 将视频合并为完整剧集（ffmpeg 拼接）
+5. 浏览器端视频编辑器（时间线 + 字幕 + BGM + 转场）+ 服务端 ffmpeg 导出 MP4
+6. AI 生成 BGM（MiniMax Music 2.6，纯器乐，基于分镜 bgmNote 字段）
+7. 将视频合并为完整剧集（ffmpeg 拼接）
 
 ---
 
@@ -129,14 +130,16 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 | `jimeng-video` | 即梦 AI | 视频 |
 | `kling` | 可灵 | 图片 + 视频 |
 | `seedance` | Seedance（火山方舟 ARK API） | 视频 |
+| `minimax` | MiniMax Music 2.x | 音乐（BGM） |
 
-**规则**：`provider-factory.ts` 的 switch-case 是增加新 provider 的唯一入口。`prompt-enhancer.ts` 必须为新 protocol 同步添加对应的 system prompt。
+**规则**：`provider-factory.ts` 的 switch-case 是增加新 provider 的唯一入口。`prompt-enhancer.ts` 必须为新 protocol 同步添加对应的 system prompt。音乐 protocol（`minimax` 等）**不经过** `provider-factory.ts`，由 `POST /api/bgm/generate` 内部的 `callMusicProvider` switch 路由；添加新音乐 provider 只需扩展该 switch 即可。
 
 ### 三种 Provider
 
 ```typescript
 AIProvider       // generateText + generateImage
 VideoProvider    // generateVideo
+// 音乐 Provider 目前无独立接口，通过 /api/bgm/generate 路由调用
 ```
 
 `resolveAIProvider` / `resolveImageProvider` / `resolveVideoProvider`（在 `provider-factory.ts`）从请求体中的 `modelConfig` 读取配置，用户未配置时 fallback 到 `getAIProvider()` 全局默认。
@@ -403,22 +406,67 @@ NOTE: The following are the ONLY lines of speech...
 
 ### 14. startFrameDesc — 帧生成唯一事实来源
 
-`startFrameDesc` / `endFrameDesc` 是图像生成的唯一画面依据，必须自包含四要素（景别/角色姿态/主光/情绪身体解剖）。`emotion`、`framing`、`lightingAtm` 三个冗余字段已于 migration 0042/0043 从数据库完全移除，所有信息统一写入 `startFrameDesc`。
+`startFrameDesc` / `endFrameDesc` 是图像生成的唯一画面依据，必须自包含**五要素**（机位空间坐标/景别取景范围/角色姿态/主光/情绪身体解剖）。`emotion`、`framing`、`lightingAtm` 三个冗余字段已于 migration 0042/0043 从数据库完全移除，所有信息统一写入 `startFrameDesc`。
+
+五要素用全角分号「；」分隔，形成五个独立子句：
 
 ```
-// ✅ 正确：startFrameDesc 自包含全部视觉信息（含光影）
+// ✅ 正确（五要素）
+startFrameDesc: "摄影机在角色正前方约1.5米，镜头高度胸口平视；
+                 近景平视，取景胸口以上；
+                 李明站在画面左三分之一，左手扶额，右臂垂落；
+                 左侧柔和月光冷蓝侧逆光均匀铺洒，轮廓光勾勒角色肩线，面部半逆光阴影留存；
+                 嘴角绷紧眼眸下垂——书房烛光"
+
+// ❌ 错误：缺少机位空间坐标（第一要素）
 startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额，右臂垂落，
                  左侧冷调月光侧逆光勾勒轮廓，嘴角绷紧眼眸下垂"
-
-// ❌ 错误：startFrameDesc 缺少主光描述（光影是四要素之一，不得省略）
-startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额，嘴角绷紧"
 ```
 
-**startFrameDesc 四要素**（缺一不可）：
-1. 景别/视角（如"近景平视"）
-2. 具名角色精确位置与静止姿态（不写运动过程）
-3. 主光（颜色 + 方向 + 来源，如"左侧冷调月光侧逆光"）
-4. 情绪的身体解剖表现（如"嘴角绷紧眼眸下垂"，禁用"神情坚定"等形容词）
+**startFrameDesc 五要素**（缺一不可，严格按此顺序）：
+1. **机位空间坐标**（首要素）——摄影机与主体的物理位置关系。格式：`摄影机在[主体][方位][距离]，镜头高度[身体部位]`
+2. **景别/视角 + 取景范围**——景别（远/全/中/近/特写）+ 镜头能看到的范围（如"取景胸口以上"）
+3. **具名角色精确位置与静止姿态**（不写运动过程）
+4. **主光完整叙述句**（颜色 + 方向 + 铺洒方式 + 受光效果，如"左侧柔和月光冷蓝侧逆光均匀铺洒，轮廓光勾勒肩线，面部半逆光阴影留存"）
+5. **情绪的身体解剖表现 + 场景背景锚定词**（如"嘴角绷紧眼眸下垂——书房烛光"，禁用"神情坚定"等形容词）
+
+### 15. 导演前思考步骤 — shot_split 和 batch_storyboard_rewrite 共同遵守
+
+**问题根因**：分镜质量差的根本原因是"从剧情动作出发"写分镜——AI 直接把剧情描述翻译成画面，而不是先做导演决策。好的分镜是摄影机优先，不是动作优先。
+
+**强制导演思考步骤**（在两个核心路径的系统提示词里均已编码）：
+
+在写任何技术字段之前，AI 必须先回答三个问题：
+
+| 问题 | 内容 |
+|---|---|
+| **Q1 单一视觉概念** | 这个镜头在视觉上只关于一件事，是什么？（不是剧情动作，是视觉 IDEA） |
+| **Q2 核心反差对** | 画面里什么和什么形成对比？（强迫找到一个：静止vs动态 / 平静vs混乱 / 前景秘密vs中景无知 / 局部vs全貌） |
+| **Q3 主动排除** | 明确不拍什么？（排除本身是叙事选择，如"全程不拍脸，只拍腿部——悬念留给下一镜"） |
+
+**编码规则**：答案写进 `sceneDescription` 的第一行：
+```
+【视觉核心：[Q1] | 反差：[Q2] | 排除：[Q3]】 + 环境描述...
+```
+
+**正反例**：
+
+```
+剧情动作（错误出发点）：
+"李明走进房间看到了灵瑶"
+
+导演视角（正确出发点）：
+Q1: 门口作为情感分界线，进门那一刻的迟疑比任何对白都重要
+Q2: 李明脚步停住（静止）vs 灵瑶背对镜头（不知道他来了）
+Q3: 不拍灵瑶的脸，保留悬念，脸的揭示留给下一镜
+
+sceneDescription 写法：
+【视觉核心：门口作为情感分界线，进门停顿是核心画面 | 反差：李明停在门口（静）vs 灵瑶背对镜头（未察觉）| 排除：不拍灵瑶的脸，不让角色进入房间内部】 书房内，暖调台灯光自右侧照亮灵瑶侧背，门框投落冷调月光线条...
+```
+
+**实现位置**：
+- `registry.ts` → `SHOT_SPLIT_DIRECTOR_CONCEPT_RULES`（shot_split 路径）
+- `storyboard-supervision.ts` → `STORYBOARD_REWRITE_SYSTEM` 导演前思考段落（batch_storyboard_rewrite 路径）
 
 ---
 
@@ -433,6 +481,49 @@ startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额
 
 ---
 
+## 提示词管理（PROMPT_REGISTRY）
+
+`src/lib/ai/prompts/registry.ts` 的 `PROMPT_REGISTRY` 数组是提示词管理页面的唯一数据源。所有在 UI 中可编辑的提示词都必须注册在此。
+
+### 当前注册的提示词（按分类）
+
+**剧本（script）**：`outline_expand`、`script_generate`、`script_parse`、`script_split`
+
+**角色（character）**：`character_extract`、`import_character_extract`、`character_image`、`beauty_image`、`combat_image`、`character_state_router`
+
+**分镜（shot）**：`shot_split`、`split_shot_single`、`batch_storyboard_rewrite`、`batch_plot_optimize`
+
+**画面（frame）**：`frame_generate_first`、`frame_generate_last`
+
+**视频（video）**：`video_generate`
+
+### 废弃的提示词（不在 registry，但有 DB 覆盖清理）
+
+- `single_shot_rewrite` — route handler 已移除，shot-drawer 按钮已删除，改用 `batch_storyboard_rewrite`
+- `ref_video_prompt` — Vision-LLM 视频精炼路径已被直出架构替代（`buildDirectVideoPrompt`）
+
+两者保留在 `prune-stale-prompt-overrides.ts` 的清单中，确保旧用户的 DB 覆盖数据被清理。
+
+### 新增提示词到 registry 的规范
+
+1. 在 `registry.ts` 定义 `PromptDefinition` 对象（参考 `batchPlotOptimizeDef` 模式）
+2. 添加到 `PROMPT_REGISTRY` 数组
+3. 在 `messages/zh.json` 的 `promptTemplates.prompts.*` 下添加 `nameKey` 和 `descriptionKey` 对应的中文翻译
+4. 如果该提示词在 handler 内部通过 `resolvePrompt()` 读取，确保传入 `userId` 和 `projectId`
+
+### batch_plot_optimize — 全集剧情优化
+
+`action = "batch_plot_optimize"` → `handleBatchPlotOptimize`：
+
+- **功能**：编剧视角批量重写全集 `shots.prompt`（场景描述）
+- **只写 `shots.prompt`**，不触碰 `startFrameDesc`/`endFrameDesc`/`motionScript`/`cameraDirection`
+- **分块处理**（每块 5 镜）+ 全集只读上下文（防止跨 chunk 跳跃）+ 降级逐镜重试
+- **叙事跳跃修复策略**：四类跳跃（时间/因果/动作/情绪）**只用文字桥接**（`△承接上镜:` 前缀），**不允许插入新镜头**（分块处理与插镜架构不兼容；需要插镜用「AI拆分分镜」手动操作）
+- **System prompt**：`PLOT_OPTIMIZE_SYSTEM`（`storyboard-supervision.ts`），可通过提示词管理页面覆盖
+- **UI 入口**：分镜页「优化剧情」按钮（位于「批量优化文本」左侧）
+
+---
+
 ## S 级分镜标准集成
 
 系统所有 AI 生成分镜内容的路径均已集成 S 级分镜标准（首帧/尾帧/videoScript 四要素/微表情词汇/禁用模板列表）。
@@ -442,9 +533,10 @@ startFrameDesc: "近景平视，李明站在画面左三分之一，左手扶额
 | 功能入口 | 文件 / Key | 说明 |
 |---|---|---|
 | AI 自动生成（大纲扩写） | `outline-expand.ts` / `outline_expand` | 故事大纲 → 多集 S 级剧本 |
-| 解析分镜（散文） | `registry` → `shot_split` | 一次 LLM 切镜并写全字段 |
+| 解析分镜（散文） | `registry` → `shot_split` | 一次 LLM 切镜并写全字段；内置导演前思考步骤（视觉核心/反差/排除），写入 sceneDescription 第一行 |
 | 解析分镜（结构化 md） | `finalizeExtractedShotsForDb` | 无 LLM，缺字段保持 null |
-| 全集分镜批量重写 | `storyboard-supervision.ts` / `batch_storyboard_rewrite` | 全集七律视觉连续性重写：LLM 一次读入全部分镜，批量重写 startFrameDesc/endFrameDesc/motionScript/cameraDirection 并写回 DB |
+| 全集分镜批量重写 | `storyboard-supervision.ts` / `batch_storyboard_rewrite` | 全集七律视觉连续性重写：LLM 一次读入全部分镜，每镜先完成导演前思考（Q1视觉核心/Q2反差/Q3主动排除），再批量重写五要素帧描述/motionScript/cameraDirection 并写回 DB |
+| 全集剧情优化 | `storyboard-supervision.ts` / `batch_plot_optimize` | 编剧视角批量重写全集 `shots.prompt`（场景描述）：检测四种叙事跳跃（时间/因果/动作/情绪），用 `△承接上镜:` 文字桥接，身体解剖词代替情绪形容词；**只改 prompt，不改帧描述/motionScript** |
 
 ### 不在此范围内的路径
 
@@ -470,11 +562,18 @@ SSE 事件序列：`start` → `progress`（每角色一条，含 `voiceHint` �
 3. 摄影机公式：起幅 + 运镜动作 + 速度 + 落幅
 4. 单一感官细节（光线/粒子/材质/声音，只选其一）
 
-**startFrameDesc / endFrameDesc 四要素**（单一事实来源，必须自包含）：
-1. 景别/视角（如"近景仰拍"）
-2. 具名角色精确位置/姿态（静止态，不写运动过程）
-3. 主光（颜色 + 方向 + 来源，如"左侧冷调月光侧逆光"）
-4. 情绪的身体解剖表现（如"嘴唇微颤、眼睑下垂"，禁用形容词如"神情坚定"）
+**startFrameDesc / endFrameDesc 五要素**（单一事实来源，必须自包含，用「；」分隔）：
+1. 机位空间坐标（首要素）——`摄影机在[主体][方位][距离]，镜头高度[身体部位]`
+2. 景别/视角 + 取景范围（如"近景仰拍，取景胸口以上"）
+3. 具名角色精确位置/姿态（静止态，不写运动过程）
+4. 主光完整叙述句（颜色 + 方向 + 铺洒方式 + 受光效果，禁止短词如"冷调月光"）
+5. 情绪的身体解剖表现 + 场景背景锚定词（如"嘴唇微颤、眼睑下垂——宫殿廊道"，禁用形容词如"神情坚定"）
+
+**cameraDirection 格式**（必须含叙事目的）：
+`起幅[景别/机位] → 运动方式+速度 → 落幅[景别/机位]，目的：[揭示/跟随/强调什么]`
+- ✅ `全景 → 缓慢dolly out拉远 → 大全景，目的：揭示角色孤立于空旷环境`
+- ✅ `中景 → counter-clockwise orbit 180度 → 中景背面，目的：环绕揭示身后的对手`
+- ❌ 禁止只写运镜词不写叙事目的（"缓慢推近"不合规）
 
 **首帧/尾帧配对规则**：
 - 首帧 = 动作开始前的静止状态（不写运动过程）
@@ -572,6 +671,36 @@ src/lib/evals/
 | 视频提示词 LLM 模式循环冗余 | Vision-LLM「描述帧图」放入 prompt，但 Seedance 已直接收到帧图参数（`anchorFirst`/`anchorLastAi`），描述等于无效二次编码 | 删除 `generateAndPersistVisionVideoPrompt`；统一为 `buildDirectVideoPrompt`（直出架构，零 API 费用） |
 | 台词注入 NOTE 块被 LLM 误解 | 旧 NOTE 块格式要求 LLM「不重复」台词，实践中 LLM 经常忽略或放错位置 | 改为 Toonflow 内联格式：`ensureDialoguesInPrompt` 只补充缺失台词，LLM 自然内嵌的不重复追加 |
 | motionScript 多角色动作顺序被 LLM 重排 | 散文描述无法锁定发声先后顺序 | 改为显式 bracket 格式 `[角色A:动作→动作] [角色B:动作]`，`[]` 顺序即叙事铁律；`expandMotionScriptBrackets` 展开为散文 |
+| 分镜帧描述缺少摄影机物理位置，Seedream 渲染构图混乱 | startFrameDesc 只写"近景"等景别词，未指定摄影机在哪里、距离多远 | startFrameDesc 升为五要素：第一要素为机位空间坐标（格式：`摄影机在[主体][方位][距离]，镜头高度[身体部位]`） |
+| cameraDirection 无叙事目的，运镜显得随意 | 只写运镜动作不写为什么这样运镜 | cameraDirection 强制格式：`起幅→运动方式+速度→落幅，目的：[揭示/跟随/强调什么]`；`registry.ts` 和 `storyboard-supervision.ts` 均已更新 |
+| AI 分镜从剧情动作出发，画面感弱、缺乏视觉张力 | shot_split 和 batch_storyboard_rewrite 直接把剧情翻译成技术字段，跳过了导演决策层 | 新增导演前思考步骤（Q1单一视觉概念 / Q2核心反差对 / Q3主动排除）；约定 15；`SHOT_SPLIT_DIRECTOR_CONCEPT_RULES` + `STORYBOARD_REWRITE_SYSTEM` |
+| 次要角色「凭空出现/消失」在镜头中间 | shot_split 无入画/出画规则，角色可以从画面中央直接现身 | 入画铁律：次要角色必须从取景框边缘进入；出画铁律：必须从边缘离开；`SHOT_SPLIT_ENTRY_EXIT_RULES`（`registry.ts`） |
+| MiniMax BGM 生成返回 hex 但写入文件报错 | `Buffer.from(hex, "hex")` 拿到的 Buffer 要用 `fs.writeFileSync`，不能用 `res.arrayBuffer()` | `bgm/generate/route.ts` |
+| BGM API key 从客户端传来不安全 | 前端把 apiKey 放 body 传给 route | 改为 route 从 DB 读 `getProviderSecret(userId, providerId)`；客户端只传 `providerId + protocol + baseUrl` |
+| shot-drawer「重写文本」按钮静默失败 | `single_shot_rewrite` route handler 已按 CLAUDE.md 要求移除，但 shot-drawer 还在调用 | 从 shot-drawer.tsx 移除该按钮及 state；用分镜页「批量优化文本」替代 |
+| registry.ts 用 `require()` 加载 storyboard-supervision | Next.js App Router 是纯 ESM，`require()` 运行时报 `ReferenceError` | 改为顶部 `import { STORYBOARD_REWRITE_SYSTEM, PLOT_OPTIMIZE_SYSTEM } from "./storyboard-supervision"`（无循环依赖） |
+| prompt-editor.tsx 保留废弃 key 的 hint 映射 | `ref_video_prompt` 和 `single_shot_rewrite` 从 registry 移除后，hint map 未同步清理 | 移除两条废弃 key |
+
+---
+
+## 视频编辑器架构
+
+路由：`/[locale]/project/[id]/episodes/[episodeId]/editor`
+
+**三栏布局**：左（MediaLibrary 208px）/ 中（VideoPreview 60% + Timeline 40%）/ 右（PropertyPanel 176px）
+
+**状态管理**：`useEditorStore`（Zustand）负责：
+- `tracks`：视频轨（`video`）/ 音频轨（`bgm`、`voice`）/ 字幕轨（`subtitle`）/ 特效轨（`effect`）
+- `clips`：每条轨上的 clip，含 startTime / endTime / url / metadata
+- `initFromShots(shots)`：进入编辑器时用分镜数据初始化视频 clip + 字幕 clip（从 `dialogues` 自动生成）
+
+**BGM 生成入口**（`MediaLibrary.tsx` → 音频 Tab）：
+- 协议路由架构：`POST /api/bgm/generate` 接收 `{prompt, providerId, protocol, baseUrl, modelId?}`
+- 添加新音乐 provider：在 `callMusicProvider` 的 switch-case 中新增 case，实现 `generateWithXxx()` 函数
+- bgmNote 建议：分镜页的 `shots.bgmNote` 字段（从剧本 `【背景音】` 标签提取）在编辑器页去重后作为 chip 建议展示
+- 生成结果在 session 内以 `generatedBgms` 数组缓存，支持多次加入时间线
+
+**服务端渲染**：`POST /api/projects/[id]/episodes/[episodeId]/render`（ffmpeg concat，支持字幕 + BGM 混流），结果写入 `episodes.final_video_url`；编辑器顶部导航显示「上次导出」下载按钮（`project.finalVideoUrl`）。
 
 ---
 

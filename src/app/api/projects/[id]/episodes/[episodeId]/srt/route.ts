@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { shots, dialogues, characters, storyboardVersions } from "@/lib/db/schema";
+import { shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
+import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 
 /**
  * GET /api/projects/:id/episodes/:episodeId/srt?versionId=xxx
  *
- * 根据 dialogues 表生成 SRT 字幕文件。
- * 时间计算：前序镜头时长累加 = 当前镜头起始时间；同镜多条台词均分镜头时长。
- * 返回：Content-Type text/plain，filename dialogue.srt
+ * 从 shots.motionScript bracket 提取台词，生成 SRT 字幕文件。
+ * 时间计算：前序镜头时长累加 = 当前镜头起始时间；同镜多条台词按字数加权分配时长。
  */
 export async function GET(
   _request: Request,
@@ -38,12 +38,13 @@ export async function GET(
     return NextResponse.json({ error: "No storyboard version found" }, { status: 404 });
   }
 
-  // 按顺序取所有分镜
+  // 按顺序取所有分镜（含 motionScript）
   const projectShots = await db
     .select({
       id: shots.id,
       sequence: shots.sequence,
       duration: shots.duration,
+      motionScript: shots.motionScript,
     })
     .from(shots)
     .where(
@@ -59,63 +60,37 @@ export async function GET(
     return NextResponse.json({ error: "No shots found" }, { status: 404 });
   }
 
-  // 取所有台词（按镜头分组）
-  type DialogueRow = {
-    shotId: string;
-    text: string;
-    characterName: string;
-    sequence: number;
-    type: string;
-  };
-
-  const allDialogues: DialogueRow[] = await db
-    .select({
-      shotId: dialogues.shotId,
-      text: dialogues.text,
-      characterName: characters.name,
-      sequence: dialogues.sequence,
-      type: dialogues.type,
-    })
-    .from(dialogues)
-    .innerJoin(characters, eq(dialogues.characterId, characters.id))
-    .innerJoin(shots, eq(dialogues.shotId, shots.id))
-    .where(
-      and(
-        eq(shots.episodeId, episodeId),
-        eq(shots.versionId, versionId)
-      )
-    )
-    .orderBy(asc(shots.sequence), asc(dialogues.sequence));
-
-  if (allDialogues.length === 0) {
-    return NextResponse.json({ error: "No dialogues found for this episode" }, { status: 404 });
-  }
-
-  // 按 shotId 分组台词
-  const dialoguesByShotId = new Map<string, DialogueRow[]>();
-  for (const d of allDialogues) {
-    if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
-    dialoguesByShotId.get(d.shotId)!.push(d);
-  }
-
   // 构建 SRT
   const srtBlocks: string[] = [];
   let index = 1;
   let offsetSeconds = 0;
+  let totalDialogues = 0;
 
   for (const shot of projectShots) {
     const shotDuration = shot.duration ?? 5;
-    const shotDialogues = dialoguesByShotId.get(shot.id) ?? [];
+    const shotDialogues = extractDialoguesFromMotionScript(shot.motionScript ?? "");
 
     if (shotDialogues.length > 0) {
-      // 同一镜头的多条台词均分时长，每条最短 1s
-      const slotDuration = Math.max(1, shotDuration / shotDialogues.length);
+      totalDialogues += shotDialogues.length;
 
+      // 按字数加权分配时长，每条最短 1.2s
+      const MIN_SUB = 1.2;
+      const totalChars = shotDialogues.reduce((s, d) => s + (d.text?.length ?? 1), 0) || 1;
+      const rawDurs = shotDialogues.map((d) =>
+        Math.max(MIN_SUB, ((d.text?.length ?? 1) / totalChars) * shotDuration)
+      );
+      const rawTotal = rawDurs.reduce((s, v) => s + v, 0);
+      const scale = rawTotal > 0 ? shotDuration / rawTotal : 1;
+
+      let dCursor = offsetSeconds;
       shotDialogues.forEach((d, i) => {
-        const startSec = offsetSeconds + i * slotDuration;
-        const endSec = Math.min(offsetSeconds + shotDuration, startSec + slotDuration);
+        const dDuration = Math.max(MIN_SUB, rawDurs[i] * scale);
+        const capped = Math.min(dDuration, offsetSeconds + shotDuration - dCursor);
+        if (capped < 0.3) return;
 
-        // 仅对白显示角色名前缀；OS/VO 加标注
+        const startSec = dCursor;
+        const endSec = dCursor + capped;
+
         const typeTag = d.type === "vo" ? "【旁白】" : d.type === "os" ? "【OS】" : "";
         const line = `${typeTag}${d.characterName}：${d.text}`;
 
@@ -123,10 +98,15 @@ export async function GET(
           `${index}\n${formatSrtTime(startSec)} --> ${formatSrtTime(endSec)}\n${line}`
         );
         index++;
+        dCursor += capped;
       });
     }
 
     offsetSeconds += shotDuration;
+  }
+
+  if (totalDialogues === 0) {
+    return NextResponse.json({ error: "No dialogues found for this episode" }, { status: 404 });
   }
 
   const srtContent = srtBlocks.join("\n\n") + "\n";

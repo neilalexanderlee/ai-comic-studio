@@ -39,6 +39,7 @@ export const episodes = sqliteTable("episodes", {
   description: text("description").default(""),
   keywords: text("keywords").default(""),
   finalVideoUrl: text("final_video_url"),
+  editorState: text("editor_state"),  // JSON 快照：时间线轨道+clip 数据
   targetDurationSeconds: integer("target_duration_seconds"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -212,31 +213,6 @@ export const shotVideoHistory = sqliteTable("shot_video_history", {
   createdAt: integer("created_at").notNull(), // Unix ms
 });
 
-export const dialogues = sqliteTable("dialogues", {
-  id: text("id").primaryKey(),
-  shotId: text("shot_id")
-    .notNull()
-    .references(() => shots.id, { onDelete: "cascade" }),
-  characterId: text("character_id")
-    .notNull()
-    .references(() => characters.id, { onDelete: "cascade" }),
-  text: text("text").notNull(),
-  audioUrl: text("audio_url"),
-  sequence: integer("sequence").notNull().default(0),
-  /**
-   * 台词类型，对应 Toonflow videoDesc 第10维台词格式：
-   * - 'dialogue'（默认）：普通对白，角色嘴部开合说话，prompt 中写「说：」
-   * - 'os'：内心独白（Off-Screen OS），角色嘴部紧闭不动，prompt 中写「内心OS：」
-   * - 'vo'：画外音（Voice Over VO），角色不在画面中或嘴部紧闭，prompt 中写「画外音VO：」
-   */
-  type: text("type", { enum: ["dialogue", "os", "vo"] }).notNull().default("dialogue"),
-  /**
-   * 声音属性描述，用于 Seedance 1.5-pro 声音生成（官方公式）：
-   * 性别 + 年龄区间 + 声音属性 + 语速 + 情绪基线
-   * 示例："男性，约25岁，声音低沉沙哑，语速缓慢，情绪压抑克制"
-   */
-  voiceHint: text("voice_hint"),
-});
 
 export const importLogs = sqliteTable("import_logs", {
   id: text("id").primaryKey(),

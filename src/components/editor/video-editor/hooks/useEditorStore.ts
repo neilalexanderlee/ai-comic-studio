@@ -1,18 +1,21 @@
 "use client";
 
 import { create } from "zustand";
-import type { Track, Clip, TrackType, TransitionType } from "../utils/clipMeta";
+import type { Track, Clip, TrackType, TransitionType, SubtitleStyle } from "../utils/clipMeta";
 import { generateClipId, generateTrackId, getTrackLabel } from "../utils/clipMeta";
 
 interface EditorState {
   // ── 轨道数据 ────────────────────────────────────
   tracks: Track[];
+  // ── 全局字幕样式 ─────────────────────────────────
+  globalSubtitleStyle: SubtitleStyle;
   // ── 播放状态 ────────────────────────────────────
   playhead: number;         // 当前播放位置（秒）
   isPlaying: boolean;
   // ── 选中状态 ────────────────────────────────────
   selectedClipId: string | null;
   selectedTrackId: string | null;
+  selectedClipIds: string[];       // 多选（Shift+click），用于 BGM 范围生成
   // ── 视口 ────────────────────────────────────────
   pixelsPerSecond: number;  // 缩放：每秒对应多少像素
   canvasWidth: number;
@@ -48,6 +51,8 @@ interface EditorState {
 
   // ── 选中 ────────────────────────────────────────
   selectClip: (clipId: string | null) => void;
+  toggleMultiSelectClip: (clipId: string) => void;
+  clearMultiSelect: () => void;
 
   // ── 从项目分镜初始化 ─────────────────────────────
   initFromShots: (shots: Array<{
@@ -56,8 +61,16 @@ interface EditorState {
     prompt: string;
     videoUrl: string | null;
     duration: number;
+    bgmNote?: string | null;
     dialogues?: Array<{ characterName: string; text: string; type?: string }>;
   }>) => void;
+
+  // ── 从 DB 快照恢复 ────────────────────────────────
+  loadFromSnapshot: (tracks: Track[]) => void;
+
+  // ── 全局字幕样式 ─────────────────────────────────
+  /** 更新全局字幕样式；applyToAll=true 时同时把所有字幕 clip 的 subtitleStyle 更新为新值 */
+  setGlobalSubtitleStyle: (style: Partial<SubtitleStyle>, applyToAll?: boolean) => void;
 
   // ── 清空 ─────────────────────────────────────────
   reset: () => void;
@@ -70,12 +83,21 @@ const MAX_TRACK_COUNTS: Record<TrackType, number> = {
   bgm: 1,
 };
 
+const DEFAULT_GLOBAL_SUBTITLE_STYLE: SubtitleStyle = {
+  fontSize: 32,
+  color: "#ffffff",
+  textAlign: "center",
+  y: 0.82,
+};
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   tracks: [],
+  globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE },
   playhead: 0,
   isPlaying: false,
   selectedClipId: null,
   selectedTrackId: null,
+  selectedClipIds: [],
   pixelsPerSecond: 80,
   canvasWidth: 1920,
   canvasHeight: 1080,
@@ -249,7 +271,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPlayhead: (time) => set({ playhead: Math.max(0, time) }),
   setPlaying: (playing) => set({ isPlaying: playing }),
   setZoom: (pps) => set({ pixelsPerSecond: Math.max(10, Math.min(500, pps)) }),
-  selectClip: (clipId) => set({ selectedClipId: clipId }),
+  selectClip: (clipId) => {
+    if (!clipId) {
+      set({ selectedClipId: null, selectedClipIds: [] });
+      return;
+    }
+    // 选中 clip 时 playhead 自动跳到该 clip 开头（NLE 标准行为）
+    const clip = get().getClipById(clipId);
+    set({
+      selectedClipId: clipId,
+      selectedClipIds: [],
+      ...(clip ? { playhead: clip.startTime } : {}),
+    });
+  },
+
+  toggleMultiSelectClip: (clipId) => {
+    set((s) => {
+      const ids = s.selectedClipIds;
+      return {
+        selectedClipIds: ids.includes(clipId)
+          ? ids.filter((id) => id !== clipId)
+          : [...ids, clipId],
+        selectedClipId: null, // 多选时清空单选
+      };
+    });
+  },
+
+  clearMultiSelect: () => set({ selectedClipIds: [] }),
+
+  setGlobalSubtitleStyle: (style, applyToAll = false) => {
+    set((s) => {
+      const next = { ...s.globalSubtitleStyle, ...style };
+      if (!applyToAll) return { globalSubtitleStyle: next };
+      // 同时把所有字幕 clip 的 subtitleStyle 更新为新值
+      return {
+        globalSubtitleStyle: next,
+        tracks: s.tracks.map((t) => ({
+          ...t,
+          clips: t.clips.map((c) =>
+            c.type === "subtitle" ? { ...c, subtitleStyle: { ...next } } : c
+          ),
+        })),
+      };
+    });
+  },
 
   // ── 从项目分镜初始化 ──────────────────────────────────────────────────────
 
@@ -290,25 +355,44 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         name: `分镜 ${shot.sequence}`,
         url: shot.videoUrl,
         shotId: shot.id,
+        bgmNote: shot.bgmNote ?? undefined,
         startTime: cursor,
         endTime: cursor + duration,
         duration,
       });
 
-      // 台词 → 字幕（每条台词拆分显示，约3秒一条）
+      // 台词 → 字幕（按字数加权分配时长，最短 1.2s / 条）
       if (shot.dialogues?.length) {
-        const perDialogue = duration / shot.dialogues.length;
+        const MIN_SUB = 1.2;
+        const totalChars = shot.dialogues.reduce((s, d) => s + (d.text?.length ?? 1), 0) || 1;
+        // 先按字数算出原始比例，再保证每条 ≥ MIN_SUB，然后等比缩放使总和 = duration
+        const rawDurs = shot.dialogues.map((d) =>
+          Math.max(MIN_SUB, ((d.text?.length ?? 1) / totalChars) * duration)
+        );
+        const rawTotal = rawDurs.reduce((s, v) => s + v, 0);
+        const scale = rawTotal > 0 ? duration / rawTotal : 1;
+        let dCursor = cursor;
         shot.dialogues.forEach((d, i) => {
-          const text = `${d.characterName}：${d.text}`;
+          const dDuration = Math.max(MIN_SUB, rawDurs[i] * scale);
+          const capped = Math.min(dDuration, cursor + duration - dCursor);
+          if (capped < 0.3) return;
+          // 行业惯例：字幕只显示台词文本，不加角色名前缀，不加引号
+          // VO/OS 加括号标注类型，普通对白直接输出台词
+          const rawText = (d.text ?? "").replace(/^[「『【]|[」』】]$/g, "").trim();
+          const text = d.type === "os"
+            ? `（内心）${rawText}`
+            : d.type === "vo"
+            ? `（旁白）${rawText}`
+            : rawText;
           subtitleClips.push({
             id: generateClipId(),
             trackId: subtitleTrack.id,
             type: "subtitle",
             name: text.slice(0, 20),
             text,
-            startTime: cursor + i * perDialogue,
-            endTime: cursor + (i + 1) * perDialogue,
-            duration: perDialogue,
+            startTime: dCursor,
+            endTime: dCursor + capped,
+            duration: capped,
             subtitleStyle: {
               fontSize: 32,
               color: "#ffffff",
@@ -319,6 +403,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
               width: 0.8,
             },
           });
+          dCursor += capped;
         });
       }
 
@@ -334,5 +419,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ tracks, playhead: 0 });
   },
 
-  reset: () => set({ tracks: [], playhead: 0, isPlaying: false, selectedClipId: null }),
+  loadFromSnapshot: (tracks) => set({ tracks, playhead: 0, selectedClipId: null, selectedClipIds: [] }),
+
+  reset: () => set({ tracks: [], globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE }, playhead: 0, isPlaying: false, selectedClipId: null }),
 }));

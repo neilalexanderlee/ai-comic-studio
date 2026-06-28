@@ -1,19 +1,75 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+/**
+ * VideoPreview — AVCanvas 架构
+ *
+ * 新增（移植自 Toonflow-web videoPreview.vue）：
+ *  - trimStart / trimEnd：通过 MP4Clip.split() 裁剪素材内部范围
+ *  - 转场渲染：tickInterceptor 实现帧级混合（fade / dissolve / slide / wipe / zoom / rotate…）
+ *  - 帧缓存：转场的 "beforeClip" 帧缓存供 "afterClip" 混合使用
+ */
+
+import { useEffect, useRef, useState } from "react";
+import { AVCanvas } from "@webav/av-canvas";
+import { MP4Clip, AudioClip, VisibleSprite } from "@webav/av-cliper";
 import { useEditorStore } from "./hooks/useEditorStore";
 import { formatTime } from "./utils/clipMeta";
+import type { Clip } from "./utils/clipMeta";
+import { getTransitionRenderer } from "./utils/transitionRenderers";
+import { getEffectTransform } from "./utils/filterEffect";
 import {
-  Play, Pause, SkipBack, SkipForward, Download, Loader2, RefreshCw,
+  Play, Pause, SkipBack, SkipForward,
+  Download, Loader2, Volume2, VolumeX,
 } from "lucide-react";
 import { uploadUrl } from "@/lib/utils/upload-url";
+import { apiFetch } from "@/lib/api-fetch";
 
-// @webav/av-canvas + @webav/av-cliper — 动态 import（防止 SSR 崩溃）
-type AVCanvasType = import("@webav/av-canvas").AVCanvas;
+const CANVAS_W = 1920;
+const CANVAS_H = 1080;
+const TRIM_MARGIN = 0.1; // 安全边界（秒），避免 split 边界报错
 
-export function VideoPreview() {
+// ─── 转场信息 ─────────────────────────────────────────────────────────────────
+
+interface TransitionInfo {
+  transitionClipId: string;
+  beforeClipId: string;
+  afterClipId: string;
+  transitionType: string;
+  startTime: number;  // seconds
+  endTime: number;    // seconds
+}
+
+interface VideoPreviewProps {
+  projectId: string;
+  episodeId: string;
+}
+
+export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const avCvsRef = useRef<AVCanvasType | null>(null);
+  const avCanvasRef = useRef<AVCanvas | null>(null);
+
+  // clipId → VisibleSprite
+  const spriteMapRef = useRef<Map<string, VisibleSprite>>(new Map());
+  // clip 关键属性快照（用于 diff，避免重复 fetch）
+  const clipSnapshotRef = useRef<Map<string, string>>(new Map());
+  // 防止并发 sync
+  const syncAbortRef = useRef<AbortController | null>(null);
+
+  // ─── 转场状态（Refs，供 tickInterceptor 在任何时间读取）────────────────────
+  // transitionClipId → TransitionInfo
+  const transitionInfoMapRef = useRef<Map<string, TransitionInfo>>(new Map());
+  // videoClipId → TransitionInfo[]（一个视频可同时是多个转场的 before/after）
+  const clipTransitionsMapRef = useRef<Map<string, TransitionInfo[]>>(new Map());
+  // clipId → 最近一帧 ImageBitmap（供转场混合使用）
+  const clipFrameCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
+
+  const [muted, setMuted] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportSeconds, setExportSeconds] = useState(0);
+  const [exportStage, setExportStage] = useState("");
+
+  const avCanvasTimeRef = useRef(0);
+  const isPlayingRef = useRef(false);
 
   const tracks = useEditorStore((s) => s.tracks);
   const playhead = useEditorStore((s) => s.playhead);
@@ -21,220 +77,660 @@ export function VideoPreview() {
   const totalDuration = useEditorStore((s) => s.totalDuration);
   const setPlayhead = useEditorStore((s) => s.setPlayhead);
   const setPlaying = useEditorStore((s) => s.setPlaying);
-  const canvasWidth = useEditorStore((s) => s.canvasWidth);
-  const canvasHeight = useEditorStore((s) => s.canvasHeight);
+  const getClipById = useEditorStore((s) => s.getClipById);
 
-  const [loading, setLoading] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [spriteCount, setSpriteCount] = useState(0);
   const total = totalDuration();
 
-  // ── 初始化 / 重建 AVCanvas ────────────────────────────────────────────────
+  // 字幕叠加（DOM，AVCanvas 不渲染 DOM 文字）
+  const allSubtitleClips = tracks.flatMap((t) =>
+    t.type === "subtitle" ? t.clips.filter((c) => c.type === "subtitle") : []
+  );
+  const activeSubtitle = allSubtitleClips.find(
+    (c) => playhead >= c.startTime && playhead < c.endTime
+  ) ?? null;
 
-  const buildCanvas = useCallback(async () => {
-    if (!containerRef.current) return;
-    setLoading(true);
+  // ── 初始化 AVCanvas ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
 
-    // 销毁旧实例
-    if (avCvsRef.current) {
-      try { (avCvsRef.current as unknown as { destroy?: () => void }).destroy?.(); } catch { /* noop */ }
-      containerRef.current.innerHTML = "";
-      avCvsRef.current = null;
-    }
-
-    // 动态 import（浏览器端）
-    const { AVCanvas } = await import("@webav/av-canvas");
-    const { MP4Clip, AudioClip, VisibleSprite, renderTxt2ImgBitmap } = await import("@webav/av-cliper");
-
-    const avCvs = new AVCanvas(containerRef.current, {
-      width: canvasWidth,
-      height: canvasHeight,
+    const avCanvas = new AVCanvas(el, {
       bgColor: "#000000",
+      width: CANVAS_W,
+      height: CANVAS_H,
     });
-    avCvsRef.current = avCvs;
+    avCanvasRef.current = avCanvas;
 
-    // 播放时间同步
-    avCvs.on("timeupdate", (time: number) => {
-      setPlayhead(time / 1e6);
+    const unsubTime = avCanvas.on("timeupdate", (t) => {
+      avCanvasTimeRef.current = t / 1e6;
+      setPlayhead(t / 1e6);
     });
-    avCvs.on("paused", () => {
+    const unsubPaused = avCanvas.on("paused", () => {
+      isPlayingRef.current = false;
       setPlaying(false);
     });
-    avCvs.on("playing", () => {
-      setPlaying(true);
-    });
 
-    // 加载所有 clip 到 AVCanvas
-    let loaded = 0;
-    const allClips = tracks.flatMap((t) =>
-      t.clips.filter((c) => c.type !== "transition")
-    );
+    return () => {
+      unsubTime();
+      unsubPaused();
+      avCanvas.destroy();
+      avCanvasRef.current = null;
+      spriteMapRef.current.clear();
+      clipSnapshotRef.current.clear();
+      // 释放帧缓存
+      for (const frame of clipFrameCacheRef.current.values()) frame.close();
+      clipFrameCacheRef.current.clear();
+    };
+  }, []);
 
-    for (const clip of allClips) {
-      try {
-        if (clip.type === "video" && clip.url) {
-          const resp = await fetch(uploadUrl(clip.url));
-          if (!resp.ok || !resp.body) continue;
-          const mp4Clip = new MP4Clip(resp.body, {
-            audio: { volume: 1 },
-          });
-          await mp4Clip.ready;
-          const sprite = new VisibleSprite(mp4Clip);
-          sprite.time.offset = clip.startTime * 1e6;
-          sprite.time.duration = clip.duration * 1e6;
-          await avCvs.addSprite(sprite);
-          loaded++;
-        } else if ((clip.type === "audio" || clip.type === "bgm") && clip.audioUrl) {
-          const resp = await fetch(clip.audioUrl);
-          if (!resp.ok || !resp.body) continue;
-          const audioClip = new AudioClip(resp.body, {
-            volume: clip.volume ?? 1,
-            loop: clip.type === "bgm",
-          });
-          const sprite = new VisibleSprite(audioClip);
-          sprite.time.offset = clip.startTime * 1e6;
-          sprite.time.duration = clip.duration * 1e6;
-          await avCvs.addSprite(sprite);
-          loaded++;
-        } else if (clip.type === "subtitle" && clip.text) {
-          const style = clip.subtitleStyle ?? {};
-          const cssText = [
-            `font-size: ${style.fontSize ?? 32}px`,
-            `color: ${style.color ?? "#ffffff"}`,
-            `font-weight: ${style.fontWeight ?? "bold"}`,
-            `text-align: ${style.textAlign ?? "center"}`,
-            `background: ${style.background ?? "rgba(0,0,0,0.55)"}`,
-            "padding: 4px 10px",
-            "border-radius: 4px",
-            `width: ${Math.round((style.width ?? 0.8) * canvasWidth)}px`,
-            "white-space: pre-wrap",
-            "word-break: break-all",
-          ].join("; ");
+  // ─── 转场检测 ──────────────────────────────────────────────────────────────
 
-          const bitmap = await renderTxt2ImgBitmap(clip.text, cssText);
-          const { ImgClip } = await import("@webav/av-cliper");
-          const imgClip = new ImgClip(bitmap);
-          const sprite = new VisibleSprite(imgClip);
-          sprite.time.offset = clip.startTime * 1e6;
-          sprite.time.duration = clip.duration * 1e6;
-          // 位置：居中下方
-          const x = Math.round((style.x ?? 0.1) * canvasWidth);
-          const y = Math.round((style.y ?? 0.82) * canvasHeight);
-          sprite.rect.x = x;
-          sprite.rect.y = y;
-          await avCvs.addSprite(sprite);
-          loaded++;
+  function detectTransitions() {
+    transitionInfoMapRef.current.clear();
+    clipTransitionsMapRef.current.clear();
+
+    for (const track of tracks) {
+      const transitionClips = track.clips.filter((c) => c.type === "transition");
+      const videoClips = track.clips.filter((c) => c.type === "video");
+
+      for (const tc of transitionClips) {
+        const midPoint = (tc.startTime + tc.endTime) / 2;
+        const TOL = 1.0;
+
+        // beforeClip：endTime 落在转场时间区间附近，最接近中点
+        let beforeClip: Clip | null = null;
+        let bestBefore = -Infinity;
+        for (const vc of videoClips) {
+          if (vc.endTime >= tc.startTime - TOL && vc.endTime <= tc.endTime + TOL) {
+            const score = -Math.abs(vc.endTime - midPoint);
+            if (score > bestBefore) { beforeClip = vc; bestBefore = score; }
+          }
         }
-      } catch (e) {
-        console.warn("[VideoPreview] Failed to load clip:", clip.id, e);
+
+        // afterClip：startTime 落在转场时间区间附近，最接近中点
+        let afterClip: Clip | null = null;
+        let bestAfter = -Infinity;
+        for (const vc of videoClips) {
+          if (vc.startTime >= tc.startTime - TOL && vc.startTime <= tc.endTime + TOL) {
+            const score = -Math.abs(vc.startTime - midPoint);
+            if (score > bestAfter) { afterClip = vc; bestAfter = score; }
+          }
+        }
+
+        if (beforeClip && afterClip && beforeClip.id !== afterClip.id) {
+          const info: TransitionInfo = {
+            transitionClipId: tc.id,
+            beforeClipId: beforeClip.id,
+            afterClipId: afterClip.id,
+            transitionType: tc.transitionType ?? "fade",
+            startTime: tc.startTime,
+            endTime: tc.endTime,
+          };
+          transitionInfoMapRef.current.set(tc.id, info);
+
+          const bList = clipTransitionsMapRef.current.get(beforeClip.id) ?? [];
+          bList.push(info);
+          clipTransitionsMapRef.current.set(beforeClip.id, bList);
+
+          const aList = clipTransitionsMapRef.current.get(afterClip.id) ?? [];
+          aList.push(info);
+          clipTransitionsMapRef.current.set(afterClip.id, aList);
+        }
+      }
+    }
+  }
+
+  // ─── 当前时间点的转场状态（供 tickInterceptor 调用）─────────────────────────
+
+  function getActiveTransitionAtTime(
+    clipId: string,
+    globalTime: number,
+  ): { transition: TransitionInfo; progress: number; isBeforeClip: boolean } | null {
+    const transitions = clipTransitionsMapRef.current.get(clipId);
+    if (!transitions?.length) return null;
+
+    const clip = getClipById(clipId);
+    if (!clip) return null;
+
+    for (const transition of transitions) {
+      const isBeforeClip = transition.beforeClipId === clipId;
+
+      if (isBeforeClip) {
+        // before clip：从转场开始到 clip 结束
+        if (globalTime >= transition.startTime && globalTime <= clip.endTime) {
+          const dur = clip.endTime - transition.startTime;
+          const progress = dur > 0 ? (globalTime - transition.startTime) / dur : 0;
+          return { transition, progress: Math.min(1, Math.max(0, progress)), isBeforeClip: true };
+        }
+      } else {
+        // after clip：从 clip 开始到转场结束
+        if (globalTime >= clip.startTime && globalTime <= transition.endTime) {
+          const dur = transition.endTime - clip.startTime;
+          const progress = dur > 0 ? (globalTime - clip.startTime) / dur : 0;
+          return { transition, progress: Math.min(1, Math.max(0, progress)), isBeforeClip: false };
+        }
+      }
+    }
+    return null;
+  }
+
+  // ─── 帧缓存更新 ────────────────────────────────────────────────────────────
+
+  async function updateFrameCache(clipId: string, frame: VideoFrame | ImageBitmap) {
+    try {
+      const copy = await createImageBitmap(frame as ImageBitmap);
+      const old = clipFrameCacheRef.current.get(clipId);
+      old?.close();
+      clipFrameCacheRef.current.set(clipId, copy);
+    } catch {
+      // 部分帧类型不可 createImageBitmap，忽略
+    }
+  }
+
+  // ─── tickInterceptor 工厂 ──────────────────────────────────────────────────
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function createTickInterceptor(
+    clipId: string,
+    clipStartTime: number,
+    playbackRate: number,
+    effectType?: Clip["effectType"],
+    clipDuration?: number,
+  ): (time: number, tickRet: any) => Promise<any> {
+    // 每个 clip 独立的 canvas 缓存（避免跨帧重建 OffscreenCanvas）
+    let workCanvas: OffscreenCanvas | null = null;
+    let workCtx: OffscreenCanvasRenderingContext2D | null = null;
+    let transCanvas: OffscreenCanvas | null = null;
+    let transCtx: OffscreenCanvasRenderingContext2D | null = null;
+    let effectCanvas: OffscreenCanvas | null = null;
+    let effectCtx: OffscreenCanvasRenderingContext2D | null = null;
+
+    /** 将特效变换应用到 frame，返回新 ImageBitmap（或 null 若无特效） */
+    async function applyEffect(
+      src: VideoFrame | ImageBitmap,
+      w: number,
+      h: number,
+      clipRelTimeSec: number,
+    ): Promise<ImageBitmap | null> {
+      if (!effectType || !clipDuration) return null;
+      const progress = Math.min(1, Math.max(0, clipRelTimeSec / clipDuration));
+      const t = getEffectTransform(effectType, progress);
+
+      if (!effectCanvas || effectCanvas.width !== w || effectCanvas.height !== h) {
+        effectCanvas = new OffscreenCanvas(w, h);
+        effectCtx = effectCanvas.getContext("2d");
+      }
+      if (!effectCtx) return null;
+
+      effectCtx.clearRect(0, 0, w, h);
+      effectCtx.save();
+      effectCtx.globalAlpha = t.opacity ?? 1;
+      // 以画布中心为变换原点
+      effectCtx.translate(w / 2 + (t.offsetX ?? 0), h / 2 + (t.offsetY ?? 0));
+      effectCtx.scale(t.scale ?? 1, t.scale ?? 1);
+      effectCtx.rotate(((t.rotation ?? 0) * Math.PI) / 180);
+      effectCtx.drawImage(src, -w / 2, -h / 2);
+      effectCtx.restore();
+
+      return createImageBitmap(effectCanvas);
+    }
+
+    function closeFrame(f: VideoFrame | ImageBitmap) {
+      if ("close" in f && typeof (f as VideoFrame).close === "function") {
+        (f as VideoFrame).close();
       }
     }
 
-    setSpriteCount(loaded);
-    setLoading(false);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return async (time: number, tickRet: any) => {
+      const ret = tickRet as { video?: VideoFrame | ImageBitmap };
+      if (!ret.video) return tickRet;
 
-    // 预览第 0 帧
-    if (loaded > 0) {
-      try { await avCvs.previewFrame(0); } catch { /* noop */ }
-    }
-  }, [tracks, canvasWidth, canvasHeight, setPlayhead, setPlaying]);
+      const frame = ret.video;
+      const width = "displayWidth" in frame ? (frame as VideoFrame).displayWidth : (frame as ImageBitmap).width;
+      const height = "displayHeight" in frame ? (frame as VideoFrame).displayHeight : (frame as ImageBitmap).height;
 
-  // tracks 变化时重建
+      // clip 内部相对时间（秒）
+      const clipRelSec = time / 1e6 / playbackRate;
+      // clip 内部相对时间（微秒）→ 全局时间轴时间（秒）
+      const globalTime = clipStartTime + clipRelSec;
+
+      const transitionState = getActiveTransitionAtTime(clipId, globalTime);
+
+      // ── 无转场：应用特效后透传 ───────────────────────────────────────────
+      if (!transitionState) {
+        await updateFrameCache(clipId, frame);
+        const effected = await applyEffect(frame, width, height, clipRelSec);
+        if (effected) {
+          closeFrame(frame);
+          return { ...ret, video: effected };
+        }
+        return tickRet;
+      }
+
+      const { transition, progress, isBeforeClip } = transitionState;
+
+      // ── afterClip：混合 beforeClip 缓存帧 ─────────────────────────────
+      if (!isBeforeClip) {
+        const beforeFrame = clipFrameCacheRef.current.get(transition.beforeClipId);
+        if (beforeFrame) {
+          if (!transCanvas || transCanvas.width !== width || transCanvas.height !== height) {
+            transCanvas = new OffscreenCanvas(width, height);
+            transCtx = transCanvas.getContext("2d");
+          }
+          if (transCtx) {
+            const renderer = getTransitionRenderer(transition.transitionType);
+            renderer.render(transCtx, beforeFrame, frame, progress, width, height);
+            closeFrame(frame);
+            const blended = await createImageBitmap(transCanvas);
+            // 特效叠加在转场结果之上
+            const effected = await applyEffect(blended, width, height, clipRelSec);
+            if (effected) { blended.close(); return { ...ret, video: effected }; }
+            return { ...ret, video: blended };
+          }
+        }
+        return tickRet;
+      }
+
+      // ── beforeClip：缓存帧 + 淡出 ─────────────────────────────────────
+      if (!workCanvas || workCanvas.width !== width || workCanvas.height !== height) {
+        workCanvas = new OffscreenCanvas(width, height);
+        workCtx = workCanvas.getContext("2d");
+      }
+      if (workCtx) {
+        workCtx.clearRect(0, 0, width, height);
+        workCtx.globalAlpha = 1;
+        workCtx.drawImage(frame, 0, 0);
+
+        // 缓存完整亮度帧供 afterClip 使用
+        const forCache = await createImageBitmap(workCanvas);
+        const old = clipFrameCacheRef.current.get(clipId);
+        old?.close();
+        clipFrameCacheRef.current.set(clipId, forCache);
+
+        // 淡出重绘
+        workCtx.clearRect(0, 0, width, height);
+        workCtx.globalAlpha = 1 - progress;
+        workCtx.drawImage(frame, 0, 0);
+        workCtx.globalAlpha = 1;
+
+        closeFrame(frame);
+        const faded = await createImageBitmap(workCanvas);
+        const effected = await applyEffect(faded, width, height, clipRelSec);
+        if (effected) { faded.close(); return { ...ret, video: effected }; }
+        return { ...ret, video: faded };
+      }
+
+      return tickRet;
+    };
+  }
+
+  // ── 同步 tracks → AVCanvas sprites ─────────────────────────────────────────
+  const tracksKey = tracks
+    .flatMap((t) => t.clips)
+    .map((c) =>
+      [
+        c.id, c.type, c.startTime, c.duration,
+        "url" in c ? c.url : "",
+        "audioUrl" in c ? c.audioUrl : "",
+        c.volume ?? "",
+        c.trimStart ?? "",
+        c.trimEnd ?? "",
+        c.transitionType ?? "",
+        c.effectType ?? "",
+      ].join(":")
+    )
+    .join("|");
+
   useEffect(() => {
-    buildCanvas();
-  }, [buildCanvas]);
+    syncSprites();
+  }, [tracksKey]);
 
-  // ── 播放控制 ─────────────────────────────────────────────────────────────
+  async function syncSprites() {
+    const avCanvas = avCanvasRef.current;
+    if (!avCanvas) return;
 
-  async function handlePlay() {
-    const avCvs = avCvsRef.current;
-    if (!avCvs) return;
+    syncAbortRef.current?.abort();
+    const abort = new AbortController();
+    syncAbortRef.current = abort;
+
+    const spriteMap = spriteMapRef.current;
+    const snapshotMap = clipSnapshotRef.current;
+
+    // 重新检测转场关联
+    detectTransitions();
+
+    // 清除帧缓存（转场关系可能变化，旧缓存不再有效）
+    for (const frame of clipFrameCacheRef.current.values()) frame.close();
+    clipFrameCacheRef.current.clear();
+
+    // 需要渲染的 clip（视频 + 音频）
+    const renderableClips = tracks.flatMap((t) =>
+      t.clips.filter((c): c is Clip =>
+        (c.type === "video" && !!c.url) ||
+        ((c.type === "bgm" || c.type === "audio") && !!c.audioUrl)
+      )
+    );
+    const currentIds = new Set(renderableClips.map((c) => c.id));
+
+    // 删除已移除的 clip
+    for (const [id, sprite] of spriteMap.entries()) {
+      if (!currentIds.has(id)) {
+        avCanvas.removeSprite(sprite);
+        spriteMap.delete(id);
+        snapshotMap.delete(id);
+      }
+    }
+
+    // 新增或更新 clip
+    for (const clip of renderableClips) {
+      if (abort.signal.aborted) return;
+
+      const snapKey = [
+        clip.startTime, clip.duration,
+        "url" in clip ? clip.url : "",
+        "audioUrl" in clip ? clip.audioUrl : "",
+        clip.volume ?? "",
+        clip.trimStart ?? "",
+        clip.trimEnd ?? "",
+      ].join(":");
+
+      const existing = spriteMap.get(clip.id);
+
+      if (existing && snapshotMap.get(clip.id) === snapKey) continue;
+
+      if (existing) {
+        const oldSnap = snapshotMap.get(clip.id) ?? "";
+        const oldParts = oldSnap.split(":");
+        const newParts = snapKey.split(":");
+        const urlChanged = oldParts[2] !== newParts[2] || oldParts[3] !== newParts[3];
+        const trimChanged = oldParts[5] !== newParts[5] || oldParts[6] !== newParts[6];
+
+        if (!urlChanged && !trimChanged) {
+          // 仅 timing/volume 变化：直接更新 sprite.time
+          const isAudio = clip.type === "bgm" || clip.type === "audio";
+          const volumeChanged = oldParts[4] !== newParts[4];
+          if (isAudio && volumeChanged) {
+            // AudioClip 创建后无法修改 volume，必须重建
+            avCanvas.removeSprite(existing);
+            spriteMap.delete(clip.id);
+            snapshotMap.delete(clip.id);
+          } else {
+            existing.time.offset = clip.startTime * 1e6;
+            existing.time.duration = clip.duration * 1e6;
+            snapshotMap.set(clip.id, snapKey);
+            continue;
+          }
+        } else {
+          avCanvas.removeSprite(existing);
+          spriteMap.delete(clip.id);
+          snapshotMap.delete(clip.id);
+        }
+      }
+
+      if (abort.signal.aborted) return;
+      const sprite = await buildSprite(clip, abort.signal);
+      if (!sprite || abort.signal.aborted) continue;
+
+      await avCanvas.addSprite(sprite);
+      spriteMap.set(clip.id, sprite);
+      snapshotMap.set(clip.id, snapKey);
+    }
+
+    if (!abort.signal.aborted && !isPlaying) {
+      await avCanvas.previewFrame(playhead * 1e6).catch(() => {});
+    }
+  }
+
+  // ─── 根据 clip 创建 VisibleSprite ─────────────────────────────────────────
+
+  async function buildSprite(clip: Clip, signal: AbortSignal): Promise<VisibleSprite | null> {
+    try {
+      if (clip.type === "video" && clip.url) {
+        const res = await fetch(uploadUrl(clip.url));
+        if (!res.ok || !res.body || signal.aborted) return null;
+
+        let mp4Clip = new MP4Clip(res.body);
+        await mp4Clip.ready;
+        if (signal.aborted) { mp4Clip.destroy?.(); return null; }
+
+        // ── trimStart / trimEnd（移植自 Toonflow videoPreview.vue）──────────
+        const originalDuration = mp4Clip.meta.duration / 1e6; // → 秒
+        const trimStart = clip.trimStart ?? 0;
+        const trimEnd = clip.trimEnd ?? originalDuration;
+
+        if (trimStart > TRIM_MARGIN && trimStart < originalDuration - TRIM_MARGIN) {
+          try {
+            const [before, after] = await mp4Clip.split(trimStart * 1e6);
+            before.destroy();
+            mp4Clip = after;
+            await mp4Clip.ready;
+          } catch { /* 安全边界保护，忽略分割失败 */ }
+        }
+
+        const keepDuration = trimEnd - trimStart;
+        const curDuration = mp4Clip.meta.duration / 1e6;
+        if (keepDuration > TRIM_MARGIN && keepDuration < curDuration - TRIM_MARGIN) {
+          try {
+            const [keep, discard] = await mp4Clip.split(keepDuration * 1e6);
+            discard.destroy();
+            mp4Clip = keep;
+            await mp4Clip.ready;
+          } catch { /* 忽略 */ }
+        }
+
+        if (signal.aborted) { mp4Clip.destroy?.(); return null; }
+
+        // ── 转场 + 特效 tickInterceptor ────────────────────────────────────
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (mp4Clip as any).tickInterceptor = createTickInterceptor(
+          clip.id, clip.startTime, 1,
+          clip.effectType,
+          clip.duration,
+        );
+
+        const sprite = new VisibleSprite(mp4Clip);
+        sprite.time.offset = clip.startTime * 1e6;
+        sprite.time.duration = clip.duration * 1e6;
+
+        // contain-fit 到画布
+        const { width: vw, height: vh } = mp4Clip.meta;
+        if (vw && vh) {
+          const vAspect = vw / vh;
+          const cAspect = CANVAS_W / CANVAS_H;
+          if (vAspect > cAspect) {
+            const h = Math.round(CANVAS_W / vAspect);
+            sprite.rect.w = CANVAS_W; sprite.rect.h = h;
+            sprite.rect.x = 0; sprite.rect.y = Math.round((CANVAS_H - h) / 2);
+          } else {
+            const w = Math.round(CANVAS_H * vAspect);
+            sprite.rect.w = w; sprite.rect.h = CANVAS_H;
+            sprite.rect.x = Math.round((CANVAS_W - w) / 2); sprite.rect.y = 0;
+          }
+        } else {
+          sprite.rect.x = 0; sprite.rect.y = 0;
+          sprite.rect.w = CANVAS_W; sprite.rect.h = CANVAS_H;
+        }
+
+        sprite.interactable = "disabled";
+        return sprite;
+
+      } else if ((clip.type === "bgm" || clip.type === "audio") && clip.audioUrl) {
+        const res = await fetch(uploadUrl(clip.audioUrl));
+        if (!res.ok || !res.body || signal.aborted) return null;
+
+        const volume = muted ? 0 : (clip.volume ?? 0.5);
+        const audioClip = new AudioClip(res.body, { volume });
+        await audioClip.ready;
+        if (signal.aborted) { audioClip.destroy?.(); return null; }
+
+        const sprite = new VisibleSprite(audioClip);
+        sprite.time.offset = clip.startTime * 1e6;
+        sprite.time.duration = clip.duration * 1e6;
+        return sprite;
+      }
+    } catch (e) {
+      if (!signal.aborted) console.error("[VideoPreview] buildSprite error:", e);
+    }
+    return null;
+  }
+
+  // 同步 isPlayingRef
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
+  // ── 外部 playhead 跳转检测 ─────────────────────────────────────────────────
+  useEffect(() => {
+    const diff = Math.abs(playhead - avCanvasTimeRef.current);
+    if (diff < 0.3) return;
+
+    const avCanvas = avCanvasRef.current;
+    if (!avCanvas) return;
+
+    if (isPlayingRef.current) {
+      const totalSec = totalDuration();
+      avCanvas.play({ start: playhead * 1e6, end: totalSec * 1e6 });
+    } else {
+      avCanvas.previewFrame(playhead * 1e6).catch(() => {});
+    }
+    avCanvasTimeRef.current = playhead;
+  }, [playhead]);
+
+  // ── 播放控制 ────────────────────────────────────────────────────────────────
+  function handlePlay() {
+    const avCanvas = avCanvasRef.current;
+    if (!avCanvas || total === 0) return;
+
     if (isPlaying) {
-      avCvs.pause();
+      avCanvas.pause();
+      isPlayingRef.current = false;
       setPlaying(false);
     } else {
-      avCvs.play({
-        start: Math.round(playhead * 1e6),
-        end: Math.round(total * 1e6),
-      });
+      const start = playhead >= total ? 0 : playhead;
+      if (start === 0 && playhead >= total) {
+        avCanvasTimeRef.current = 0;
+        setPlayhead(0);
+      }
+      avCanvas.play({ start: start * 1e6, end: total * 1e6 });
+      isPlayingRef.current = true;
       setPlaying(true);
     }
   }
 
-  async function handleSeek(time: number) {
-    const avCvs = avCvsRef.current;
+  function handleSeek(time: number) {
+    const avCanvas = avCanvasRef.current;
+    if (!avCanvas) return;
+    avCanvas.pause();
+    isPlayingRef.current = false;
     setPlaying(false);
-    avCvs?.pause();
+    avCanvasTimeRef.current = time;
     setPlayhead(time);
-    try { await avCvs?.previewFrame(Math.round(time * 1e6)); } catch { /* noop */ }
+    avCanvas.previewFrame(time * 1e6).catch(() => {});
   }
 
-  async function handleSkipBack() {
-    handleSeek(0);
-  }
+  // ── 静音（需重建 AudioClip sprite）────────────────────────────────────────
+  useEffect(() => {
+    for (const [id, sprite] of spriteMapRef.current.entries()) {
+      const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === id);
+      if (clip && (clip.type === "bgm" || clip.type === "audio")) {
+        avCanvasRef.current?.removeSprite(sprite);
+        spriteMapRef.current.delete(id);
+        clipSnapshotRef.current.delete(id);
+      }
+    }
+    syncSprites();
+  }, [muted]);
 
-  async function handleSkipEnd() {
-    handleSeek(total);
-  }
-
-  // ── 导出 MP4 ─────────────────────────────────────────────────────────────
-
+  // ── 导出（服务端 ffmpeg：concat libx264 归零 PTS → BGM adelay 精确对齐）────────
   async function handleExport() {
-    const avCvs = avCvsRef.current;
-    if (!avCvs || total === 0) return;
+    if (total === 0) return;
     setExporting(true);
+    setExportSeconds(0);
+    setExportStage("准备中…");
+    const timer = setInterval(() => setExportSeconds((s) => s + 1), 1000);
     try {
-      const combinator = await avCvs.createCombinator({
-        width: canvasWidth,
-        height: canvasHeight,
-      });
-      // combinator.output() 返回 ReadableStream，用 reader 手动读取
-      const reader = combinator.output().getReader();
-      const chunks: ArrayBuffer[] = [];
+      const res = await apiFetch(
+        `/api/projects/${projectId}/episodes/${episodeId}/render`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timeline: { tracks, canvasWidth: CANVAS_W, canvasHeight: CANVAS_H, globalSubtitleStyle: useEditorStore.getState().globalSubtitleStyle } }),
+        }
+      );
+      if (!res.ok || !res.body) throw new Error("Render request failed");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let outputUrl = "";
+      let buf = "";
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        // value 是 Uint8Array，复制到 ArrayBuffer 避免类型冲突
-        chunks.push(value.buffer instanceof ArrayBuffer ? value.buffer : value.slice().buffer);
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as
+              | { type: "progress"; message: string }
+              | { type: "done"; outputUrl: string }
+              | { type: "error"; message: string };
+            if (event.type === "progress") {
+              setExportStage(event.message);
+            } else if (event.type === "done") {
+              outputUrl = event.outputUrl;
+            } else if (event.type === "error") {
+              throw new Error(event.message);
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
+        }
       }
-      const blob = new Blob(chunks, { type: "video/mp4" });
-      const url = URL.createObjectURL(blob);
+
+      if (!outputUrl) throw new Error("No output URL received");
+      setExportStage("完成！");
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `editor-export-${Date.now()}.mp4`;
+      a.href = uploadUrl(outputUrl);
+      a.download = `export-${Date.now()}.mp4`;
       a.click();
-      URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("[VideoPreview] Export failed:", e);
+      alert("导出失败：" + (e instanceof Error ? e.message : String(e)));
     } finally {
+      clearInterval(timer);
       setExporting(false);
+      setExportSeconds(0);
+      setExportStage("");
     }
   }
 
+  // ── 渲染 ────────────────────────────────────────────────────────────────────
   return (
     <div className="flex h-full flex-col bg-[#111] items-center justify-between">
-      {/* AVCanvas 容器 */}
-      <div className="relative flex flex-1 items-center justify-center w-full overflow-hidden p-2">
+      {/* Canvas 预览区 + 字幕叠加 */}
+      <div className="relative flex flex-1 w-full overflow-hidden bg-black items-center justify-center">
         <div
           ref={containerRef}
-          className="max-h-full max-w-full rounded-lg shadow-2xl overflow-hidden"
-          style={{
-            aspectRatio: `${canvasWidth}/${canvasHeight}`,
-            width: "100%",
-            maxWidth: `${(canvasWidth / canvasHeight) * 400}px`,
-            background: "#000",
-          }}
+          className="max-h-full max-w-full"
+          style={{ aspectRatio: "16/9" }}
         />
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded-lg">
-            <div className="flex flex-col items-center gap-2">
-              <Loader2 className="h-6 w-6 animate-spin text-white" />
-              <p className="text-[11px] text-white/70">加载媒体素材…</p>
-            </div>
+
+        {/* 字幕 DOM 叠加 */}
+        {activeSubtitle?.text && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 max-w-[85%] text-center pointer-events-none">
+            <span
+              className="inline-block rounded px-3 py-1 text-[13px] font-medium leading-snug text-white"
+              style={{ background: "rgba(0,0,0,0.65)", textShadow: "0 1px 3px rgba(0,0,0,0.8)" }}
+            >
+              {activeSubtitle.text}
+            </span>
           </div>
         )}
-        {!loading && spriteCount === 0 && total === 0 && (
-          <div className="absolute inset-0 flex items-center justify-center">
+
+        {tracks.flatMap((t) => t.clips).filter((c) => c.type === "video").length === 0 && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-[12px] text-white/40">从左侧媒体库添加视频片段</p>
           </div>
         )}
@@ -242,68 +738,59 @@ export function VideoPreview() {
 
       {/* 控制栏 */}
       <div className="w-full bg-[#1a1a1a] px-4 py-2 flex items-center gap-3">
-        {/* 时间 */}
         <span className="font-mono text-[11px] text-white/70 w-28 shrink-0">
           {formatTime(playhead)} / {formatTime(total)}
         </span>
 
-        {/* 进度条 */}
         <input
           type="range"
           min={0}
           max={total || 1}
-          step={0.01}
+          step={0.05}
           value={playhead}
           onChange={(e) => handleSeek(parseFloat(e.target.value))}
           className="flex-1 accent-red-500"
         />
 
-        {/* 按钮组 */}
         <div className="flex items-center gap-1.5 shrink-0">
           <button
-            onClick={handleSkipBack}
+            onClick={() => handleSeek(0)}
             className="flex h-7 w-7 items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10"
           >
             <SkipBack className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={handlePlay}
-            disabled={loading || total === 0}
+            disabled={total === 0}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black hover:bg-white/90 disabled:opacity-40"
           >
             {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-0.5" />}
           </button>
           <button
-            onClick={handleSkipEnd}
+            onClick={() => handleSeek(total)}
             className="flex h-7 w-7 items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10"
           >
             <SkipForward className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => buildCanvas()}
-            disabled={loading}
-            title="重新加载素材"
+            onClick={() => setMuted((m) => !m)}
             className="flex h-7 w-7 items-center justify-center rounded text-white/60 hover:text-white hover:bg-white/10"
+            title={muted ? "取消静音" : "静音"}
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
           </button>
           <div className="mx-1 h-4 w-px bg-white/20" />
           <button
             onClick={handleExport}
-            disabled={exporting || total === 0 || loading}
+            disabled={exporting || total === 0}
             className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-primary/90 disabled:opacity-40"
           >
             {exporting
-              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />导出中…</>
+              ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />{exportStage || "渲染中…"} {exportSeconds}s</>
               : <><Download className="h-3.5 w-3.5" />导出 MP4</>
             }
           </button>
         </div>
-
-        {/* 素材计数 */}
-        {spriteCount > 0 && (
-          <span className="text-[10px] text-white/40 shrink-0">{spriteCount} 个素材</span>
-        )}
       </div>
     </div>
   );

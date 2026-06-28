@@ -4,7 +4,7 @@ import { jsonSchema } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, dialogues, storyboardVersions, episodeCharacters, characterAssets, trackVideos } from "@/lib/db/schema";
+import { projects, episodes, characters, shots, storyboardVersions, episodeCharacters, characterAssets, trackVideos } from "@/lib/db/schema";
 import { eq, asc, and, lt, gt, desc, inArray, isNull, sql } from "drizzle-orm";
 import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
@@ -18,7 +18,8 @@ import type { TaskType } from "@/lib/task-queue";
 import { buildScriptParsePrompt } from "@/lib/ai/prompts/script-parse";
 import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, resolveCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
-import { STORYBOARD_REWRITE_SYSTEM, buildRewriteUserPrompt } from "@/lib/ai/prompts/storyboard-supervision";
+import { STORYBOARD_REWRITE_SYSTEM, buildRewriteUserPrompt, PLOT_OPTIMIZE_SYSTEM, buildPlotOptimizeUserPrompt } from "@/lib/ai/prompts/storyboard-supervision";
+import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
@@ -370,7 +371,15 @@ export async function POST(
 
 
   if (action === "batch_storyboard_rewrite") {
-    return handleBatchStoryboardRewrite(projectId, episodeId, resolvedModelConfig);
+    return handleBatchStoryboardRewrite(projectId, episodeId, resolvedModelConfig, userId);
+  }
+
+  if (action === "batch_plot_optimize") {
+    return handleBatchPlotOptimize(projectId, episodeId, resolvedModelConfig, userId);
+  }
+
+  if (action === "batch_extract_bgm_notes") {
+    return handleBatchExtractBgmNotes(projectId, episodeId);
   }
 
   if (action === "batch_voice_generate") {
@@ -420,6 +429,10 @@ export async function POST(
 
   if (action === "assign_tracks") {
     return handleAssignTracks(projectId, payload, episodeId);
+  }
+
+  if (action === "cover_image_generate") {
+    return handleCoverImageGenerate(projectId, userId, payload, resolvedModelConfig);
   }
 
   // Image/video generation - keep in task queue
@@ -1024,7 +1037,6 @@ async function handleShotSplitStream(
     endFrame: string;
     motionScript: string;
     duration: number;
-    dialogues: Array<{ character: string; text: string }>;
     cameraDirection?: string;
   };
 
@@ -1129,11 +1141,6 @@ async function handleShotSplitStream(
       cameraDirection: shot.cameraDirection || "static",
       duration: shot.duration,
       soundEffectNote: (shot as Record<string, unknown>).soundEffect as string | null ?? null,
-      dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string; type?: string }) => ({
-        character: d.character,
-        text: d.text,
-        type: (d.type as "dialogue" | "os" | "vo") ?? "dialogue",
-      })),
     })),
     existingVersionId: verifiedTargetVersionId,
   });
@@ -1148,8 +1155,9 @@ async function handleShotSplitStream(
     motionScript: shot.motionScript,
     startFrameDesc: shot.startFrame,
     endFrameDesc: shot.endFrame,
-    dialogues: (shot.dialogues ?? []).map((d: { character: string; text: string }) => ({
-      characterName: d.character,
+    // Dialogues embedded in motionScript brackets; superviseShots gets them from motionScript
+    dialogues: extractDialoguesFromMotionScript(shot.motionScript ?? "").map((d) => ({
+      characterName: d.characterName,
       text: d.text,
     })),
   }));
@@ -1440,6 +1448,7 @@ async function handleBatchVoiceGenerate(
   });
 }
 
+
 // --- batch_storyboard_rewrite: tool-calling approach (Toonflow pattern) ---
 // LLM calls write_shot_rewrite() once per shot → each call writes DB immediately → SSE progress
 
@@ -1450,7 +1459,8 @@ function sseEvent(data: Record<string, unknown>): string {
 function handleBatchStoryboardRewrite(
   projectId: string,
   episodeId: string | undefined,
-  modelConfig?: ModelConfig
+  modelConfig?: ModelConfig,
+  userId?: string
 ): Response {
   if (!modelConfig?.text) {
     return new Response(
@@ -1468,6 +1478,11 @@ function handleBatchStoryboardRewrite(
       };
 
       try {
+        // 解析用户自定义 system prompt（若有）
+        const rewriteSystemPrompt = userId
+          ? await resolvePrompt("batch_storyboard_rewrite", { userId, projectId }).catch(() => STORYBOARD_REWRITE_SYSTEM)
+          : STORYBOARD_REWRITE_SYSTEM;
+
         // Fetch project visualStyle for art-style aware lighting vocabulary
         const [rewriteProject] = await db
           .select({ visualStyle: projects.visualStyle })
@@ -1517,38 +1532,22 @@ function handleBatchStoryboardRewrite(
         const shotIds = shotRows.map((s) => s.id);
         const validShotIds = new Set(shotIds);
 
-        // Fetch dialogues（含 type 和 voiceHint，供批量重写将台词内嵌进 motionScript）
-        const dialogueRows = await db
-          .select({
-            shotId: dialogues.shotId,
-            text: dialogues.text,
-            type: dialogues.type,
-            characterName: characters.name,
-            voiceHint: characters.voiceHint,
-          })
-          .from(dialogues)
-          .innerJoin(characters, eq(dialogues.characterId, characters.id))
-          .where(inArray(dialogues.shotId, shotIds))
-          .orderBy(dialogues.sequence);
-
-        const dialoguesByShotId = new Map<
-          string,
-          Array<{ characterName: string; text: string; type: string | null; voiceHint: string | null }>
-        >();
-        for (const d of dialogueRows) {
-          if (!d.shotId) continue;
-          if (!dialoguesByShotId.has(d.shotId)) dialoguesByShotId.set(d.shotId, []);
-          dialoguesByShotId.get(d.shotId)!.push({
-            characterName: d.characterName,
-            text: d.text,
-            type: d.type,
-            voiceHint: d.voiceHint,
-          });
-        }
-
+        // 台词从 motionScript bracket 实时解析，附加角色 voiceHint
+        const rewriteCharRows = await db
+          .select({ name: characters.name, voiceHint: characters.voiceHint })
+          .from(characters)
+          .where(eq(characters.projectId, projectId));
+        const charVoiceMap = new Map(
+          rewriteCharRows.map((c) => [c.name, c.voiceHint ?? null])
+        );
         const shotsWithDialogues = shotRows.map((s) => ({
           ...s,
-          dialogues: dialoguesByShotId.get(s.id) ?? [],
+          dialogues: extractDialoguesFromMotionScript(s.motionScript ?? "").map((d) => ({
+            characterName: d.characterName,
+            text: d.text,
+            type: d.type as string | null,
+            voiceHint: (charVoiceMap.get(d.characterName) ?? null) as string | null,
+          })),
         }));
 
         const totalCount = shotRows.length;
@@ -1593,6 +1592,7 @@ function handleBatchStoryboardRewrite(
                 .update(shots)
                 .set({ startFrameDesc, endFrameDesc, motionScript, cameraDirection, videoPrompt: null })
                 .where(eq(shots.id, shotId));
+
               writtenShotIds.add(shotId);
               writtenShotFrames.set(shotId, startFrameDesc);
               updatedCount++;
@@ -1622,7 +1622,7 @@ function handleBatchStoryboardRewrite(
           try {
             const result = streamText({
               model: createLanguageModel(modelConfig.text!),
-              system: STORYBOARD_REWRITE_SYSTEM,
+              system: rewriteSystemPrompt,
               prompt: buildRewriteUserPrompt(chunk, shotsWithDialogues, visualStyleContext, writtenShotFrames),
               temperature: 0.5,
               tools: { write_shot_rewrite: writeShotRewrite },
@@ -1654,7 +1654,7 @@ function handleBatchStoryboardRewrite(
                 try {
                   const singleResult = streamText({
                     model: createLanguageModel(modelConfig.text!),
-                    system: STORYBOARD_REWRITE_SYSTEM,
+                    system: rewriteSystemPrompt,
                     prompt: buildRewriteUserPrompt([singleShot], shotsWithDialogues, visualStyleContext, writtenShotFrames),
                     temperature: 0.5,
                     tools: { write_shot_rewrite: writeShotRewrite },
@@ -1684,6 +1684,204 @@ function handleBatchStoryboardRewrite(
         console.log(`[BatchStoryboardRewrite] Done: ${updatedCount}/${totalCount}`);
       } catch (err) {
         console.error("[BatchStoryboardRewrite] Fatal error:", err);
+        send({ type: "error", error: extractErrorMessage(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
+
+// --- batch_plot_optimize: 剧情优化 Agent ---
+// 读取全集 shots.prompt（场景描述），用编剧视角批量重写为有血有肉的剧本内容，写回 shots.prompt。
+
+function handleBatchPlotOptimize(
+  projectId: string,
+  episodeId: string | undefined,
+  modelConfig?: ModelConfig,
+  userId?: string
+): Response {
+  if (!modelConfig?.text) {
+    return new Response(
+      sseEvent({ type: "error", error: "No text model configured" }),
+      { status: 200, headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" } }
+    );
+  }
+
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
+
+      try {
+        // 解析用户自定义 system prompt（若有）
+        const plotSystemPrompt = userId
+          ? await resolvePrompt("batch_plot_optimize", { userId, projectId }).catch(() => PLOT_OPTIMIZE_SYSTEM)
+          : PLOT_OPTIMIZE_SYSTEM;
+
+        // 拉取全集 shots
+        const shotRows = await db
+          .select({
+            id: shots.id,
+            sequence: shots.sequence,
+            duration: shots.duration,
+            prompt: shots.prompt,
+            motionScript: shots.motionScript,
+          })
+          .from(shots)
+          .innerJoin(storyboardVersions, eq(shots.versionId, storyboardVersions.id))
+          .where(
+            episodeId
+              ? and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId))
+              : eq(storyboardVersions.projectId, projectId)
+          )
+          .orderBy(shots.sequence);
+
+        if (shotRows.length === 0) {
+          send({ type: "error", error: "No shots found for this episode" });
+          controller.close();
+          return;
+        }
+
+        const shotIds = shotRows.map((s) => s.id);
+        const validShotIds = new Set(shotIds);
+
+        // 从 motionScript bracket 中提取台词供 LLM 参考（不会修改）
+        const shotsWithDialogues = shotRows.map((s) => ({
+          ...s,
+          dialogues: extractDialoguesFromMotionScript(s.motionScript ?? "").map((d) => ({
+            characterName: d.characterName,
+            text: d.text,
+            type: d.type as string | null,
+          })),
+        }));
+
+        const totalCount = shotRows.length;
+        let updatedCount = 0;
+        const writtenShotIds = new Set<string>();
+
+        send({ type: "start", totalCount });
+        console.log(`[BatchPlotOptimize] start project=${projectId} episode=${episodeId} shots=${totalCount}`);
+
+        // 工具：LLM 按镜头顺序逐一调用，写回 shots.prompt
+        const writeShotPlot = tool({
+          description: "将优化后的场景描述写入数据库。每个分镜调用一次，按镜头顺序逐一调用。",
+          inputSchema: jsonSchema<{
+            shotId: string;
+            prompt: string;
+          }>({
+            type: "object",
+            properties: {
+              shotId: { type: "string", description: "镜头 ID，必须与输入完全一致" },
+              prompt: { type: "string", description: "重写后的场景描述（符合编剧标准，有血有肉）" },
+            },
+            required: ["shotId", "prompt"],
+          }),
+          execute: async ({ shotId, prompt: newPrompt }) => {
+            if (!validShotIds.has(shotId)) return `skipped: unknown shotId ${shotId}`;
+            if (writtenShotIds.has(shotId)) return `skipped: already written ${shotId}`;
+            if (!newPrompt?.trim()) return `skipped: empty prompt for ${shotId}`;
+
+            try {
+              await db
+                .update(shots)
+                .set({ prompt: newPrompt })
+                .where(eq(shots.id, shotId));
+
+              writtenShotIds.add(shotId);
+              updatedCount++;
+              send({ type: "progress", updatedCount, totalCount });
+              console.log(`[BatchPlotOptimize] wrote shot ${shotId} (${updatedCount}/${totalCount})`);
+              return `ok: ${shotId}`;
+            } catch (dbErr) {
+              console.error(`[BatchPlotOptimize] DB write failed for shot ${shotId}:`, dbErr);
+              return `error: DB write failed for ${shotId}`;
+            }
+          },
+        });
+
+        // 分块处理，每块 5 个镜头，避免推理超时
+        const CHUNK_SIZE = 5;
+        const chunks: typeof shotsWithDialogues[] = [];
+        for (let i = 0; i < shotsWithDialogues.length; i += CHUNK_SIZE) {
+          chunks.push(shotsWithDialogues.slice(i, i + CHUNK_SIZE));
+        }
+
+        for (let chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+          const chunk = chunks[chunkIdx];
+          const chunkLabel = `chunk ${chunkIdx + 1}/${chunks.length}`;
+          console.log(`[BatchPlotOptimize] ${chunkLabel} start (shots ${chunk.map(s => s.sequence).join(",")})`);
+
+          try {
+            const result = streamText({
+              model: createLanguageModel(modelConfig.text!),
+              system: plotSystemPrompt,
+              prompt: buildPlotOptimizeUserPrompt(chunk, shotsWithDialogues),
+              temperature: 0.7,
+              tools: { write_shot_plot: writeShotPlot },
+              stopWhen: stepCountIs(chunk.length + 5),
+            });
+
+            let lastHeartbeat = Date.now();
+            for await (const ch of result.fullStream) {
+              const now = Date.now();
+              if (now - lastHeartbeat > 2000) {
+                send({ type: "thinking", updatedCount, totalCount });
+                lastHeartbeat = now;
+              }
+              void ch;
+            }
+            console.log(`[BatchPlotOptimize] ${chunkLabel} done (${updatedCount}/${totalCount})`);
+          } catch (streamErr) {
+            const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
+            console.warn(`[BatchPlotOptimize] ${chunkLabel} failed: ${errMsg}`);
+            send({ type: "stream_error", error: `${chunkLabel}: ${errMsg}`, updatedCount, totalCount });
+
+            // 降级：逐镜单独重试
+            const unwritten = chunk.filter((s) => !writtenShotIds.has(s.id));
+            for (const singleShot of unwritten) {
+              try {
+                const singleResult = streamText({
+                  model: createLanguageModel(modelConfig.text!),
+                  system: plotSystemPrompt,
+                  prompt: buildPlotOptimizeUserPrompt([singleShot], shotsWithDialogues),
+                  temperature: 0.7,
+                  tools: { write_shot_plot: writeShotPlot },
+                  stopWhen: stepCountIs(6),
+                });
+                let lastHeartbeat = Date.now();
+                for await (const ch of singleResult.fullStream) {
+                  const now = Date.now();
+                  if (now - lastHeartbeat > 2000) {
+                    send({ type: "thinking", updatedCount, totalCount });
+                    lastHeartbeat = now;
+                  }
+                  void ch;
+                }
+              } catch (singleErr) {
+                const msg = singleErr instanceof Error ? singleErr.message : String(singleErr);
+                console.warn(`[BatchPlotOptimize] shot ${singleShot.sequence} fallback failed: ${msg}`);
+                send({ type: "stream_error", error: `shot ${singleShot.sequence} skipped: ${msg}`, updatedCount, totalCount });
+              }
+            }
+          }
+        }
+
+        send({ type: "done", updatedCount, totalCount });
+        console.log(`[BatchPlotOptimize] Done: ${updatedCount}/${totalCount}`);
+      } catch (err) {
+        console.error("[BatchPlotOptimize] Fatal error:", err);
         send({ type: "error", error: extractErrorMessage(err) });
       } finally {
         controller.close();
@@ -2235,11 +2433,7 @@ async function handleSingleVideoGenerate(
   const isSingleVideoCrowdShot = singleVideoShotChars.length === 0;
   const useSingleVideoReferenceMode = shouldUseFirstFrameVideoMode(shot, isSingleVideoCrowdShot);
 
-  const shotDialogues = await db
-    .select({ text: dialogues.text, characterId: dialogues.characterId, sequence: dialogues.sequence, type: dialogues.type })
-    .from(dialogues)
-    .where(eq(dialogues.shotId, shotId))
-    .orderBy(asc(dialogues.sequence));
+  const shotDialoguesParsed = extractDialoguesFromMotionScript(shot.motionScript ?? "");
 
   const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
   const videoSlots = await resolveSlotContents("video_generate", { userId, projectId });
@@ -2304,15 +2498,15 @@ async function handleSingleVideoGenerate(
       shotForVideo.bgmNote
     );
     const videoContextForDialogue = resolvedMotionText;
-    const onScreenDialogueChars = shotDialogues
-      .map((d) => shotCharacters.find((c) => c.id === d.characterId)?.name ?? "Unknown")
+    const onScreenDialogueChars = shotDialoguesParsed
+      .map((d) => d.characterName)
       .filter((name) =>
         isCharacterOnScreen(name, videoContextForDialogue, shotForVideo.startFrameDesc)
       );
 
-    const dialogueList = shotDialogues.map((d) => {
-      const char = shotCharacters.find((c) => c.id === d.characterId);
-      const characterName = char?.name ?? "Unknown";
+    const dialogueList = shotDialoguesParsed.map((d) => {
+      const char = shotCharacters.find((c) => c.name === d.characterName);
+      const characterName = d.characterName;
       const onScreen = isCharacterOnScreen(
         characterName,
         videoContextForDialogue,
@@ -2521,22 +2715,12 @@ async function handleVideoAssembleSync(projectId: string, payload?: Record<strin
     return NextResponse.json({ error: "No video clips to assemble" }, { status: 400 });
   }
 
-  // Get dialogues for subtitles
-  const allDialogues = [];
+  // Get dialogues for subtitles (from motionScript brackets, no DB query needed)
+  const allDialogues: Array<{ text: string; characterName: string; sequence: number; shotSequence: number }> = [];
   for (const shot of projectShots) {
-    const shotDialogues = await db
-      .select({
-        text: dialogues.text,
-        characterName: characters.name,
-        sequence: dialogues.sequence,
-        shotSequence: shots.sequence,
-      })
-      .from(dialogues)
-      .innerJoin(characters, eq(dialogues.characterId, characters.id))
-      .innerJoin(shots, eq(dialogues.shotId, shots.id))
-      .where(eq(dialogues.shotId, shot.id))
-      .orderBy(asc(dialogues.sequence));
-    allDialogues.push(...shotDialogues);
+    for (const d of extractDialoguesFromMotionScript(shot.motionScript ?? "")) {
+      allDialogues.push({ text: d.text, characterName: d.characterName, sequence: d.sequence, shotSequence: shot.sequence ?? 0 });
+    }
   }
 
   try {
@@ -2741,6 +2925,82 @@ async function handleAssignTracks(
  * 返回候选场景列表（不自动创建，由前端让用户勾选后再批量 POST）。
  */
 
+// ─── batch_extract_bgm_notes：从剧集 script 重新提取 bgmNote 到分镜 ───────────
+
+/**
+ * 读取 episodes.script 原始剧本，重新解析每个 shot 的【背景音】标签，
+ * 只更新 shots.bgm_note 字段，不触碰其他分镜字段。
+ * 按 sequence 号匹配 DB 中的 shots（与当前 storyboard version 一致）。
+ */
+async function handleBatchExtractBgmNotes(
+  projectId: string,
+  episodeId: string | undefined,
+) {
+  if (!episodeId) {
+    return NextResponse.json({ error: "episodeId 为必填" }, { status: 400 });
+  }
+
+  // 1. 读取剧集 script 原文
+  const [episode] = await db
+    .select({ script: episodes.script })
+    .from(episodes)
+    .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)));
+
+  if (!episode) {
+    return NextResponse.json({ error: "剧集不存在" }, { status: 404 });
+  }
+
+  const scriptText = episode.script?.trim();
+  if (!scriptText) {
+    return NextResponse.json({ error: "剧集 script 为空，无法提取" }, { status: 400 });
+  }
+
+  // 2. 重新解析 bgmNote
+  const { shots: extractedShots } = extractShotsFromScript(scriptText);
+  const bgmMap = new Map<number, string | null>();
+  for (const s of extractedShots) {
+    if (s.bgmNote) bgmMap.set(s.sequence, s.bgmNote);
+  }
+
+  if (bgmMap.size === 0) {
+    return NextResponse.json({ updated: 0, message: "剧本中未发现【背景音】标签" });
+  }
+
+  // 3. 找当前剧集最新 storyboard version 的所有 shots
+  const [latestVersion] = await db
+    .select({ id: storyboardVersions.id })
+    .from(storyboardVersions)
+    .where(and(eq(storyboardVersions.projectId, projectId), eq(storyboardVersions.episodeId, episodeId)))
+    .orderBy(desc(storyboardVersions.createdAt))
+    .limit(1);
+
+  if (!latestVersion) {
+    return NextResponse.json({ error: "该剧集没有分镜版本" }, { status: 404 });
+  }
+
+  const targetShots = await db
+    .select({ id: shots.id, sequence: shots.sequence })
+    .from(shots)
+    .where(eq(shots.versionId, latestVersion.id))
+    .orderBy(asc(shots.sequence));
+
+  // 4. 按 sequence 匹配，只更新有 bgmNote 的
+  let updated = 0;
+  for (const shot of targetShots) {
+    const bgmNote = bgmMap.get(shot.sequence);
+    if (bgmNote !== undefined) {
+      await db.update(shots).set({ bgmNote }).where(eq(shots.id, shot.id));
+      updated++;
+    }
+  }
+
+  return NextResponse.json({
+    updated,
+    total: targetShots.length,
+    message: `已从剧本中提取并更新 ${updated} 个分镜的背景音乐注记`,
+  });
+}
+
 // ─── split_shot：将单个分镜拆成两个连续分镜 ───────────────
 
 async function handleSplitShot(
@@ -2763,18 +3023,8 @@ async function handleSplitShot(
     return NextResponse.json({ error: "分镜不存在" }, { status: 404 });
   }
 
-  // 查询原始分镜的台词（带角色名）
-  const originalDialogues = await db
-    .select({
-      text: dialogues.text,
-      type: dialogues.type,
-      characterName: characters.name,
-      sequence: dialogues.sequence,
-    })
-    .from(dialogues)
-    .innerJoin(characters, eq(dialogues.characterId, characters.id))
-    .where(eq(dialogues.shotId, shotId))
-    .orderBy(dialogues.sequence);
+  // 从 motionScript bracket 提取原始台词（无需查 dialogues 表）
+  const originalDialogues = extractDialoguesFromMotionScript(shot.motionScript ?? "");
 
   const dialoguesBlock = originalDialogues.length > 0
     ? `- 台词列表（必须分配到两个子分镜中，禁止丢弃）：\n` +
@@ -2840,7 +3090,6 @@ async function handleSplitShot(
   const newShots = [];
   for (let i = 0; i < 2; i++) {
     const s = splitShots[i] as Record<string, unknown>;
-    const dialogueList = Array.isArray(s.dialogues) ? s.dialogues : [];
     const newShotId = ulid();
     const [inserted] = await db.insert(shots).values({
       id: newShotId,
@@ -2857,30 +3106,7 @@ async function handleSplitShot(
       cameraDirection: typeof s.cameraDirection === "string" ? s.cameraDirection : null,
     }).returning();
     newShots.push(inserted);
-
-    // 插入台词
-    for (let di = 0; di < dialogueList.length; di++) {
-      const d = dialogueList[di] as Record<string, unknown>;
-      if (typeof d.text !== "string" || !d.text.trim()) continue;
-      // 尝试匹配角色 ID（按名称模糊匹配）
-      const charName = typeof d.character === "string" ? d.character.trim() : "";
-      const [matchedChar] = charName
-        ? await db
-            .select({ id: characters.id })
-            .from(characters)
-            .where(and(eq(characters.projectId, projectId), eq(characters.name, charName)))
-            .limit(1)
-        : [undefined];
-      if (!matchedChar) continue;
-      await db.insert(dialogues).values({
-        id: ulid(),
-        shotId: newShotId,
-        characterId: matchedChar.id,
-        text: d.text.trim(),
-        sequence: di,
-        type: typeof d.type === "string" && ["dialogue", "os", "vo"].includes(d.type) ? d.type as "dialogue" | "os" | "vo" : "dialogue",
-      });
-    }
+    // Dialogues are embedded in motionScript brackets; no separate table insert needed.
   }
 
   // 删除原分镜
@@ -3023,4 +3249,74 @@ async function handleExpandCharacterAsset(
   }
 
   return NextResponse.json({ success: true, generated });
+}
+
+// --- cover_image_generate: 生成2:3竖版封面图（支持角色定妆图 @图N 绑定） ---
+async function handleCoverImageGenerate(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig
+) {
+  let prompt = payload?.prompt as string;
+  // 客户端传来的角色定妆图路径数组（本地 uploads/... 相对路径）
+  const referenceImagePaths = (payload?.referenceImagePaths as string[] | undefined) ?? [];
+  // 每张参考图对应的角色名（与 referenceImagePaths 顺序对应）
+  const referenceLabels = (payload?.referenceLabels as string[] | undefined) ?? [];
+
+  if (!prompt) {
+    return NextResponse.json({ error: "No prompt provided" }, { status: 400 });
+  }
+
+  if (!modelConfig?.image) {
+    return NextResponse.json({ error: "No image model configured" }, { status: 400 });
+  }
+
+  const ai = resolveImageProvider(modelConfig);
+
+  // 将相对路径转为绝对路径，过滤掉不存在的文件
+  const validRefs: Array<{ absPath: string; label: string }> = [];
+  for (let i = 0; i < referenceImagePaths.length; i++) {
+    const p = referenceImagePaths[i];
+    if (!p) continue;
+    const abs = path.isAbsolute(p) ? p : path.join(process.cwd(), p);
+    try {
+      if (fs.existsSync(abs)) {
+        validRefs.push({ absPath: abs, label: referenceLabels[i] ?? "" });
+      }
+    } catch { /* skip */ }
+  }
+  const cappedRefs = validRefs.slice(0, 14); // Seedream 最多 14 张
+
+  // ── @图N 绑定：在 prompt 头部注入参考图说明 ──
+  // 只声明"@图N 为X角色"，不替换正文里的角色名。
+  // 原因：正文里的位置描述（由左至右：格朗、翠缇娜...）是用户的空间排列意图，
+  // 一旦替换成@图N数字编号，模型会按编号大小重排位置，违背用户意图。
+  // 保留角色名原文 + 头部声明，模型能自动将声明与正文名字对应。
+  if (cappedRefs.length > 0) {
+    const prefix = cappedRefs
+      .map((r, i) => (r.label ? `@图${i + 1} 为${r.label}角色` : `@图${i + 1}`))
+      .join(" ");
+    prompt = `${prefix},\n\n${prompt}\n\n严格保持各角色的面部特征、发型、服饰与对应参考图完全一致，不得改动。`;
+  }
+
+  const absRefPaths = cappedRefs.map((r) => r.absPath);
+  console.log(`[CoverImageGenerate] refs=${absRefPaths.length}, prompt[:80]=${prompt.slice(0, 80)}...`);
+
+  try {
+    const imagePath = await ai.generateImage(prompt, {
+      aspectRatio: "2:3",
+      size: "1664x2496", // Seedream 5.0/4.5/4.0 官方推荐 2K 2:3
+      quality: "hd",
+      ...(absRefPaths.length > 0 ? { referenceImages: absRefPaths } : {}),
+    });
+
+    return NextResponse.json({ imagePath, status: "ok" });
+  } catch (err) {
+    console.error("[CoverImageGenerate] Failed:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Image generation failed" },
+      { status: 500 }
+    );
+  }
 }

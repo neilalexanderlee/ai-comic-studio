@@ -337,6 +337,20 @@
       "when": 1779000023000,
       "tag": "0047_drop_enhance_prompts_link_shots",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1779000024000,
+      "tag": "0048_episode_editor_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1779000025000,
+      "tag": "0049_drop_dialogues",
+      "breakpoints": true
     }
   ]
 }

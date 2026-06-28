@@ -8,11 +8,70 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music, FileDown } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
+
+/**
+ * 将定妆图导出为符合红果平台要求的格式：
+ * - 比例 7:10（宽:高），居中裁剪
+ * - 输出尺寸 1400×2000px
+ * - JPEG 格式，自动压缩至 ≤2MB
+ */
+async function exportAsset7x10(imgSrc: string, fileName: string) {
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = reject;
+    img.src = imgSrc;
+  });
+
+  const TARGET_W = 1400;
+  const TARGET_H = 2000;
+  const targetRatio = TARGET_W / TARGET_H; // 0.7 = 7:10
+  const imgRatio = img.naturalWidth / img.naturalHeight;
+
+  let sx = 0, sy = 0, sw = img.naturalWidth, sh = img.naturalHeight;
+  if (imgRatio > targetRatio) {
+    // 图片比目标宽 → 左右裁掉多余
+    sw = img.naturalHeight * targetRatio;
+    sx = (img.naturalWidth - sw) / 2;
+  } else {
+    // 图片比目标高 → 上下裁掉多余（保留上部人物主体）
+    sh = img.naturalWidth / targetRatio;
+    sy = 0; // 从顶部开始，保留人物主体
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = TARGET_W;
+  canvas.height = TARGET_H;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, TARGET_W, TARGET_H);
+
+  // 自动压缩至 ≤2MB
+  let quality = 0.92;
+  let blob: Blob | null = null;
+  while (quality >= 0.5) {
+    blob = await new Promise<Blob | null>((r) =>
+      canvas.toBlob((b) => r(b), "image/jpeg", quality)
+    );
+    if (!blob || blob.size <= 2 * 1024 * 1024) break;
+    quality -= 0.05;
+  }
+  if (!blob) { alert("导出失败，请重试"); return; }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 /** 音色快捷预设（与 seedance-multi-param.ts DEFAULT_VOICE_PROFILES 保持同步） */
 const VOICE_PRESETS = [
@@ -443,6 +502,22 @@ export function CharacterCard({
           >
             <Sparkles className="h-3 w-3" />
           </button>
+
+          {/* 导出7:10定妆图（符合红果上传要求） */}
+          {asset.imagePath && (
+            <button
+              onClick={() =>
+                exportAsset7x10(
+                  uploadUrl(asset.imagePath!),
+                  `${name}_${asset.tag}_7x10.jpg`
+                )
+              }
+              title="导出符合红果格式（7:10比例，≤2MB JPG）"
+              className="absolute right-1 bottom-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-all hover:bg-black/70 group-hover/slot:opacity-100 shadow-sm"
+            >
+              <FileDown className="h-3 w-3" />
+            </button>
+          )}
 
           {/* Delete Asset Button (removes entire form slot + file) */}
           <button

@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
-import { shots, projects, dialogues, characters } from "@/lib/db/schema";
+import { shots, projects } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import type { Task } from "@/lib/task-queue";
+import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 
 export async function handleVideoAssemble(task: Task) {
   const payload = task.payload as { projectId: string };
@@ -21,22 +22,12 @@ export async function handleVideoAssemble(task: Task) {
     throw new Error("No video clips to assemble");
   }
 
-  // Get dialogues for subtitles
-  const allDialogues = [];
+  // Get dialogues for subtitles (from motionScript brackets, no DB query needed)
+  const allDialogues: Array<{ text: string; characterName: string; sequence: number; shotSequence: number }> = [];
   for (const shot of projectShots) {
-    const shotDialogues = await db
-      .select({
-        text: dialogues.text,
-        characterName: characters.name,
-        sequence: dialogues.sequence,
-        shotSequence: shots.sequence,
-      })
-      .from(dialogues)
-      .innerJoin(characters, eq(dialogues.characterId, characters.id))
-      .innerJoin(shots, eq(dialogues.shotId, shots.id))
-      .where(eq(dialogues.shotId, shot.id))
-      .orderBy(asc(dialogues.sequence));
-    allDialogues.push(...shotDialogues);
+    for (const d of extractDialoguesFromMotionScript(shot.motionScript ?? "")) {
+      allDialogues.push({ text: d.text, characterName: d.characterName, sequence: d.sequence, shotSequence: shot.sequence ?? 0 });
+    }
   }
 
   const outputPath = await assembleVideo({

@@ -17,6 +17,10 @@ import {
   SINGLE_SHOT_REWRITE_DEFAULT_SLOTS,
   assembleSingleShotRewriteSystem,
 } from "./single-shot-rewrite-defaults";
+import {
+  STORYBOARD_REWRITE_SYSTEM,
+  PLOT_OPTIMIZE_SYSTEM,
+} from "./storyboard-supervision";
 
 // ── Types ────────────────────────────────────────────────
 
@@ -546,35 +550,70 @@ const SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE = `Output a JSON array. Each shot object
 [
   {
     "sequence": 1,
-    "sceneDescription": "Scene/environment description — setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood",
+    "sceneDescription": "【视觉核心：[single visual concept] | 反差：[contrast pair A vs B] | 排除：[what is actively excluded from frame]】 + scene/environment: setting, architecture, props, weather, time of day, lighting setup, color palette, atmospheric mood. MUST start with the 【视觉核心 | 反差 | 排除】 line derived from your director's concept step.",
     "startFrame": "Detailed FIRST FRAME description for AI image generation (see requirements below)",
     "endFrame": "Detailed LAST FRAME description for AI image generation (see requirements below)",
     "motionScript": "Complete time-segmented action script ending with ｜朝向：[face direction] annotation (see requirements below)",
     "duration": {{MIN_DURATION}}-{{MAX_DURATION}},
     "soundEffect": "Diegetic sound events only (no music/BGM), e.g. 风声衣袂声/脚步声金属碰撞/火焰噼啪声",
-    "dialogues": [
-      {
-        "character": "Exact character name",
-        "text": "Dialogue line spoken during this shot",
-        "type": "dialogue|os|vo"
-      }
-    ],
     "cameraDirection": "Specific camera movement instruction"
   }
 ]
 
 FIELD RULES:
 - soundEffect: REQUIRED. Diegetic/environmental sounds only. Write "无音效" if truly silent. NEVER include music or BGM here.
-- dialogues[].type: REQUIRED for all dialogue entries.
-  - "dialogue": normal on-screen speech (mouth moving)
-  - "os": off-screen inner monologue (mouth closed/not shown)
-  - "vo": voiceover narration (character not in frame or mouth closed)
 
 ORIENTATION RULE (｜朝向：annotation in motionScript):
 Every motionScript for a shot containing named characters MUST end with: ｜朝向：[direction]
 Direction must be one of: 正面面朝镜头 / 3/4侧面朝右 / 3/4侧面朝左 / 正侧面朝右 / 正侧面朝左 / 背对镜头 / 3/4背面朝右 / 3/4背面朝左
 For dialogue scenes with two characters: specify both, e.g. ｜朝向：角色甲3/4侧面朝右，角色乙3/4侧面朝左
 For environment/crowd shots without named characters: omit the ｜朝向：annotation.`;
+
+const SHOT_SPLIT_DIRECTOR_CONCEPT_RULES = `═══════════════════════════════════════════════════
+  DIRECTOR'S VISUAL CONCEPT — MANDATORY FIRST STEP (before writing ANY shot fields)
+═══════════════════════════════════════════════════
+You are not transcribing plot action into visuals. You are a director choosing HOW to show a story beat.
+
+For EVERY shot, before writing startFrame/endFrame/motionScript, you MUST silently ask THREE questions:
+
+  Q1 — SINGLE VISUAL CONCEPT: "In one phrase, what is this shot VISUALLY ABOUT?"
+       Not the plot action ("李明走进房间") — the visual IDEA ("门口空间作为情感分界线，李明在门槛停住不进去")
+       A shot with no single visual concept = a shot with no reason to exist.
+
+  Q2 — CONTRAST PAIR: "What two things are in tension or opposition in this frame?"
+       The most powerful shots are built on contrast. Examples:
+       - 静止主体 vs 动态背景（角色纹丝不动，身后战场爆炸）
+       - 荒诞处境 vs 平静反应（奇观红光包围，角色淡定打电话）
+       - 前景秘密 vs 中景无知（前景虚焦的危险物，中景角色毫无察觉）
+       - 极近景局部 vs 极远景全貌（眼睛特写 vs 拉远揭示空旷环境）
+       No contrast = flat shot. Force a contrast even where the screenplay doesn't have one.
+
+  Q3 — ACTIVE EXCLUSION: "What am I deliberately NOT showing, and why?"
+       Exclusion is a directorial decision, not a technical constraint.
+       Examples:
+       - "整段不拍脸，只拍腿部——保持悬念，脸的揭示留给下一镜"
+       - "不拍全身，只拍手和道具——让观众聚焦于道具的意义"
+       - "不交代环境，只拍两人面部——封闭空间感让对话压力更大"
+
+ENCODING RULE: Encode your answers into the sceneDescription field as the FIRST LINE, before environment description:
+【视觉核心：[Q1 answer] | 反差：[Q2 pair] | 排除：[Q3 decision]】
+
+DERIVATION EXAMPLES (plot action → directorial concept):
+  Plot: "丹眉发现符纸布袋后离开房间"
+  ❌ Generic: 【视觉核心：丹眉离开 | 反差：无 | 排除：无】
+  ✅ Director: 【视觉核心：布袋子作为被遗忘的秘密等待揭示 | 反差：人物离开→布袋子留下被镜头注视 | 排除：不跟丹眉出门，不拍门关上，镜头停留在布袋子上】
+
+  Plot: "两人对话，李明告诉灵瑶真相"
+  ❌ Generic: 【视觉核心：对话场景 | 反差：说者vs听者 | 排除：无】
+  ✅ Director: 【视觉核心：灵瑶听到真相时手的反应比脸更诚实 | 反差：李明的台词（声音）vs 灵瑶手指慢慢收紧（身体） | 排除：不拍灵瑶的脸，只拍她的手——脸的表情可以控制，手不会说谎】
+
+  Plot: "将军走向战场"
+  ❌ Generic: 【视觉核心：将军前进 | 反差：无 | 排除：无】
+  ✅ Director: 【视觉核心：脚步的节奏感建立角色意志 | 反差：沉重战靴踩过的是曾经的街道（地面材质变化）| 排除：不拍脸和上半身，只拍脚部侧拍跟随——全段不揭示表情，延迟情绪爆发】
+
+❌ FORBIDDEN: sceneDescription that does NOT start with 【视觉核心 | 反差 | 排除】
+❌ FORBIDDEN: 视觉核心 that is just a plot description ("李明走进房间" = plot, not visual concept)
+❌ FORBIDDEN: 反差 that is empty or vague ("说者vs听者" without specifying WHAT is in tension)`;
 
 const SHOT_SPLIT_VIDEO_SCRIPT_RULES = `═══════════════════════════════════════════════════
   motionScript — S-GRADE QUALITY REQUIREMENTS (per segment)
@@ -636,20 +675,31 @@ For wide shots and atmosphere-only segments:
 const SHOT_SPLIT_START_END_FRAME_RULES = `═══════════════════════════════════════════════════
   startFrame & endFrame — Image Generation Anchors
 ═══════════════════════════════════════════════════
-Each must be a SELF-SUFFICIENT image generation prompt containing:
-- SHOT TYPE (景别): use "主体+景别" syntax — e.g. "角色甲的近景" / "角色乙的半身像" / "两人的中景"
-  摄影景别词: 远景/全景/中景/近景/特写/极特写
-  美术景别词: 头像/胸像/半身像/全身像
-- CAMERA ANGLE (机位/视角):
-  机位高度: 高机位俯视 / 低机位仰视 / 平机位 / 正扣（正上方）/ 正仰（正下方朝上）
-  叙事视角: 过肩视角 / 主观视角（POV）/ 蝼蚁视角 / 偷窥视角 / 望远镜视角
-  主体角度: 正面 / 正侧 / 四分之三侧 / 背面
-- COMPOSITION: character positions (left/center/right, rule-of-thirds), foreground/background layers, depth-of-field
-- CHARACTERS: reference by exact name, describe CURRENT pose, expression, action only — visual appearance is carried by the frame image
-- LIGHTING: direction + color temperature — specific to this frame (e.g. "右侧月光冷调侧逆光"). MUST be present.
+Each must be a SELF-SUFFICIENT image generation prompt containing ALL FIVE elements below:
+
+- CAMERA SPATIAL COORDINATE (机位空间坐标) — FIRST ELEMENT, MANDATORY:
+  Physical camera position relative to the subject. Format: "摄影机在[主体][方位][距离]，镜头高度[body part]"
+  Examples:
+    "摄影机在角色正前方约2米，镜头高度胸口平视" (frontal mid-shot)
+    "摄影机在角色左侧约1米，镜头高度腰部略低仰拍" (low lateral)
+    "摄影机正上方90度垂直俯拍" (god's eye overhead)
+    "摄影机贴近桌面边缘，从桌面高度向上略微仰拍" (table-level low)
+  ❌ NEVER write only 景别 words like "近景" without specifying WHERE the camera physically is.
+
+- SHOT TYPE + FRAMING SCOPE (景别 + 取景范围):
+  景别: 远景/全景/中景/近景/特写/极特写 | 美术: 头像/胸像/半身像/全身像
+  Framing scope: explicitly state what is visible in frame (e.g. "取景胸口以上", "囊括两人及地面", "画面里只看到角色下半身腰部以下")
+  Camera angle: 高机位俯视 / 低机位仰视 / 平机位 / 正扣 / 蝼蚁视角 / 过肩视角 / POV
+  Subject angle: 正面 / 正侧 / 四分之三侧 / 背面
+
+- COMPOSITION & CHARACTERS: character positions (left/center/right, rule-of-thirds), foreground/background layers, depth-of-field. Reference by exact name, CURRENT pose only — no motion verbs.
+
+- LIGHTING: direction + color temperature — specific to this frame (e.g. "右侧月光冷调侧逆光"). MUST be a complete sentence describing how light falls on subject and scene. NEVER just a short tag like "冷调月光".
+
 - EMOTIONAL STATE: anatomy-based body/face description ONLY — e.g. "下颌角收紧" / "眉心细纹" / "喉结轻动". ⚠️ NEVER use emotion adjectives (神情坚定/眼神复杂/情绪丰富) — these are banned.
-- SELF-SUFFICIENT: startFrame is the ONLY description sent to the image model. It must contain all four elements above so the model can generate the frame without any other field.
-- Do NOT include dialogue text in startFrame or endFrame
+
+SELF-SUFFICIENT RULE: startFrame is the ONLY description sent to the image model. It must contain all five elements above.
+Do NOT include dialogue text in startFrame or endFrame.
 
 startFrame = INITIAL STATE before action begins (starting poses, opening expressions, camera at start position)
 endFrame = END STATE after action completes — must be visually stable (not mid-motion), creates natural visual bridge to the next shot
@@ -695,6 +745,29 @@ PHYSICAL REALITY CHECK (every frame):
   - Every frame description = a FROZEN STILL IMAGE — no motion verbs
 
 ═══════════════════════════════════════════════════
+  入画/出画铁律 — Character Entry/Exit Rules
+═══════════════════════════════════════════════════
+These rules apply to ALL secondary characters (non-main characters, crowd members, passersby) in motionScript.
+
+入画铁律 (CHARACTER ENTRY):
+  ✅ ALWAYS: Characters enter from the EDGE of the frame (bottom edge / left edge / right edge / corner)
+  ✅ They appear as if they have been walking and are just NOW crossing into the camera's view
+  ❌ NEVER: Characters materialize from the center of the frame or "appear" from the background depth
+  ❌ NEVER: Characters "walk in from far away" — they enter already close, from the frame boundary
+
+出画铁律 (CHARACTER EXIT):
+  ✅ ALWAYS: Characters exit by walking OUT through a frame edge (left / right / bottom / corner)
+  ❌ NEVER: Characters "disappear", "fade out", or "walk into the distance and shrink" inside the frame
+  ❌ NEVER: Characters stop in the middle of the frame and are not shown leaving
+
+OBSTRUCTION TRANSITION TECHNIQUE (变装/状态切换):
+  When a character needs to change state (costume, expression, position) mid-shot without a cut:
+  - Have a physical object briefly obscure the entire subject: a passing person, flying paper, cloth, door swing
+  - The object must FULLY block the subject for 0.3–0.5 seconds
+  - After obstruction clears: character's new state is revealed naturally
+  Example: "第6秒：一张报纸从画面上方被风吹来快速飘到镜头正前方完全遮挡画面0.5秒，报纸被风吹走后角色已换装。"
+
+═══════════════════════════════════════════════════
   AI Image Generation Constraint — Characters MUST Appear in startFrame
 ═══════════════════════════════════════════════════
 The startFrame is sent to an AI image model as the FIRST FRAME anchor for video generation. The image model uses character reference photos to draw the character. If the character is absent from startFrame, there is NO way to anchor their appearance in the video.
@@ -735,7 +808,7 @@ GOOD (specific, max 3s each):
 4-6s: 管道破裂的黑烟在热浪上翻滚折叠，碎片仍在坠落，传感器以高亢液压鸣声锁定下一目标；镜头低角缓慢向右环绕，停于铁兽剪影构图。"
 
 ━━━ 台词内嵌规范（有台词的镜头 MANDATORY） ━━━
-当镜头含有台词（dialogues[] 非空）时，每条台词必须同时嵌入 motionScript 中角色实际开口的时间段，格式如下：
+当镜头含有台词时，每条台词必须嵌入 motionScript 中角色实际开口的时间段，格式如下：
 
 对白（type=dialogue）：
 [角色名（视觉描述）说：「台词文字」（嘴型口型同步）]
@@ -746,13 +819,12 @@ GOOD (specific, max 3s each):
 规则：
 - 台词 [] 放在角色实际说话那一段，不得挪到段末或单独附在最后
 - 若角色先有动作再开口，先写动作 []，同一时间段内再写台词 []
-- dialogues[] 数组仍须完整输出所有台词（字幕/SRT 用途）
 - ｜朝向：标注仍须写在整条 motionScript 的行末
 
 GOOD（有台词的镜头示例）：
 "0-3s: [铁狼迈步上前→俯身蹲下] [铁狼（疤痕侧脸）说：「孩子，跟我走。」（嘴型口型同步）] 3-6s: [孩子抬头→愣住，手指收紧衣角] ｜朝向：铁狼3/4侧面朝左"
 
-BAD（台词只写在 dialogues[] 而未嵌入 motionScript）：
+BAD（台词未嵌入 motionScript，视频模型不知道角色在说话）：
 "0-3s: 铁狼走向孩子蹲下。3-6s: 孩子抬头愣住。｜朝向：铁狼3/4侧面朝左"
 ← 错误：台词消失于视频提示词，视频模型不知道角色在说话`;
 
@@ -762,41 +834,33 @@ const SHOT_SPLIT_PROPORTIONAL_TIERS_TEMPLATE = `══════════�
 {{PROPORTIONAL_TIERS}}`;
 
 const SHOT_SPLIT_CAMERA_DIRECTIONS = `═══════════════════════════════════════════════════
-  cameraDirection — Technical Camera Instruction
+  cameraDirection — Technical Camera Instruction (NARRATIVE PURPOSE REQUIRED)
 ═══════════════════════════════════════════════════
-Choose ONE value per shot. Compound movements allowed with " + ".
+FORMAT: "起幅[景别/机位] → 运动方式+速度 → 落幅[景别/机位]，目的：[叙事目的]"
 
-▸ 基础运镜（中文优先，与 motionScript 保持一致）:
-- "static" / "固定" — locked camera
-- "推" / "dolly in" — camera moves forward toward subject
-- "拉" / "dolly out" — camera pulls away
-- "摇左" / "摇右" / "pan left" / "pan right" — horizontal pivot
-- "摇上" / "摇下" / "tilt up" / "tilt down" — vertical pivot
-- "移左" / "移右" — lateral tracking (camera body moves)
-- "跟" / "tracking shot" — follows character movement
-- "升" / "crane up" — camera rises vertically
-- "降" / "crane down" — camera descends
-- "甩" / "whip pan" — fast blurred pan for cut emphasis
-- "环绕" / "orbit" — camera arcs around subject
-- "变焦推" / "slow zoom in" — focal length change (Hitchcock effect when combined with 拉)
-- "handheld" — slight instability for immediacy/tension
+NARRATIVE PURPOSE is MANDATORY — every cameraDirection must end with "，目的：[what this movement reveals/follows/emphasizes]"
 
-▸ 机位高度 + 视角（可与运镜组合）:
-- "高机位" — camera above subject, looking down
-- "低机位" / "low angle" — camera below subject, looking up
-- "蝼蚁视角" — extreme low angle, ground level
-- "俯拍" / "bird's eye" — straight down from above
-- "仰拍" — straight up from below
+Examples of correctly formatted cameraDirection values:
+- "中景固定 locked-off → 不动 → 中景固定，目的：让角色微表情主导节奏"
+- "特写 → 缓慢dolly out拉远 → 全景，目的：揭示角色孤立于空旷环境中"
+- "全景 → 缓慢dolly in推近 → 近景，目的：强调角色眼神从迷茫到清醒的变化"
+- "中景平视 → 侧面tracking shot跟随 → 中景平视，目的：跟随角色穿越空间展示环境纵深"
+- "正面近景 → counter-clockwise orbit 180度 → 背面中景，目的：环绕揭示角色身后的对手"
+- "贴地低角 → 缓慢tilt up上摇 → 中景仰拍，目的：从脚部揭示到脸部，强调人物高大感"
+- "中景 handheld 手持抖动，目的：制造紧张的临场感"
 
-▸ 叙事视角（直接写入值）:
-- "过肩" — over-the-shoulder framing
-- "主观视角" / "POV" — character's point of view
-- "偷窥视角" — voyeuristic, partially obscured
-- "望远镜视角" — narrow circular framing, telephoto feel
+❌ FORBIDDEN: cameraDirection without narrative purpose ("缓慢推近" alone is REJECTED)
+❌ FORBIDDEN: narrative purpose that is pure camera description ("目的：从中景推到近景" — that's just repeating the movement)
+✅ REQUIRED: narrative purpose must describe story/emotional effect ("揭示X" / "强调X" / "跟随X" / "制造X感")
 
-▸ 复合运镜（写成组合值）:
-- "推 + 变焦拉" — Hitchcock zoom (subject stays, background compresses/stretches)
-- "环绕 + 升" / "orbit + crane up"
+▸ 运镜词库（可用于构建上述格式）:
+固定/locked-off | 推/dolly in | 拉/dolly out | 摇左/pan left | 摇右/pan right
+摇上/tilt up | 摇下/tilt down | 移左/移右/lateral tracking | 跟/tracking shot
+升/crane up | 降/crane down | 甩/whip pan | 环绕/orbit | 变焦推/slow zoom in
+handheld | 希区柯克 = 推+变焦拉 | orbit + crane up
+
+▸ 机位高度修饰词: 高机位 | 低机位/low angle | 蝼蚁视角 | 俯拍/bird's eye | 仰拍
+▸ 叙事视角修饰词: 过肩 | 主观视角/POV | 偷窥视角 | 望远镜视角
 - "低机位 + 推" / "low angle push in"
 - "高机位 + 摇下" / "high angle tilt down"
 - "跟 + 摇" — follow then pivot`;
@@ -921,7 +985,7 @@ const SHOT_SPLIT_DIALOGUE_DURATION = `══════════════
 ❌ 禁止把有长台词的镜头 duration 设为 3~5s（台词根本念不完）
 ❌ 一句台词对应一个镜头，禁止在单镜头内塞多角色多轮对白`;
 
-const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript, dialogues.text, dialogues.character) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
+const SHOT_SPLIT_LANGUAGE_RULES = `CRITICAL LANGUAGE RULE: ALL text fields (sceneDescription, startFrame, endFrame, motionScript) MUST be in the SAME LANGUAGE as the screenplay. Chinese screenplay → ALL fields in Chinese. ONLY "cameraDirection" uses English.
 
 OUTPUT FORMAT: If a DURATION BUDGET planning step is requested in the user prompt, output the <!-- PLAN: ... --> comment on its own line FIRST, then output the JSON array with no other text. If no planning step is requested, output ONLY the JSON array. No markdown fences. No other commentary.`;
 
@@ -932,6 +996,7 @@ const shotSplitDef: PromptDefinition = {
   category: "shot",
   slots: [
     slot("role_definition", SHOT_SPLIT_ROLE_DEFINITION, true),
+    slot("director_concept", SHOT_SPLIT_DIRECTOR_CONCEPT_RULES, true),
     slot("output_format", SHOT_SPLIT_OUTPUT_FORMAT_TEMPLATE, false),
     slot("video_script_rules", SHOT_SPLIT_VIDEO_SCRIPT_RULES, true),
     slot("start_end_frame_rules", SHOT_SPLIT_START_END_FRAME_RULES, true),
@@ -979,6 +1044,8 @@ const shotSplitDef: PromptDefinition = {
     return [
       replaceDynamic(r("role_definition")),
       "",
+      r("director_concept"),
+      "",
       replaceDynamic(r("output_format")),
       "",
       r("video_script_rules"),
@@ -1025,8 +1092,7 @@ export const SPLIT_SHOT_SINGLE_SYSTEM = `你是一位资深商业动画导演，
     "motionScript": "...",
     "duration": N,
     "soundEffect": "...",
-    "cameraDirection": "...",
-    "dialogues": []
+    "cameraDirection": "..."
   },
   {
     "sequence_offset": 1,
@@ -1040,7 +1106,7 @@ export const SPLIT_SHOT_SINGLE_SYSTEM = `你是一位资深商业动画导演，
 - motionScript 格式：0-Xs: [...]. Xs-Ys: [...]. ｜朝向：...
 - motionScript 总时长精确等于该分镜 duration
 - 有具名角色的分镜：该角色必须出现在 startFrame 中
-- dialogues【必须保留所有原始台词，禁止丢弃】：根据叙事节奏将原始台词分配到两个子分镜；每条台词放入叙事上最合适发生的那个分镜；dialogues 字段格式：[{"character": "角色名（必须与原台词中角色名完全一致）", "text": "台词原文（完整保留）", "type": "dialogue|os|vo"}]
+- 台词【必须保留所有原始台词，禁止丢弃】：将原始 motionScript 中的台词 bracket 按叙事节奏分配到两个子分镜的 motionScript 中；每条台词放入叙事上最合适发生的那个分镜
 - 仅输出 JSON 数组，无任何其他文字`;
 
 // ─── 9. frame_generate_first ────────────────────────────
@@ -1465,31 +1531,10 @@ const videoGenerateDef: PromptDefinition = {
   },
 };
 
-// ─── 11. ref_video_prompt ───────────────────────────────
-// Runtime: resolveRefVideoPromptSystem picks slot by video protocol (seedance_system / kling_system / …).
-
-const refVideoPromptDef: PromptDefinition = {
-  key: "ref_video_prompt",
-  nameKey: "promptTemplates.prompts.refVideoPrompt",
-  descriptionKey: "promptTemplates.prompts.refVideoPromptDesc",
-  category: "video",
-  slots: [
-    slot("seedance_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.seedance_system, true),
-    slot("kling_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.kling_system, true),
-    slot("jimeng_video_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.jimeng_video_system, true),
-    slot("veo_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.veo_system, true),
-    slot("generic_system", REF_VIDEO_PROMPT_DEFAULT_SLOTS.generic_system, true),
-  ],
-  buildFullPrompt(sc) {
-    const s = this.slots;
-    const r = (k: string) => resolve(sc, s, k);
-    return [
-      "【预览：默认展示 Seedance 插槽；运行时按视频模型协议自动选用 kling_system / jimeng_video_system / veo_system】",
-      "",
-      r("seedance_system"),
-    ].join("\n");
-  },
-};
+// ─── 11. ref_video_prompt（已废弃）──────────────────────
+// Vision-LLM 精炼视频 prompt 已被直出架构替代（buildDirectVideoPrompt）。
+// generate action 已 410，resolveRefVideoPromptSystem 无调用方。
+// DB 旧覆盖由 prune-stale-prompt-overrides.ts 负责清理，此处不再注册进 UI。
 
 // ─── 4b. beauty_image ──────────────────────────────────
 
@@ -1628,25 +1673,46 @@ const outlineExpandDef: PromptDefinition = {
   },
 };
 
-// ─── single_shot_rewrite ────────────────────────────────
+// ─── single_shot_rewrite（已废弃，route handler 已移除）────
+// 改用 batch_storyboard_rewrite（全集批量重写）
+// 注意：prune-stale-prompt-overrides.ts 的清单中保留该 key 以清理旧 DB 数据
 
-const singleShotRewriteDef: PromptDefinition = {
-  key: "single_shot_rewrite",
-  nameKey: "promptTemplates.prompts.singleShotRewrite",
-  descriptionKey: "promptTemplates.prompts.singleShotRewriteDesc",
+// ─── split_shot_single ──────────────────────────────────
+
+const splitShotSingleDef: PromptDefinition = {
+  key: "split_shot_single",
+  nameKey: "promptTemplates.prompts.splitShotSingle",
+  descriptionKey: "promptTemplates.prompts.splitShotSingleDesc",
   category: "shot",
-  slots: [
-    slot("role_and_task", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.role_and_task, true),
-    slot("step1_self_check", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.step1_self_check, true),
-    slot(
-      "step2_field_standards",
-      SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.step2_field_standards,
-      true
-    ),
-    slot("forbidden_rules", SINGLE_SHOT_REWRITE_DEFAULT_SLOTS.forbidden_rules, true),
-  ],
+  slots: [slot("system_prompt", SPLIT_SHOT_SINGLE_SYSTEM, true)],
   buildFullPrompt(sc) {
-    return assembleSingleShotRewriteSystem(sc);
+    return sc.system_prompt ?? SPLIT_SHOT_SINGLE_SYSTEM;
+  },
+};
+
+// ─── batch_storyboard_rewrite ───────────────────────────
+
+const batchStoryboardRewriteDef: PromptDefinition = {
+  key: "batch_storyboard_rewrite",
+  nameKey: "promptTemplates.prompts.batchStoryboardRewrite",
+  descriptionKey: "promptTemplates.prompts.batchStoryboardRewriteDesc",
+  category: "shot",
+  slots: [slot("system_prompt", STORYBOARD_REWRITE_SYSTEM, true)],
+  buildFullPrompt(sc) {
+    return sc.system_prompt ?? STORYBOARD_REWRITE_SYSTEM;
+  },
+};
+
+// ─── batch_plot_optimize ────────────────────────────────
+
+const batchPlotOptimizeDef: PromptDefinition = {
+  key: "batch_plot_optimize",
+  nameKey: "promptTemplates.prompts.batchPlotOptimize",
+  descriptionKey: "promptTemplates.prompts.batchPlotOptimizeDesc",
+  category: "shot",
+  slots: [slot("system_prompt", PLOT_OPTIMIZE_SYSTEM, true)],
+  buildFullPrompt(sc) {
+    return sc.system_prompt ?? PLOT_OPTIMIZE_SYSTEM;
   },
 };
 
@@ -1664,11 +1730,14 @@ export const PROMPT_REGISTRY: PromptDefinition[] = [
   combatImageDef,
   characterStateRouterDef,
   shotSplitDef,
-  singleShotRewriteDef,
+  splitShotSingleDef,
+  // singleShotRewriteDef — 已废弃，从 registry 移除
+  batchStoryboardRewriteDef,
+  batchPlotOptimizeDef,
   frameGenerateFirstDef,
   frameGenerateLastDef,
   videoGenerateDef,
-  refVideoPromptDef,
+  // refVideoPromptDef — 已废弃，从 registry 移除
 ];
 
 export const PROMPT_REGISTRY_MAP: Record<string, PromptDefinition> =

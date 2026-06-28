@@ -1,11 +1,11 @@
 import { db } from "@/lib/db";
 import {
   characters,
-  dialogues,
   episodeCharacters,
   shots,
   storyboardVersions,
 } from "@/lib/db/schema";
+import { extractDialoguesFromMotionScript } from "./extract-dialogues-from-motion-script";
 import { normalizeCharacterName, normalizeCharacterNameWithAge } from "./normalize-character-name";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
@@ -34,7 +34,6 @@ export interface PersistableShot {
   bgmNote?: string | null;
   /** 场景级音效提示（注入视频 prompt 供 Seedance/Kling 生成原生 SFX） */
   soundEffectNote?: string | null;
-  dialogues: Array<{ character: string; text: string; sequence?: number; type?: "dialogue" | "os" | "vo" }>;
   warnings?: string[];
 }
 
@@ -87,9 +86,6 @@ export async function persistStoryboardVersion(params: {
       .from(shots)
       .where(eq(shots.versionId, versionId));
 
-    for (const s of existingShots) {
-      await db.delete(dialogues).where(eq(dialogues.shotId, s.id));
-    }
     await db.delete(shots).where(eq(shots.versionId, versionId));
 
     // 删磁盘文件（用 Set 避免相邻镜头共享文件被重复删除）
@@ -179,25 +175,13 @@ export async function persistStoryboardVersion(params: {
       warnings: shot.warnings?.join("; ") || null,
     });
 
-    for (let i = 0; i < shot.dialogues.length; i += 1) {
-      const dialogue = shot.dialogues[i];
-      // Pass 1: exact match keeping age qualifier (e.g. "龙渊（10岁）" → 10-year-old)
-      // Pass 2: base-name fallback (e.g. "龙渊" when only "龙渊（10岁）" exists)
+    // Track which characters appear in this shot's dialogue (for episodeCharacters auto-linking)
+    // Dialogue data lives in motionScript brackets; no separate table insert needed.
+    for (const d of extractDialoguesFromMotionScript(shot.motionScript ?? "")) {
       const matchedChar =
-        charByExactName.get(normalizeCharacterNameWithAge(dialogue.character)) ??
-        charByName.get(normalizeCharacterName(dialogue.character));
-      if (!matchedChar) continue;
-
-      matchedCharacterIds.add(matchedChar.id);
-
-      await db.insert(dialogues).values({
-        id: ulid(),
-        shotId,
-        characterId: matchedChar.id,
-        text: dialogue.text,
-        sequence: dialogue.sequence ?? i,
-        type: (dialogue.type as "dialogue" | "os" | "vo") ?? "dialogue",
-      });
+        charByExactName.get(normalizeCharacterNameWithAge(d.characterName)) ??
+        charByName.get(normalizeCharacterName(d.characterName));
+      if (matchedChar) matchedCharacterIds.add(matchedChar.id);
     }
   }
 

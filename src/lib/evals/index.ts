@@ -5,19 +5,21 @@
  * Or:        npx tsx src/lib/evals/index.ts
  *
  * Flags:
- *   --suite char     only character-routing suite
- *   --suite prompt   only prompt-enhancement suite
+ *   --suite char         only character-routing suite
+ *   --suite prompt       only prompt-enhancement suite
+ *   --suite storyboard   only storyboard-quality suite
  */
 
 import { runAllSuites, runSuite } from "./runner";
 import { characterRoutingSuite } from "./cases/character-routing";
 import { promptEnhancementSuite } from "./cases/prompt-enhancement";
+import { storyboardQualitySuite } from "./cases/storyboard-quality";
 
 const args = process.argv.slice(2);
 const suiteFlag = args.indexOf("--suite");
 const selectedSuite = suiteFlag !== -1 ? args[suiteFlag + 1] : null;
 
-const allSuites = [characterRoutingSuite, promptEnhancementSuite];
+const allSuites = [characterRoutingSuite, promptEnhancementSuite, storyboardQualitySuite];
 
 async function main() {
   console.log("AI漫剧工坊 — AI Eval Runner");

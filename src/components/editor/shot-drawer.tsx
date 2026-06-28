@@ -128,7 +128,6 @@ export function ShotDrawer({
   // Local generating state (independent of page-level anyGenerating)
   const [generatingVideo, setGeneratingVideo] = useState(false);
   const [generatingPrompt, setGeneratingPrompt] = useState(false);
-  const [rewritingText, setRewritingText] = useState(false);
   const [videoHistoryOpen, setVideoHistoryOpen] = useState(false);
 
   const [previewSrc, setPreviewSrc] = useState<string | null>(null);
@@ -145,7 +144,6 @@ export function ShotDrawer({
     setEditDuration(shot.duration ?? 5);
     setGeneratingVideo(false);
     setGeneratingPrompt(false);
-    setRewritingText(false);
   }, [shot?.id]);
 
   // Escape key to close
@@ -184,7 +182,7 @@ export function ShotDrawer({
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
   const localGenerating =
-    frameActions.frameActionsBusy || generatingVideo || generatingPrompt || rewritingText;
+    frameActions.frameActionsBusy || generatingVideo || generatingPrompt;
   const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);
 
   async function patchShot(fields: Record<string, unknown>) {
@@ -272,31 +270,8 @@ export function ShotDrawer({
     }
   }
 
-  async function handleRewriteText() {
-    setRewritingText(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "single_shot_rewrite",
-          payload: { shotId: shot!.id },
-          modelConfig: getModelConfig(),
-        }),
-      });
-      onUpdate();
-      if (shot?.chainSourceShotId) {
-        toast.info(
-          `首帧继承自第 ${chainSourceSequence ?? "?"} 镜 — 若本镜引入了新角色，请点下方「刷新首帧」。`,
-          { duration: 6000 }
-        );
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
-    } finally {
-      setRewritingText(false);
-    }
-  }
+  // handleRewriteText 已废弃 — single_shot_rewrite route handler 已移除
+  // 请使用分镜页「批量优化文本」（batch_storyboard_rewrite）
 
   return (
     <>
@@ -441,15 +416,12 @@ export function ShotDrawer({
                 </div>
               )}
               <div className="flex flex-wrap gap-1.5">
-                <Button size="xs" variant="outline" onClick={handleRewriteText} disabled={rewritingText || anyGenerating}>
-                  {rewritingText ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                  {rewritingText ? t("common.generating") : t("shot.rewriteText")}
-                </Button>
+                {/* 「重写文本」已移除 — 请使用分镜页「批量优化文本」 */}
                 <ShotRestoreFromScriptButton
                   projectId={projectId}
                   shotId={shot.id}
                   onRestored={onUpdate}
-                  disabled={rewritingText || anyGenerating}
+                  disabled={anyGenerating}
                 />
               </div>
             </div>

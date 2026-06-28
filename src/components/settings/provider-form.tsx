@@ -23,6 +23,7 @@ const DEFAULT_BASE_URLS: Record<Protocol, string> = {
   jimeng: "https://visual.volcengineapi.com",
   "jimeng-video": "https://visual.volcengineapi.com",
   doubao: "https://ark.cn-beijing.volces.com/api/v3",
+  minimax: "https://api.minimaxi.com",
 };
 
 function getProtocolOptions(capability: Capability): { value: Protocol; label: string }[] {
@@ -39,6 +40,11 @@ function getProtocolOptions(capability: Capability): { value: Protocol; label: s
       { value: "kling", label: "Kling" },
       { value: "doubao", label: "Doubao (Seedream)" },
       { value: "jimeng", label: "Jimeng (即梦)" },
+    ];
+  }
+  if (capability === "music") {
+    return [
+      { value: "minimax", label: "MiniMax Music" },
     ];
   }
   // video

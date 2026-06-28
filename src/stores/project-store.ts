@@ -21,9 +21,10 @@ interface Character {
 interface Dialogue {
   id: string;
   text: string;
-  characterId: string;
   characterName: string;
+  character?: string;
   sequence: number;
+  type?: string;
 }
 
 interface Shot {

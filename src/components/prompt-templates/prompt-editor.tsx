@@ -22,12 +22,11 @@ const PROMPT_HINT_I18N: Record<string, string> = {
   frame_generate_first: "framePromptHint",
   frame_generate_last: "framePromptHint",
   video_generate: "videoGenerateHint",
-  ref_video_prompt: "refVideoPromptHint",
   character_extract: "characterExtractHint",
   import_character_extract: "importCharacterExtractHint",
   outline_expand: "outlineExpandHint",
   shot_split: "shotSplitHint",
-  single_shot_rewrite: "singleShotRewriteHint",
+  // ref_video_prompt 和 single_shot_rewrite 已废弃，从 registry 移除
 };
 
 // Map the UI category to actual registry categories
@@ -376,6 +375,19 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                   )}
                 </div>
               )}
+              {selectedPrompt && (() => {
+                try {
+                  const descKey = tKey(selectedPrompt.descriptionKey);
+                  const desc = t(descKey as Parameters<typeof t>[0]);
+                  return desc && desc !== descKey ? (
+                    <div className="border-b border-[--border-subtle] bg-[--surface] px-4 py-2 text-[11px] text-[--text-muted]">
+                      {desc}
+                    </div>
+                  ) : null;
+                } catch {
+                  return null;
+                }
+              })()}
               {/* Editor header — always visible */}
               <div className="flex items-center justify-between border-b border-[--border-subtle] px-4 py-2.5">
                 <div className="flex items-center gap-2">

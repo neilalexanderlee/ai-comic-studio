@@ -8,24 +8,28 @@ const ICONS: Record<Capability, React.ReactNode> = {
   text: <Type className="h-3 w-3" />,
   image: <ImageIcon className="h-3 w-3" />,
   video: <VideoIcon className="h-3 w-3" />,
+  music: null,
 };
 
 const COLORS: Record<Capability, string> = {
   text: "bg-blue-500/10 text-blue-600",
   image: "bg-emerald-500/10 text-emerald-600",
   video: "bg-purple-500/10 text-purple-600",
+  music: "bg-purple-500/10 text-purple-600",
 };
 
-const SETTERS: Record<Capability, "setDefaultTextModel" | "setDefaultImageModel" | "setDefaultVideoModel"> = {
+const SETTERS: Record<Capability, "setDefaultTextModel" | "setDefaultImageModel" | "setDefaultVideoModel" | "setDefaultMusicModel"> = {
   text: "setDefaultTextModel",
   image: "setDefaultImageModel",
   video: "setDefaultVideoModel",
+  music: "setDefaultMusicModel",
 };
 
-const GETTERS: Record<Capability, "defaultTextModel" | "defaultImageModel" | "defaultVideoModel"> = {
+const GETTERS: Record<Capability, "defaultTextModel" | "defaultImageModel" | "defaultVideoModel" | "defaultMusicModel"> = {
   text: "defaultTextModel",
   image: "defaultImageModel",
   video: "defaultVideoModel",
+  music: "defaultMusicModel",
 };
 
 interface InlineModelPickerProps {
