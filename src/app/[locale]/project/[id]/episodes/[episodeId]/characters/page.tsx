@@ -7,7 +7,7 @@ import { useModelStore } from "@/stores/model-store";
 import { CharacterCard } from "@/components/editor/character-card";
 import { Button } from "@/components/ui/button";
 import { useTranslations } from "next-intl";
-import { Users, Sparkles, ImageIcon, Loader2, X, UserPlus } from "lucide-react";
+import { Users, Sparkles, ImageIcon, Loader2, X, UserPlus, ChevronDown, ChevronUp, Star, Sword } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -28,6 +28,7 @@ export default function EpisodeCharactersPage() {
   const params = useParams<{ id: string; episodeId: string }>();
   const { id: projectId, episodeId } = params;
 
+  const [guideOpen, setGuideOpen] = useState(true);
   const [extracting, setExtracting] = useState(false);
   const [generatingImages, setGeneratingImages] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
@@ -257,8 +258,61 @@ export default function EpisodeCharactersPage() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[--border-subtle] bg-white/70 px-4 py-3 text-xs leading-relaxed text-[--text-secondary] shadow-sm">
-        {t("character.morphNamingHint")}
+      {/* 资产上传指南折叠卡 */}
+      <div className="rounded-2xl border border-blue-100 bg-blue-50/60 shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setGuideOpen((v) => !v)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-blue-800">{t("character.assetGuideTitle")}</span>
+            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-600">推荐阅读</span>
+          </div>
+          {guideOpen
+            ? <ChevronUp className="h-4 w-4 text-blue-400 flex-shrink-0" />
+            : <ChevronDown className="h-4 w-4 text-blue-400 flex-shrink-0" />
+          }
+        </button>
+        {guideOpen && (
+          <div className="px-4 pb-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs text-[--text-secondary] leading-relaxed border-t border-blue-100 pt-3">
+            <div className="rounded-xl bg-white/80 border border-blue-100 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-blue-700">
+                <Sparkles className="h-3 w-3" />{t("character.assetGuideMorphTitle")}
+              </div>
+              <ul className="space-y-1.5 text-[11px]">
+                <li>上传 <strong>1 张正面全身图</strong>（纯色背景，头顶到脚尖不截断）</li>
+                <li><strong className="text-green-700">标志性武器（角色标配）</strong>→ 画进定妆图，AI 每次都能看到它</li>
+                <li><strong className="text-orange-600">场景专属武器</strong>（只在特定集出现）→ 不画进定妆图，改用道具图</li>
+                <li>上传后点「扩展角度」自动生成侧面/背面变体，改善视频外貌一致性</li>
+              </ul>
+            </div>
+            <div className="rounded-xl bg-white/80 border border-amber-100 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-amber-700">
+                <Sword className="h-3 w-3" />{t("character.assetGuidePropTitle")}
+              </div>
+              <ul className="space-y-1.5 text-[11px]">
+                <li><strong>剧情中途换武器</strong>（换了新剑）→ 新武器上传道具图</li>
+                <li><strong>场景专属装备</strong>（某集才出现的盔甲、飞行器）</li>
+                <li><strong>需要特写的道具细节</strong>（符文、铭刻、独特纹理）</li>
+                <li>在分镜抽屉「道具参考图」勾选后，生成首帧/视频时额外传给 AI</li>
+              </ul>
+            </div>
+            <div className="rounded-xl bg-white/80 border border-yellow-100 p-3">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-yellow-700">
+                <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />{t("character.assetGuideDefaultTitle")}
+              </div>
+              <ul className="space-y-1.5 text-[11px]">
+                <li>带 ★ 的图是<strong>当前主定妆图</strong>——所有分镜生成都自动使用它</li>
+                <li>同一角色可有多张形态，点图片左下角五角星随时切换</li>
+                <li><strong>换武器/换服装后只需切换主图</strong>，下次生成自动跟上</li>
+              </ul>
+              <div className="mt-2 rounded-lg bg-yellow-50 border border-yellow-200 px-2 py-1.5 text-[10px] text-yellow-700">
+                💡 形态标签建议和剧本一致（「日常」「武装」「礼服」等）
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {project.characters.length === 0 ? (

@@ -504,6 +504,12 @@ export function ShotDrawer({
             </div>
 
             {/* 道具参考图勾选（分镜级手动绑定） */}
+            {/* 有命名角色但角色没有道具图时，显示引导提示 */}
+            {namedCharacterCount > 0 && shot.availablePropAssets && shot.availablePropAssets.length === 0 && (
+              <div className="mt-3 rounded-lg border border-dashed border-amber-200 bg-amber-50/60 px-3 py-2 text-[10px] text-amber-700 leading-relaxed">
+                <span className="font-semibold">道具参考图：</span>若本镜角色需使用特定武器/装备，可在角色页为该角色添加道具图（🗡️），再回来勾选。
+              </div>
+            )}
             {shot.availablePropAssets && shot.availablePropAssets.length > 0 && (
               <div className="mt-3">
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
