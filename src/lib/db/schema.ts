@@ -91,7 +91,7 @@ export const characterAssets = sqliteTable("character_assets", {
   imagePath: text("image_path"),
   tag: text("tag").notNull().default("日常"),
   isDefault: integer("is_default").notNull().default(0),
-  assetType: text("asset_type", { enum: ["morph", "blueprint"] })
+  assetType: text("asset_type", { enum: ["morph", "blueprint", "prop"] })
     .notNull()
     .default("morph"),
   /**
@@ -199,6 +199,13 @@ export const shots = sqliteTable("shots", {
    * 示例："T1" / "T2"。null 表示未分配，按单镜独立生成。
    */
   track: text("track"),
+  /**
+   * 分镜级道具绑定（JSON 数组，存 character_assets.id）。
+   * 用户在分镜卡上手动勾选本镜需要使用的道具图（assetType="prop"）。
+   * 生成首帧/视频时，对应资产的 imagePath 加入参考图列表。
+   * null 或 "[]" 表示本镜不附加任何道具参考。
+   */
+  propRefs: text("prop_refs"),
 });
 
 /** 分镜视频历史版本，每个分镜最多保留 5 条，超出时应用层删除最旧记录和文件 */

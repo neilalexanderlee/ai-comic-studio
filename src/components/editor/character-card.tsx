@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music, FileDown } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music, FileDown, Star, Sword } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -86,7 +86,7 @@ export interface CharacterAsset {
   id: string;
   imagePath: string | null;
   tag: string;
-  assetType: "morph" | "blueprint";
+  assetType: "morph" | "blueprint" | "prop";
   isDefault: number;
   /** 参考音频路径（MP3/WAV/M4A），用于 Seedance 多参模式音色克隆 */
   audioPath?: string | null;
@@ -329,18 +329,34 @@ export function CharacterCard({
     }
   }
 
-  async function handleAddAsset(type: "morph" | "blueprint" = "morph") {
+  async function handleAddAsset(type: "morph" | "blueprint" | "prop" = "morph") {
     try {
+      const defaultTag = type === "blueprint" ? "四视图" : type === "prop" ? "道具" : "新形态";
       const response = await apiFetch(`/api/projects/${projectId}/characters/${id}/assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tag: type === "blueprint" ? "四视图" : "新形态", assetType: type }),
+        body: JSON.stringify({ tag: defaultTag, assetType: type }),
       });
       if (!response.ok) throw new Error("Add failed");
       onUpdate();
     } catch (err) {
       console.error(err);
       toast.error("Failed to add asset");
+    }
+  }
+
+  async function handleSetDefault(assetId: string) {
+    try {
+      await apiFetch(`/api/projects/${projectId}/characters/${id}/assets/${assetId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isDefault: true }),
+      });
+      toast.success("已设为当前主定妆图");
+      onUpdate();
+    } catch (err) {
+      console.error(err);
+      toast.error("设置失败");
     }
   }
 
@@ -560,6 +576,30 @@ export function CharacterCard({
               {asset.angle === "3q" ? "3/4" : asset.angle === "profile" ? "侧" : asset.angle === "back" ? "背" : asset.angle}
             </div>
           )}
+
+          {/* 道具图标签 */}
+          {asset.assetType === "prop" && (
+            <div className="absolute bottom-1 right-1 z-10 rounded-md bg-amber-500/80 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5">
+              <Sword className="h-2 w-2" />道具
+            </div>
+          )}
+
+          {/* 主定妆图星标（isDefault=1 常驻显示；有多张主图时 hover 显示切换按钮） */}
+          {asset.assetType === "morph" && !asset.angle && (
+            asset.isDefault === 1 ? (
+              <div className="absolute bottom-1 left-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-yellow-400/90 shadow-sm">
+                <Star className="h-2.5 w-2.5 fill-white text-white" />
+              </div>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleSetDefault(asset.id); }}
+                title="设为当前主定妆图"
+                className="absolute bottom-1 left-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/40 text-white opacity-0 transition-all hover:bg-yellow-500/80 group-hover/slot:opacity-100 shadow-sm"
+              >
+                <Star className="h-2.5 w-2.5" />
+              </button>
+            )
+          )}
         </div>
 
         {/* 扩展角度按钮：仅正面原图（angle=null）且有图片时显示 */}
@@ -598,16 +638,27 @@ export function CharacterCard({
         <div className="flex gap-3 overflow-x-auto px-4 pb-4 snap-x snap-mandatory scrollbar-hide items-start">
           {assets.map(asset => renderAssetSlot(asset))}
           
-          {/* Add Asset Button */}
-          <button 
-            onClick={() => handleAddAsset()}
-            className="flex-shrink-0 w-[140px] aspect-[3/4] rounded-xl border-2 border-dashed border-[--border-subtle] flex flex-col items-center justify-center gap-2 text-[--text-muted] hover:text-primary hover:border-primary transition-all group/add self-end mb-1"
-          >
-            <div className="w-10 h-10 rounded-full bg-[--surface] flex items-center justify-center group-hover/add:bg-primary/10 transition-colors">
-              <Upload className="h-5 w-5" />
-            </div>
-            <span className="text-xs font-medium">添加形态</span>
-          </button>
+          {/* Add Asset Buttons */}
+          <div className="flex-shrink-0 self-end mb-1 flex flex-col gap-2">
+            <button
+              onClick={() => handleAddAsset("morph")}
+              title={t("character.addMorphTooltip")}
+              className="w-[140px] aspect-[3/4] rounded-xl border-2 border-dashed border-[--border-subtle] flex flex-col items-center justify-center gap-2 text-[--text-muted] hover:text-primary hover:border-primary transition-all group/add"
+            >
+              <div className="w-10 h-10 rounded-full bg-[--surface] flex items-center justify-center group-hover/add:bg-primary/10 transition-colors">
+                <Upload className="h-5 w-5" />
+              </div>
+              <span className="text-xs font-medium">添加形态</span>
+            </button>
+            <button
+              onClick={() => handleAddAsset("prop")}
+              title={t("character.addPropTooltip")}
+              className="w-[140px] rounded-lg border border-dashed border-amber-300 flex items-center justify-center gap-1.5 py-1.5 text-amber-600 hover:bg-amber-50 hover:border-amber-400 transition-all text-xs font-medium"
+            >
+              <Sword className="h-3 w-3" />
+              添加道具图
+            </button>
+          </div>
         </div>
       </div>
 

@@ -9,7 +9,7 @@ interface Character {
     id: string;
     imagePath: string | null;
     tag: string;
-    assetType: "morph" | "blueprint";
+    assetType: "morph" | "blueprint" | "prop";
     isDefault: number;
   }[];
   visualHint?: string | null;
@@ -50,6 +50,7 @@ interface Shot {
   cutPoint?: string | null;
   chainSourceShotId?: string | null;
   chainSourceType?: string | null;
+  propRefs?: string | null;
   dialogues: Dialogue[];
 }
 

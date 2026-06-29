@@ -41,6 +41,14 @@ interface Dialogue {
   characterName: string;
 }
 
+/** 单个道具资产（用于分镜级道具勾选 UI） */
+interface PropAsset {
+  id: string;
+  imagePath: string | null;
+  tag: string;
+  characterName: string;
+}
+
 interface DrawerShot {
   id: string;
   sequence: number;
@@ -61,8 +69,11 @@ interface DrawerShot {
   remoteVideoLastDownloadAt?: string | Date | null;
   videoResolution?: string | null;
   dialogues: Dialogue[];
-  isCrowdShot?: boolean;
   chainSourceShotId?: string | null;
+  /** 分镜级道具绑定（JSON 数组字符串，存 character_assets.id） */
+  propRefs?: string | null;
+  /** 本镜角色的道具资产列表（由 storyboard/page.tsx 计算后传入） */
+  availablePropAssets?: PropAsset[];
 }
 
 interface ShotDrawerProps {
@@ -124,6 +135,8 @@ export function ShotDrawer({
   const [editVideoPrompt, setEditVideoPrompt] = useState("");
   const [editCameraDirection, setEditCameraDirection] = useState("static");
   const [editDuration, setEditDuration] = useState(5);
+  // 道具参考图本地选中态（乐观更新）
+  const [localPropRefs, setLocalPropRefs] = useState<string[]>([]);
 
   // Local generating state (independent of page-level anyGenerating)
   const [generatingVideo, setGeneratingVideo] = useState(false);
@@ -144,6 +157,9 @@ export function ShotDrawer({
     setEditDuration(shot.duration ?? 5);
     setGeneratingVideo(false);
     setGeneratingPrompt(false);
+    // 同步道具选中态
+    try { setLocalPropRefs(shot.propRefs ? JSON.parse(shot.propRefs) : []); }
+    catch { setLocalPropRefs([]); }
   }, [shot?.id]);
 
   // Escape key to close
@@ -175,8 +191,7 @@ export function ShotDrawer({
 
   const hasFrame = !!(shot.anchorFirst || shot.anchorLastAi || shot.cutPoint);
   const videoReadiness = getShotVideoReadiness(
-    { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi },
-    shot.isCrowdShot ?? false
+    { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi }
   );
   const canGenerateVideo = videoReadiness.ready;
   const hasVideoPrompt = !!shot.videoPrompt;
@@ -487,6 +502,59 @@ export function ShotDrawer({
                 }
               />
             </div>
+
+            {/* 道具参考图勾选（分镜级手动绑定） */}
+            {shot.availablePropAssets && shot.availablePropAssets.length > 0 && (
+              <div className="mt-3">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+                  道具参考图
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {shot.availablePropAssets.map((prop) => {
+                    const isSelected = localPropRefs.includes(prop.id);
+                    const toggleProp = async () => {
+                      const next = isSelected
+                        ? localPropRefs.filter((id) => id !== prop.id)
+                        : [...localPropRefs, prop.id];
+                      setLocalPropRefs(next); // 乐观更新
+                      await patchShot({ propRefs: JSON.stringify(next) });
+                      onUpdate(); // 同步服务端最新状态
+                    };
+                    return (
+                      <button
+                        key={prop.id}
+                        type="button"
+                        title={`${prop.characterName} · ${prop.tag || "道具"}`}
+                        onClick={toggleProp}
+                        className={`relative h-14 w-14 overflow-hidden rounded-lg border-2 transition-all ${
+                          isSelected
+                            ? "border-amber-400 ring-1 ring-amber-300"
+                            : "border-[--border-subtle] opacity-60 hover:opacity-100"
+                        }`}
+                      >
+                        {prop.imagePath ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={uploadUrl(prop.imagePath)}
+                            alt={prop.tag || "道具"}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center bg-[--surface-alt] text-[8px] text-[--text-muted]">
+                            无图
+                          </div>
+                        )}
+                        {isSelected && (
+                          <div className="absolute inset-x-0 bottom-0 bg-amber-400/80 text-center text-[8px] font-bold text-white leading-tight py-0.5">
+                            ✓
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
 
           {/* Step 3: Video Prompt */}

@@ -1622,43 +1622,9 @@ const combatImageDef: PromptDefinition = {
   },
 };
 
-// ─── 4d. character_state_router ────────────────────────
-
-const ROUTER_ROLE = `You are an AI scene analyzer. Your job is to determine the state of a character based on the scene description.`;
-const ROUTER_CRITERIA = `=== Decision Criteria ===
-Choose the most appropriate visual state (Tag) for the character from the [Available Tags] list based on the scene context.
-Format your output exactly as: "Match: [Tag]".
-If the character requires a specific visual state that is NOT in the [Available Tags] list (e.g. they are fighting but only 'Daily' is available), still output the best matching Tag, but append a (Missing: [Required State]) note.
-Example: "Match: Daily (Missing: Combat)" or "Match: Spear (Missing: Broken Armor)".
-Reply ONLY with the match result.`;
-
-const characterStateRouterDef: PromptDefinition = {
-  key: "character_state_router",
-  nameKey: "promptTemplates.prompts.characterStateRouter",
-  descriptionKey: "promptTemplates.prompts.characterStateRouterDesc",
-  category: "character",
-  slots: [
-    slot("role_definition", ROUTER_ROLE, true),
-    slot("decision_criteria", ROUTER_CRITERIA, true),
-  ],
-  buildFullPrompt(sc, params) {
-    const s = this.slots;
-    const r = (k: string) => resolve(sc, s, k);
-    const sceneDesc = (params?.sceneDesc as string) ?? "";
-    const characterName = (params?.characterName as string) ?? "";
-    const tags = (params?.tags as string[]) ?? [];
-    return [
-      r("role_definition"),
-      "",
-      r("decision_criteria"),
-      "",
-      `=== Current Context ===`,
-      `Character Name: "${characterName}"`,
-      `Available Tags: ${tags.join(", ") || "None"}`,
-      `Scene Description: ${sceneDesc}`,
-    ].join("\n");
-  },
-};
+// ─── character_state_router（已废弃，LLM 状态路由已移除）────
+// 改用 isDefault=1 资产直接选图，不再调用 LLM
+// 注意：prune-stale-prompt-overrides.ts 的清单中保留该 key 以清理旧 DB 数据
 
 // ─── outline_expand ─────────────────────────────────────
 
@@ -1728,7 +1694,7 @@ export const PROMPT_REGISTRY: PromptDefinition[] = [
   characterImageDef,
   beautyImageDef,
   combatImageDef,
-  characterStateRouterDef,
+  // characterStateRouterDef — 已废弃，LLM 状态路由移除
   shotSplitDef,
   splitShotSingleDef,
   // singleShotRewriteDef — 已废弃，从 registry 移除

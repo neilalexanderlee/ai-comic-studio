@@ -54,7 +54,7 @@ export function useShotFrameActions({
   const [adoptingPrevFrame, setAdoptingPrevFrame] = useState(false);
   const [adoptingPrevEpisode, setAdoptingPrevEpisode] = useState(false);
   const [frameRefPickerOpen, setFrameRefPickerOpen] = useState(false);
-  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "last" | "both" | null>(null);
+  const [pendingFrameTarget, setPendingFrameTarget] = useState<"first" | "last" | null>(null);
 
   const prevChainFrame = prevCutPoint ?? prevAnchorLastAi ?? null;
   const prevChainFrameSource: "video" | "ai" | null =
@@ -69,7 +69,7 @@ export function useShotFrameActions({
   }
 
   async function executeFrameGenerate(
-    frameTarget: "first" | "last" | "both",
+    frameTarget: "first" | "last",
     choice?: FrameReferenceChoice
   ) {
     const payload: Record<string, unknown> = {
@@ -94,7 +94,7 @@ export function useShotFrameActions({
     onUpdate();
   }
 
-  function openFrameReferencePicker(frameTarget: "first" | "last" | "both") {
+  function openFrameReferencePicker(frameTarget: "first" | "last") {
     if (!imageGuard()) return;
     setPendingFrameTarget(frameTarget);
     setFrameRefPickerOpen(true);

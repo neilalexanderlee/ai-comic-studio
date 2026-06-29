@@ -55,7 +55,7 @@ import {
 import type { FrameReferencePayload, FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import {
   collectVisionFramePaths,
-  shouldUseFirstFrameVideoMode,
+  resolveSingleVideoMode,
 } from "@/lib/storyboard/shot-video-readiness.server";
 import {
   pickFirstFramePromptBuildParams,
@@ -287,16 +287,9 @@ function extractErrorMessage(err: unknown): string {
   return err.message;
 }
 
-async function saveShotWarnings(shotId: string, resolvedChars: Array<{ name: string, missingState?: string | null }>) {
-  const missingStates = resolvedChars
-    .filter(c => c.missingState)
-    .map(c => `${c.name}: ${c.missingState}`);
-  
-  if (missingStates.length > 0) {
-    await db.update(shots).set({ warnings: missingStates.join("; ") }).where(eq(shots.id, shotId));
-  } else {
-    await db.update(shots).set({ warnings: null }).where(eq(shots.id, shotId));
-  }
+async function saveShotWarnings(shotId: string) {
+  // LLM 状态路由已移除，不再产生 missingState 警告；统一清空
+  await db.update(shots).set({ warnings: null }).where(eq(shots.id, shotId));
 }
 
 interface ModelConfig {
@@ -2096,14 +2089,13 @@ async function handleSingleFrameGenerate(
     .join("\n");
 
   // Load reference images for the union of all characters in this shot.
+  // 优先用 startFrameDesc（含机位/服装/光影视觉细节）+ prompt（叙事背景），让状态路由有更准确的判断依据
+  const frameSceneDesc = [shot.startFrameDesc, shot.prompt].filter(Boolean).join("\n");
   const resolvedChars = await resolveCharacterImages(
-    shot.prompt || "",
+    frameSceneDesc,
     charsForFrame,
-    modelConfig?.text,
-    userId,
-    projectId
   );
-  await saveShotWarnings(shotId, resolvedChars);
+  await saveShotWarnings(shotId);
 
   // Frame-specific reference image subsets — 主图必须排在角度图前面，
   // 确保 @图N 编号与 referenceImages[N-1] 一一对应（与 Toonflow generateFlowImage 一致）。
@@ -2111,10 +2103,10 @@ async function handleSingleFrameGenerate(
   const lastFrameCharNames  = new Set(charsForLastFrame.map((c) => c.name));
   const resolvedFirst = resolvedChars.filter((rc) => firstFrameCharNames.has(rc.name));
   const charMainImagesFirst  = resolvedFirst.map((c) => c.imagePath);
-  const charAngleImagesFirst = resolvedFirst.flatMap((c) => (c.angleImagePaths ?? []).slice(0, 2));
+  const charAngleImagesFirst = resolvedFirst.flatMap((c) => (c.angleImages ?? []).slice(0, 2).map(ai => ai.path));
   const resolvedLast = resolvedChars.filter((rc) => lastFrameCharNames.has(rc.name));
   const charMainImagesLast  = resolvedLast.map((c) => c.imagePath);
-  const charAngleImagesLast = resolvedLast.flatMap((c) => (c.angleImagePaths ?? []).slice(0, 2));
+  const charAngleImagesLast = resolvedLast.flatMap((c) => (c.angleImages ?? []).slice(0, 2).map(ai => ai.path));
   // 合并版本供 length 检查和 debug 日志使用。
   const charRefImagesFirst = [...charMainImagesFirst, ...charAngleImagesFirst];
   const charRefImagesLast  = [...charMainImagesLast,  ...charAngleImagesLast];
@@ -2154,8 +2146,9 @@ async function handleSingleFrameGenerate(
     .map((c) => `${c.name}${c.visualHint ? `【${c.visualHint}】` : ""}: ${c.description}`)
     .join("\n");
 
-  // frameTarget: "first" = only regenerate anchorFirst; "last" = only anchorLastAi; "both" = default
-  const frameTarget = (payload?.frameTarget as "first" | "last" | "both") ?? "both";
+  // frameTarget: "first" = only regenerate anchorFirst; "last" = only anchorLastAi
+  // 客户端始终显式传入，服务端 default 为 "first"（防御性兜底，不应依赖）
+  const frameTarget = (payload?.frameTarget as "first" | "last") ?? "first";
 
   // 解析多参考图（frameReferences 数组，新）或单参考图（frameReference，兼容旧版）
   // 第一张为主参考（用于 chainSourceShotId/chainSourceType 记录），后续为额外参考。
@@ -2197,6 +2190,21 @@ async function handleSingleFrameGenerate(
   // 主参考（第一张）用于衔接元数据记录；多张全部注入 refImages
   const continuityRef: ResolvedFrameRef | undefined = resolvedFrameRefs[0];
 
+  // 分镜级道具参考图：读取 shot.propRefs（JSON 数组 assetId），查出磁盘上存在的图片路径
+  const propRefIds: string[] = (() => {
+    if (!shot.propRefs) return [];
+    try { return JSON.parse(shot.propRefs) as string[]; }
+    catch { return []; }
+  })();
+  const propRefPaths: string[] = propRefIds.length > 0
+    ? (await db
+        .select({ imagePath: characterAssets.imagePath })
+        .from(characterAssets)
+        .where(inArray(characterAssets.id, propRefIds)))
+      .map((a) => a.imagePath)
+      .filter((p): p is string => !!p && shotFrameFileOnDisk(p))
+    : [];
+
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
@@ -2210,11 +2218,12 @@ async function handleSingleFrameGenerate(
       //     @图2 → referenceList[1] = char1 主图
       //   角色的多角度图（angleImages）和跨镜参考图（crossShotRefPaths）
       //   追加到末尾，作为额外上下文，不占 @图N 编号。
-      // refImages 顺序：charMain(@图N 对齐) → charAngle(无编号) → crossShot(无编号)
+      // refImages 顺序：charMain(@图N 对齐) → charAngle(无编号) → crossShot(无编号) → propRef(无编号)
       const refImages = [
         ...charMainImagesFirst,
         ...charAngleImagesFirst,   // 角度图追加到末尾（无 @图N 绑定，提供额外一致性上下文）
         ...crossShotRefPaths,      // 跨镜参考图追加到末尾
+        ...propRefPaths,           // 道具参考图追加到末尾（分镜级手动绑定）
       ];
       const firstFrameAssets = [
         ...charsForFirstFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
@@ -2301,6 +2310,7 @@ async function handleSingleFrameGenerate(
       //   无编号     → charAngleImagesLast（角度图，额外一致性上下文）
       //   无编号     → existingFirstFrame（首帧作为风格连续性锚定，排末尾）
       //   无编号     → crossShotRefPathsLast
+      //   无编号     → propRefPaths（道具参考图，分镜级手动绑定）
       const crossShotRefPathsLast = resolvedFrameRefs.map((r) => r.path);
       const lastFramePath = await ai.generateImage(lastPrompt, {
         ...imageOpts,
@@ -2310,6 +2320,7 @@ async function handleSingleFrameGenerate(
           ...charAngleImagesLast,
           existingFirstFrame,
           ...crossShotRefPathsLast,
+          ...propRefPaths,           // 道具参考图追加到末尾
         ]),
       });
       await db
@@ -2319,55 +2330,10 @@ async function handleSingleFrameGenerate(
       return NextResponse.json({ shotId, anchorLastAi: lastFramePath, status: "ok" });
     }
 
-    // frameTarget === "both" — user explicitly chose keyframe-interpolation mode;
-    // always generate anchorFirst + anchorLastAi with no heuristic.
+    // 未知 frameTarget 兜底：生成首帧（不应发生，客户端始终显式传 first/last）
     const firstFramePath = await generateAnchorFirst();
-
-    // Both frames: generate anchorLastAi
-    const bothLastFrameAssets = [
-      ...charsForLastFrame.map((c) => ({ id: c.id, name: c.name, type: "role" as const })),
-    ];
-    const lastPromptRaw = buildLastFramePrompt(
-      pickLastFramePromptBuildParams({
-        shot,
-        characterDescriptions: characterDescriptionsForLast,
-        namedCharacterCount: charsForLastFrame.length,
-        hasAnchorFirst: true,
-        hasCharacterSheetRefs: charRefImagesLast.length > 0,
-        visualStyleTag: singleVisualStyleTag,
-        visualStyle: singleVisualStyle,
-        cameraDirection: singleCleanedCamera,
-        slotContents: frameLastSlots,
-        assets: bothLastFrameAssets,
-      })
-    );
-    const lastPrompt = lastPromptRaw;
-    // Both 模式尾帧：与 "last" 模式相同的对齐规则
-    //   charMain → charAngle → firstFrame（连续性锚定）→ crossShot
-    const bothCrossShotRefPaths = resolvedFrameRefs.map((r) => r.path);
-    const lastFramePath = await ai.generateImage(lastPrompt, {
-      ...imageOpts,
-      quality: "hd",
-      referenceImages: limitReferenceImages([
-        ...charMainImagesLast,
-        ...charAngleImagesLast,
-        firstFramePath,
-        ...bothCrossShotRefPaths,
-      ]),
-    });
-
-    await db
-      .update(shots)
-      .set({
-        anchorFirst: firstFramePath,
-        anchorLastAi: lastFramePath,
-        status: "completed",
-        chainSourceShotId: continuityRef?.shotId ?? null,
-        chainSourceType: continuityRef?.frameType ?? null,
-      })
-      .where(eq(shots.id, shotId));
-
-    return NextResponse.json({ shotId, anchorFirst: firstFramePath, anchorLastAi: lastFramePath, status: "ok" });
+    await persistAnchorFirst(firstFramePath);
+    return NextResponse.json({ shotId, anchorFirst: firstFramePath, status: "ok" });
   } catch (err) {
     console.error(`[SingleFrameGenerate] Error for shot ${shotId}:`, err);
     await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
@@ -2430,8 +2396,10 @@ async function handleSingleVideoGenerate(
   // Detect crowd shot: no named characters in this shot's text → use reference mode
   const singleVideoShotText = buildShotCharacterText(shot);
   const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters, { contextText: singleVideoCharacterContext });
-  const isSingleVideoCrowdShot = singleVideoShotChars.length === 0;
-  const useSingleVideoReferenceMode = shouldUseFirstFrameVideoMode(shot, isSingleVideoCrowdShot);
+  // 三态视频生成模式（SingleVideoMode）
+  const singleVideoMode = resolveSingleVideoMode(shot);
+  // 向后兼容：prompt 拼接逻辑仍用此布尔值判断"是否首帧模式"
+  const useSingleVideoReferenceMode = singleVideoMode !== "keyframe";
 
   const shotDialoguesParsed = extractDialoguesFromMotionScript(shot.motionScript ?? "");
 
@@ -2529,23 +2497,59 @@ async function handleSingleVideoGenerate(
       !!shotForVideo.anchorLastAi &&
       shotFrameFileOnDisk(shotForVideo.anchorLastAi);
 
+    // ── multimodal 模式预解析：在 prompt 构建前 resolve 角色图，确保 @参考N 编号与 refs 数组同步 ──
+    // 仅在 multimodal + Seedance + 无预生成 prompt 时提前执行；其余模式延迟到三路分流处。
+    const needPreResolveCharImages =
+      singleVideoMode === "multimodal" &&
+      !shotForVideo.videoPrompt &&
+      isSeedanceProtocol &&
+      singleVideoShotChars.length > 0;
+
+    // charImagesForVideo：multimodal 模式下实际有图（磁盘存在）的角色列表
+    // 其余模式为 []，三路分流里 multimodal 分支直接复用，不重复查询
+    const charImagesForVideo = needPreResolveCharImages
+      ? await resolveCharacterImages(
+          // startFrameDesc 优先（含服装/光影视觉细节），prompt 补充叙事背景
+          [shotForVideo.startFrameDesc, shotForVideo.prompt].filter(Boolean).join("\n"),
+          singleVideoShotChars,
+        )
+      : [];
+
     // ── Seedance 新格式：@参考N + 音色 + 台词类型 ──────────────────────────────
     let videoPromptBase: string;
     if (!shotForVideo.videoPrompt && isSeedanceProtocol) {
-      // 构建角色资产列表（检查是否有音频参考）
+      // 构建角色资产列表：
+      //   multimodal 模式：只包含有磁盘图片的角色（与 multimodalRefs 第一轮完全对应）
+      //   其余模式：包含所有命名角色（@参考N 空悬无妨，API 不传 refs）
+      const charsForPrompt = needPreResolveCharImages
+        ? singleVideoShotChars.filter((c) =>
+            charImagesForVideo.some(
+              (ci) => ci.name === c.name && !!ci.imagePath && shotFrameFileOnDisk(ci.imagePath)
+            )
+          )
+        : singleVideoShotChars;
+
       const seedanceSingleAssets: SeedanceAsset[] = [];
-      for (const char of singleVideoShotChars) {
-        const charAssets = await db
-          .select({ audioPath: characterAssets.audioPath })
-          .from(characterAssets)
-          .where(eq(characterAssets.characterId, char.id));
-        const hasAudio = charAssets.some((a) => !!a.audioPath);
+      for (const char of charsForPrompt) {
+        // multimodal 模式：audioPath 已由 resolveCharacterImages 查好，直接复用
+        const resolvedChar = charImagesForVideo.find((ci) => ci.name === char.name);
+        const hasAudio = resolvedChar
+          ? !!resolvedChar.audioPath
+          : await (async () => {
+              const rows = await db
+                .select({ audioPath: characterAssets.audioPath })
+                .from(characterAssets)
+                .where(eq(characterAssets.characterId, char.id));
+              return rows.some((r) => !!r.audioPath);
+            })();
         seedanceSingleAssets.push({
           id: char.id,
           name: char.name,
           type: "role",
           voiceHint: char.voiceHint || null,
           hasAudio,
+          // angleImages：multimodal 预解析时已获取，其余模式传空数组（@参考N 不传 refs，空悬无妨）
+          angleImages: resolvedChar?.angleImages ?? [],
         });
       }
 
@@ -2606,14 +2610,11 @@ async function handleSingleVideoGenerate(
     const videoPrompt = videoPromptBase;
 
     console.log(
-      `\n${"=".repeat(80)}\n[SingleVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${useSingleVideoReferenceMode ? "reference" : "keyframe"})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
+      `\n${"=".repeat(80)}\n[SingleVideoGenerate] Shot ${shot.sequence} — FINAL VIDEO PROMPT (sent to model, mode=${singleVideoMode})\n${"=".repeat(80)}\n${videoPrompt}\n${"=".repeat(80)}\n`
     );
 
     const resolution = payload?.resolution as "480p" | "720p" | undefined;
 
-    // 首帧模式：initialImage = anchorFirst；首尾帧模式：anchorFirst + 磁盘上存在的 AI anchorLastAi。
-    // 角色定妆图不传入视频模型：首帧图已由 Seedream + 定妆图生成，角色外貌已锚定其中；
-    // API 规定 first_frame / reference_image 两种模式互斥，混用会丢失首帧强约束。
     const onRemoteResultSingle = async ({ videoUrl, taskId }: { videoUrl: string; taskId?: string | null }) => {
       await db.update(shots).set({
         remoteVideoUrl: videoUrl,
@@ -2623,26 +2624,117 @@ async function handleSingleVideoGenerate(
         remoteVideoExpiresAt: getRemoteVideoExpiry(),
       }).where(eq(shots.id, shotId));
     };
-    const result = await videoProvider.generateVideo(
-      useSingleVideoReferenceMode
-        ? {
-            initialImage: shotForVideo.anchorFirst!,
-            prompt: videoPrompt,
-            duration: effectiveDuration,
-            ratio,
-            ...(resolution && { resolution }),
-            onRemoteResult: onRemoteResultSingle,
+
+    // ── 三路分流：keyframe / initialImage / multimodal ──────────────────────────
+    let result: Awaited<ReturnType<typeof videoProvider.generateVideo>>;
+
+    if (singleVideoMode === "keyframe") {
+      // 首尾帧模式：两帧双锁，最强约束（极少数情况，需手动生成 AI 尾帧）
+      result = await videoProvider.generateVideo({
+        anchorFirst: shotForVideo.anchorFirst!,
+        anchorLastAi: shotForVideo.anchorLastAi!,
+        prompt: videoPrompt,
+        duration: effectiveDuration,
+        ratio,
+        ...(resolution && { resolution }),
+        onRemoteResult: onRemoteResultSingle,
+      });
+    } else if (singleVideoMode === "multimodal") {
+      // 多模态参考模式：anchorFirst 作构图参考，角色定妆图锁定外貌（修复角色跑偏 bug）
+      // charImagesForVideo 已在 prompt 构建前预解析（needPreResolveCharImages），无需重复查询。
+      // 若 videoPrompt 已预生成（shotForVideo.videoPrompt 非空），则为空数组，refs 仅含 anchorFirst。
+      // （预生成 prompt 的 @参考N 编号由生成时决定，当前 multimodal 路径不处理此场景）
+
+      // 组装 multimodalRefs，顺序必须与 buildSeedanceMultiParamVideoPrompt 的 buildRefEntries 完全一致：
+      //   第一轮：角色资产主图 + 紧跟该角色的角度变体（3q → profile → back）
+      //   第二轮：分镜首帧 anchorFirst（构图锚点）
+      //   第三轮：音频（音色克隆参考）
+      //
+      // 14 张上限保护（Seedance API 硬限制）：
+      //   优先级：主图 > anchorFirst > 音频文件 > 角度变体
+      //   超出时按 back → profile → 3q 顺序裁剪角度变体（character-router 已保证 3q→profile→back 顺序，
+      //   角度预算耗尽时后面的角度自然被跳过，即背面先丢）
+      const MAX_MULTIMODAL_REFS = 14;
+      const charMainCount = charImagesForVideo.filter(
+        (ci) => ci.imagePath && shotFrameFileOnDisk(ci.imagePath)
+      ).length;
+      const anchorCount =
+        shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst) ? 1 : 0;
+      const audioCount = charImagesForVideo.filter(
+        (ci) => !!ci.audioPath && fs.existsSync(ci.audioPath)
+      ).length;
+      let angleSlotBudget = Math.max(
+        0,
+        MAX_MULTIMODAL_REFS - charMainCount - anchorCount - audioCount
+      );
+
+      const multimodalRefs: import("@/lib/ai/types").MultimodalRefItem[] = [];
+
+      // 第一轮：角色主图 + 角度变体（顺序对应 buildRefEntries 的 asset_image + asset_angle_image 轮）
+      for (const ci of charImagesForVideo) {
+        if (ci.imagePath && shotFrameFileOnDisk(ci.imagePath)) {
+          multimodalRefs.push({ type: "image", path: ci.imagePath });
+          for (const ai of ci.angleImages ?? []) {
+            if (angleSlotBudget > 0) {
+              multimodalRefs.push({ type: "image", path: ai.path });
+              angleSlotBudget--;
+            }
           }
-        : {
-            anchorFirst: shotForVideo.anchorFirst!,
-            anchorLastAi: shotForVideo.anchorLastAi!,
-            prompt: videoPrompt,
-            duration: effectiveDuration,
-            ratio,
-            ...(resolution && { resolution }),
-            onRemoteResult: onRemoteResultSingle,
+        }
+      }
+      // 第二轮：分镜首帧（对应 buildRefEntries 的 storyboard_image 轮）
+      if (shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst)) {
+        multimodalRefs.push({ type: "image", path: shotForVideo.anchorFirst });
+      }
+      // 第三轮：音频（对应 buildRefEntries 的 asset_audio 轮）
+      for (const ci of charImagesForVideo) {
+        if (ci.audioPath && fs.existsSync(ci.audioPath)) {
+          multimodalRefs.push({ type: "audio", path: ci.audioPath });
+        }
+      }
+      // 第四轮：道具参考图（分镜级手动绑定，追加到末尾，不占角色编号位置）
+      const videoPropRefIds: string[] = (() => {
+        if (!shot.propRefs) return [];
+        try { return JSON.parse(shot.propRefs) as string[]; }
+        catch { return []; }
+      })();
+      if (videoPropRefIds.length > 0) {
+        const videoPropAssets = await db
+          .select({ imagePath: characterAssets.imagePath })
+          .from(characterAssets)
+          .where(inArray(characterAssets.id, videoPropRefIds));
+        for (const pa of videoPropAssets) {
+          if (pa.imagePath && shotFrameFileOnDisk(pa.imagePath) && multimodalRefs.length < MAX_MULTIMODAL_REFS) {
+            multimodalRefs.push({ type: "image", path: pa.imagePath });
           }
-    );
+        }
+      }
+
+      console.log(
+        `[SingleVideoGenerate] Shot ${shot.sequence}: multimodal refs — ` +
+          `${multimodalRefs.filter((r) => r.type === "image").length} image(s), ` +
+          `${multimodalRefs.filter((r) => r.type === "audio").length} audio(s)`
+      );
+
+      result = await videoProvider.generateVideo({
+        multimodalRefs,
+        prompt: videoPrompt,
+        duration: effectiveDuration,
+        ratio,
+        ...(resolution && { resolution }),
+        onRemoteResult: onRemoteResultSingle,
+      });
+    } else {
+      // initialImage 模式：cutPoint 继承帧/群演，像素级时序连续（严格首帧锚定）
+      result = await videoProvider.generateVideo({
+        initialImage: shotForVideo.anchorFirst!,
+        prompt: videoPrompt,
+        duration: effectiveDuration,
+        ratio,
+        ...(resolution && { resolution }),
+        onRemoteResult: onRemoteResultSingle,
+      });
+    }
 
     // 把旧视频存入历史（超出 5 条时自动清理最旧文件）
     await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "重新生成前");

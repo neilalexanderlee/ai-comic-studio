@@ -223,28 +223,38 @@ export default function EpisodeStoryboardPage() {
 
   const anyGenerating = generating || generatingVideoPrompts;
 
-  const drawerShots = project.shots.map((shot) => ({
-    id: shot.id,
-    sequence: shot.sequence,
-    prompt: shot.prompt,
-    startFrameDesc: shot.startFrameDesc,
-    endFrameDesc: shot.endFrameDesc,
-    motionScript: shot.motionScript,
-    cameraDirection: shot.cameraDirection,
-    duration: shot.duration,
-    anchorFirst: shot.anchorFirst,
-    anchorLastAi: shot.anchorLastAi,
-    cutPoint: shot.cutPoint,
-    videoPrompt: shot.videoPrompt,
-    videoUrl: shot.videoUrl,
-    remoteVideoUrl: shot.remoteVideoUrl,
-    remoteVideoStatus: shot.remoteVideoStatus,
-    remoteVideoExpiresAt: shot.remoteVideoExpiresAt,
-    remoteVideoLastDownloadAt: shot.remoteVideoLastDownloadAt,
-    videoResolution: shot.videoResolution,
-    dialogues: shot.dialogues || [],
-    isCrowdShot: filterShotCharacters(buildShotCharacterText(shot), project.characters).length === 0,
-  }));
+  const drawerShots = project.shots.map((shot) => {
+    // 计算本镜命名角色的道具资产列表（availablePropAssets）
+    const shotNamedCharsForDrawer = filterShotCharacters(buildShotCharacterText(shot), project.characters);
+    const availablePropAssets = shotNamedCharsForDrawer.flatMap((c) =>
+      (c.assets ?? [])
+        .filter((a) => a.assetType === "prop")
+        .map((a) => ({ id: a.id, imagePath: a.imagePath, tag: a.tag, characterName: c.name }))
+    );
+    return {
+      id: shot.id,
+      sequence: shot.sequence,
+      prompt: shot.prompt,
+      startFrameDesc: shot.startFrameDesc,
+      endFrameDesc: shot.endFrameDesc,
+      motionScript: shot.motionScript,
+      cameraDirection: shot.cameraDirection,
+      duration: shot.duration,
+      anchorFirst: shot.anchorFirst,
+      anchorLastAi: shot.anchorLastAi,
+      cutPoint: shot.cutPoint,
+      videoPrompt: shot.videoPrompt,
+      videoUrl: shot.videoUrl,
+      remoteVideoUrl: shot.remoteVideoUrl,
+      remoteVideoStatus: shot.remoteVideoStatus,
+      remoteVideoExpiresAt: shot.remoteVideoExpiresAt,
+      remoteVideoLastDownloadAt: shot.remoteVideoLastDownloadAt,
+      videoResolution: shot.videoResolution,
+      dialogues: shot.dialogues || [],
+      propRefs: shot.propRefs ?? null,
+      availablePropAssets,
+    };
+  });
 
   async function handleGenerateShots() {
     // 当前版本有已生成的帧或视频时，自动新建版本保护现有资产，不再弹确认框。
@@ -975,7 +985,6 @@ export default function EpisodeStoryboardPage() {
         <div className="space-y-3">
           {project.shots.map((shot, index) => {
             const shotNamedCharacters = filterShotCharacters(buildShotCharacterText(shot), project.characters);
-            const isCrowdShot = shotNamedCharacters.length === 0;
             const chainSourceSequence = shot.chainSourceShotId
               ? project.shots.find((s) => s.id === shot.chainSourceShotId)?.sequence
               : null;
@@ -1039,7 +1048,6 @@ export default function EpisodeStoryboardPage() {
               batchGeneratingVideoPrompts={generatingVideoPrompts}
               prevCutPoint={index > 0 ? project.shots[index - 1]?.cutPoint : null}
               prevAnchorLastAi={index > 0 ? project.shots[index - 1]?.anchorLastAi : null}
-              isCrowdShot={isCrowdShot}
               chainSourceShotId={shot.chainSourceShotId}
               chainSourceType={shot.chainSourceType}
               chainSourceSequence={chainSourceSequence ?? null}

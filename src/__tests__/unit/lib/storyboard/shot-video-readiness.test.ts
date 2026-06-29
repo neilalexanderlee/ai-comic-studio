@@ -35,7 +35,6 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
           id: "s1",
           sequence: 1,
           anchorFirst: "/uploads/missing.png",
-          prompt: "角色甲站立",
           videoUrl: null,
         },
       ],
@@ -67,7 +66,7 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
     expect(blocked).toHaveLength(0);
   });
 
-  it("DB 有尾帧路径但磁盘缺失时走首帧模式 → 不 blocked", () => {
+  it("有首帧路径且磁盘存在 → 不 blocked", () => {
     shotFrameFileOnDisk.mockImplementation((p) => String(p).includes("first-ok"));
 
     const blocked = listBatchVideoBlockedShotsOnDisk(
@@ -77,7 +76,6 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
           sequence: 2,
           anchorFirst: "/uploads/first-ok.png",
           anchorLastAi: "/uploads/last-missing.png",
-          prompt: "角色甲转身",
           videoUrl: null,
         },
       ],
@@ -94,12 +92,17 @@ describe("getShotVideoReadiness (server)", () => {
     shotFrameFileOnDisk.mockReset();
   });
 
-  it("群演镜只需首帧在盘", () => {
-    shotFrameFileOnDisk.mockReturnValue(true);
+  it("无首帧路径 → not ready", () => {
+    shotFrameFileOnDisk.mockReturnValue(false);
+    const r = getShotVideoReadiness({ anchorFirst: null });
+    expect(r.ready).toBe(false);
+    if (!r.ready) expect(r.issue).toBe("missing_anchor_first");
+  });
 
+  it("有首帧路径且磁盘存在 → ready（含群演）", () => {
+    shotFrameFileOnDisk.mockReturnValue(true);
     const r = getShotVideoReadiness(
-      { anchorFirst: "/uploads/first.png", anchorLastAi: null },
-      true
+      { anchorFirst: "/uploads/first.png", anchorLastAi: null }
     );
     expect(r.ready).toBe(true);
   });
@@ -110,7 +113,7 @@ describe("listBatchVideoBlockedShots (client)", () => {
 
   it("无首帧路径 → 非 eligible，不进入预检列表", () => {
     const blocked = listBatchVideoBlockedShots(
-      [{ id: "s1", sequence: 1, anchorFirst: null, prompt: "角色甲", videoUrl: null }],
+      [{ id: "s1", sequence: 1, anchorFirst: null, videoUrl: null }],
       characters,
       "new_only"
     );
@@ -119,15 +122,7 @@ describe("listBatchVideoBlockedShots (client)", () => {
 
   it("有首帧路径 → 不 blocked（磁盘由服务端再校验）", () => {
     const blocked = listBatchVideoBlockedShots(
-      [
-        {
-          id: "s1",
-          sequence: 1,
-          anchorFirst: "/uploads/first.png",
-          prompt: "角色甲",
-          videoUrl: null,
-        },
-      ],
+      [{ id: "s1", sequence: 1, anchorFirst: "/uploads/first.png", videoUrl: null }],
       characters,
       "new_only"
     );
@@ -136,11 +131,15 @@ describe("listBatchVideoBlockedShots (client)", () => {
 });
 
 describe("getShotVideoReadiness (client)", () => {
-  it("群演镜有首帧路径即可", () => {
+  it("有首帧路径即可（含群演）", () => {
     const r = getShotVideoReadinessClient(
-      { anchorFirst: "/uploads/first.png", anchorLastAi: null },
-      true
+      { anchorFirst: "/uploads/first.png", anchorLastAi: null }
     );
     expect(r.ready).toBe(true);
+  });
+
+  it("无首帧路径 → not ready", () => {
+    const r = getShotVideoReadinessClient({ anchorFirst: null });
+    expect(r.ready).toBe(false);
   });
 });

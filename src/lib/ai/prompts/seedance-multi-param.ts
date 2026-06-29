@@ -21,6 +21,12 @@ export type SeedanceAsset = {
   voiceHint?: string | null;
   /** 是否有参考音频文件 — true 时使用情况2，自动插入一个音频 @参考 编号 */
   hasAudio?: boolean;
+  /**
+   * 角度变体图（3q / profile / back），与主图同一服装状态，文件已确认存在。
+   * 顺序固定：3q → profile → back（由 character-router 保证）。
+   * buildRefEntries Round 1 会在主图之后为每个变体分配连续 @参考N。
+   */
+  angleImages?: { angle: string; path: string }[];
 };
 
 export type SeedanceDialogue = {
@@ -63,6 +69,7 @@ export type SeedanceMultiParamInput = {
 
 type RefEntry =
   | { kind: "asset_image"; refNum: number; asset: SeedanceAsset }
+  | { kind: "asset_angle_image"; refNum: number; asset: SeedanceAsset; angle: string }
   | { kind: "asset_audio"; refNum: number; asset: SeedanceAsset }
   | { kind: "storyboard_image"; refNum: number; shotIndex: number };
 
@@ -81,9 +88,12 @@ function buildRefEntries(assets: SeedanceAsset[], shots: SeedanceShot[]): RefEnt
   const entries: RefEntry[] = [];
   let counter = 1;
 
-  // 第一轮：所有资产图片
+  // 第一轮：所有资产图片（主图 + 紧跟其角度变体：3q → profile → back）
   for (const asset of assets) {
     entries.push({ kind: "asset_image", refNum: counter++, asset });
+    for (const ai of asset.angleImages ?? []) {
+      entries.push({ kind: "asset_angle_image", refNum: counter++, asset, angle: ai.angle });
+    }
   }
 
   // 第二轮：所有分镜首帧图
@@ -170,7 +180,7 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
   const refEntries = buildRefEntries(assets, shots);
 
   // 建立查找 map
-  const assetImageRefMap = new Map<string, number>(); // asset.id → refNum
+  const assetImageRefMap = new Map<string, number>(); // asset.id → refNum（主图）
   const assetAudioRefMap = new Map<string, number>(); // asset.id → refNum
   const shotRefMap = new Map<number, number>();        // shotIndex → refNum
 
@@ -187,18 +197,30 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
   lines.push("");
 
   // 4. 参考定义段
+  const ANGLE_LABEL: Record<string, string> = {
+    "3q": "四分之三侧面",
+    "profile": "正侧面",
+    "back": "背面",
+  };
   lines.push("参考定义:");
   for (const entry of refEntries) {
     if (entry.kind === "asset_image") {
       const asset = entry.asset;
       const desc = buildAssetDesc(asset);
       const audioRef = assetAudioRefMap.get(asset.id);
+      // 仅当角色资产且存在角度变体时，标注"正面（外貌主参考）"以区别于角度变体行
+      const hasAngles = asset.type === "role" && (asset.angleImages ?? []).length > 0;
+      const mainLabel = hasAngles ? `${desc}正面（外貌主参考）` : desc;
       if (audioRef !== undefined) {
-        // 带音频的资产：在同一行末尾追加 ，参考音频为：@参考N
-        lines.push(`@参考${entry.refNum}: ${asset.name}，${desc}，参考音频为：@参考${audioRef}`);
+        lines.push(`@参考${entry.refNum}: ${asset.name}，${mainLabel}，参考音频为：@参考${audioRef}`);
       } else {
-        lines.push(`@参考${entry.refNum}: ${asset.name}，${desc}`);
+        lines.push(`@参考${entry.refNum}: ${asset.name}，${mainLabel}`);
       }
+    } else if (entry.kind === "asset_angle_image") {
+      const asset = entry.asset;
+      const mainRef = assetImageRefMap.get(asset.id);
+      const label = ANGLE_LABEL[entry.angle] ?? entry.angle;
+      lines.push(`@参考${entry.refNum}: ${asset.name}${label}视图（与@参考${mainRef}同一角色，${label}外貌补充）`);
     } else if (entry.kind === "storyboard_image") {
       const shot = shots[entry.shotIndex];
       lines.push(`@参考${entry.refNum}: 分镜${entry.shotIndex + 1}，${shot.sceneName || shot.sceneDescription.slice(0, 20)}`);

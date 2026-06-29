@@ -85,7 +85,6 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │   │   │   ├── schema.ts              # Drizzle 表定义（单一事实来源，最新 idx=46）
 │   │   │   └── index.ts               # DB 实例 + idempotent migration runner
 │   │   ├── storyboard/                # 分镜工具函数
-│   │   │   ├── frame-generation-strategy.ts  # 智能帧生成策略（三层决策）
 │   │   │   ├── video-desc.ts          # ★ buildVideoDesc()（10维 videoDesc 组装）
 │   │   │   ├── track-grouping.ts      # ★ groupShotsIntoTracks()（≤15s 分组）
 │   │   │   ├── shot-video-prompt-sync.server.ts  # ★ buildDirectVideoPrompt / syncVideoPromptIfStale（直出架构）
@@ -112,6 +111,39 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 │       └── integration/       # API 集成测试
 └── src/lib/evals/             # AI Eval 评估框架
 ```
+
+---
+
+## 角色资产架构（最优实践）
+
+### 每个角色的资产组成
+
+| 资产类型 | assetType | 数量 | 用途 |
+|---|---|---|---|
+| 主定妆图（正面，isDefault=1） | `morph` | 1 张 | 始终传入，锁定外貌身份 |
+| 角度变体（3q/profile/back） | `morph` | 0-3 张 | 补充视角，angle 字段标记 |
+| 武器/道具图 | `prop` | 0-N 张 | 在分镜抽屉「道具参考图」区域勾选，写入 shots.prop_refs（JSON 数组，store character_assets.id） |
+| 音色参考 | 任意 | 0-1 个 | audioPath 字段，音色克隆 |
+
+### 主定妆图选择逻辑（无 LLM）
+
+```
+多张 morph（angle=null）→ isDefault=1 那张；无标记则取第一张
+一张 morph             → 直接用
+零张 morph             → 用 blueprint
+```
+
+### 武器处理决策规则
+
+- **武器是角色标志性外观**（如龙渊的背剑）→ 主定妆图包含武器；背面/3q 角度图自然展示背剑姿势；另上传一张剑的特写道具图（`prop`）供需要武器细节的分镜引用
+- **武器仅在特定场景出现** → 主定妆图不含武器；武器作为 `prop` 资产，在打戏分镜手动加入 FrameReferencePicker
+- **角色换武器**（如故事中期换剑）→ 用 inpainting 生成新剑版本的角度图，上传后更新 `isDefault=1`；旧定妆图保留，手动在角色页切换
+
+### 行业对标
+
+- Kling Elements：每个角色最多 4 张角度图（front + 3/4 x2 + back），武器可建独立 Element
+- Seedance 2.0：`[identity_lock]` 锁定角色，`[object_lock]` 锁定道具，分别传入
+- 共同原则：角色外貌与武器道具分开，不用 LLM 路由
 
 ---
 
@@ -157,7 +189,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 46` — `0046_drop_scenes`
+**当前最新迁移索引**：`idx 51` — `0051_shot_prop_refs`
 
 ### 关键表
 
@@ -169,7 +201,7 @@ VideoProvider    // generateVideo
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除） |
 | `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
-| `character_assets` | 角色图片/音频；`audioPath`（音色参考，用于 Seedance 音色克隆）|
+| `character_assets` | 角色图片/音频；`assetType`（`morph`/`blueprint`/`prop`）；`isDefault`（1=当前主定妆图）；`audioPath`（音色参考，用于 Seedance 音色克隆）|
 | `episode_characters` | 多对多：角色参与哪些剧集 |
 
 **已移除的表**：`scenes`（migration 0046）、`scene_variants`（migration 0045）。场景功能整体废弃，`shots.scene_id` 字段同步移除。
@@ -215,9 +247,8 @@ const visualStyleTag = VISUAL_STYLE_PRESETS[project.visualStyle]?.tag ?? "";
 
 ### 4. enhancePrompts — 存 DB，不存 localStorage
 
-`projects.enhance_prompts` 字段（integer，默认 1）对应 UI 上的「AI 增强」开关，控制两件事：
+`projects.enhance_prompts` 字段（integer，默认 1）对应 UI 上的「AI 增强」开关，控制一件事：
 1. 生成图片/视频前调用 `enhanceImagePrompt` / `enhanceVideoPrompt` 进行 prompt 改写
-2. 帧生成策略（`resolveFrameMode`）中启用 LLM 语义判断（关闭时仅走确定性规则）
 
 通过 `PATCH /api/projects/:id` 持久化，不使用 localStorage。
 
@@ -241,24 +272,68 @@ const charExtractSystem = await resolveCharacterExtractSystemPrompt(
 const charExtractSystem = await resolvePrompt("character_extract", { userId, projectId });
 ```
 
-### 7. 帧生成策略 — resolveFrameMode
+### 7. 帧生成 — frameTarget 机制
 
-`src/lib/storyboard/frame-generation-strategy.ts` 决定每个分镜生成「首帧+尾帧」还是「仅首帧」。
+UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（`frameTarget: "first"`）。AI 尾帧需用户单独点击「生成尾帧」按钮（`frameTarget: "last"`）触发。
 
-**三层决策（按顺序）：**
+**frameTarget 取值（客户端显式传入，无 "both"）：**
+- `"first"` — 只生成/覆写 `anchorFirst`
+- `"last"` — 只生成/覆写 `anchorLastAi`（需要 `anchorFirst` 已存在）
 
-| 层 | 触发条件 | 结果 |
-|---|---|---|
-| 确定性（无 LLM） | 无命名角色 / duration < 5s / endFrameDesc 为空 / 首尾帧描述相似度 > 82% | `first_only` |
-| LLM 语义判断 | 确定性规则未命中 + `enhancePrompts=true` | LLM 分析摄影机意图、首尾帧差异、场景跳变风险 |
-| 安全兜底 | LLM 报错/超时 或 无 textConfig | `both`（保守默认） |
+服务端 default 为 `"first"`（防御性兜底，正常流程不依赖 default）。`"both"` 模式已于 2026-06 完全移除。
 
-**关键设计决策：**
-- LLM judge 绑定在 `enhancePrompts`（「AI 增强」开关）上——关掉 AI 功能时仅走确定性规则，不产生额外 LLM 调用
-- `first_only` 结果：只写 `anchor_first`，不写 `anchor_last_ai`；视频生成时若磁盘无有效 `anchor_last_ai` → Seedance 首帧参考图模式
-- Seedance 参考图模式返回视频最后一帧 → 写入本镜 `cut_point`（**不**自动写下一镜，除非开启衔接开关）
+**视频生成模式因此的影响：**
+- `anchorLastAi` 几乎不存在（用户极少主动生成尾帧）
+- 视频生成默认路径：有命名角色 → `multimodal` 模式；cutPoint 继承 → `initialImage` 模式
 
-**帧生成策略** = 决定当前镜头要不要生成 AI 尾帧（与镜间衔接无关）。
+### 7b. 视频生成三路分流 — SingleVideoMode
+
+`SingleVideoMode = "initialImage" | "keyframe" | "multimodal"`，由 `resolveSingleVideoMode(shot)` 决定，定义于 `src/lib/storyboard/shot-video-readiness.server.ts`。
+
+**决策顺序（不可调整）：**
+
+```
+1. shotFrameFileOnDisk(shot.anchorLastAi) → "keyframe"     // 首尾帧双锁（最强）
+2. shot.chainSourceShotId                 → "initialImage" // cutPoint 继承，时序连续优先
+3. 其余所有镜头（含群演）                 → "multimodal"   // 角色外貌锁定
+```
+
+群演镜头（无命名角色）现在也走 `multimodal`：`resolveCharacterImages` 返回空列表，`multimodalRefs` 仅含 `anchorFirst`，Seedance 降级处理，无副作用。旧的 `isCrowdShot` 字符串匹配判断已全面移除（不稳定，误判代价高）。
+
+**multimodal refs 组装顺序**（必须与 `buildRefEntries` 的三轮分配完全一致，否则 `@参考N` 编号错位）：
+
+```
+第一轮（asset_image）：每个命名角色的主图 → @参考1, @参考2...
+第二轮（storyboard_image）：anchorFirst（分镜首帧，构图锚点）→ @参考N
+第三轮（asset_audio）：音频参考（audioPath，音色克隆）→ @参考N+1...
+```
+
+**关键约束：`@参考N` 必须先于 refs 组装前确定角色列表**
+
+`buildSeedanceMultiParamVideoPrompt`（prompt 端）和 `multimodalRefs`（API 端）必须使用**同一份过滤后的角色列表**——仅包含 `resolveCharacterImages` 实际找到磁盘图片的角色。若 prompt 端包含无图角色、API 端不包含，编号会系统性错位。实现上通过在 prompt 构建前预先调用 `resolveCharacterImages` 来保证同步（`needPreResolveCharImages` 标志，`generate/route.ts`）。
+
+**角度变体（3q/profile/back）已加入 multimodalRefs**
+
+`resolveCharacterImages` 返回 `angleImages: { angle: string; path: string }[]`（按 3q → profile → back 顺序，仅含磁盘存在的文件）。`buildRefEntries` Round 1 在每个 asset 主图后紧跟其角度变体，prompt 参考定义段生成如下格式：
+
+```
+@参考1: 李明，角色正面（外貌主参考），参考音频为：@参考5
+@参考2: 李明四分之三侧面视图（与@参考1同一角色，四分之三侧面外貌补充）
+@参考3: 灵瑶，角色正面（外貌主参考）
+@参考4: 分镜1构图参考
+@参考5: 李明音色参考
+```
+
+`multimodalRefs` 顺序与 `buildRefEntries` 完全对齐：第一轮角色主图+角度变体、第二轮 anchorFirst、第三轮音频。
+
+**14 张上限保护**（Seedance API 硬限制）：
+- 预算 = 14 − 主图数 − anchorFirst(1) − 音频文件数
+- 角度变体按预算分配；超出时后面的角度（back 先丢）自然跳过
+- 优先级：主图 > anchorFirst > 音频文件 > 角度变体
+
+实现位置：`handleSingleVideoGenerate`（`generate/route.ts`）三路分流代码块。`resolveCharacterImages`（`character-router.ts`）返回 `angleImages` 和 `audioPath` 字段。
+
+**批量视频生成无需单独迁移**：批量视频是客户端循环调用 `single_video_generate`，每次调用走同一套三态逻辑，自动享受 multimodal 路径。
 
 ### 8. linkShotsViaCutPoint — 镜头衔接（视频尾帧）
 
@@ -489,7 +564,7 @@ sceneDescription 写法：
 
 **剧本（script）**：`outline_expand`、`script_generate`、`script_parse`、`script_split`
 
-**角色（character）**：`character_extract`、`import_character_extract`、`character_image`、`beauty_image`、`combat_image`、`character_state_router`
+**角色（character）**：`character_extract`、`import_character_extract`、`character_image`、`beauty_image`、`combat_image`
 
 **分镜（shot）**：`shot_split`、`split_shot_single`、`batch_storyboard_rewrite`、`batch_plot_optimize`
 
@@ -501,8 +576,9 @@ sceneDescription 写法：
 
 - `single_shot_rewrite` — route handler 已移除，shot-drawer 按钮已删除，改用 `batch_storyboard_rewrite`
 - `ref_video_prompt` — Vision-LLM 视频精炼路径已被直出架构替代（`buildDirectVideoPrompt`）
+- `character_state_router` — LLM 状态路由已移除（2026-06），改为 `isDefault=1` 直接选图
 
-两者保留在 `prune-stale-prompt-overrides.ts` 的清单中，确保旧用户的 DB 覆盖数据被清理。
+三者保留在 `prune-stale-prompt-overrides.ts` 的清单中，确保旧用户的 DB 覆盖数据被清理。
 
 ### 新增提示词到 registry 的规范
 
@@ -680,6 +756,13 @@ src/lib/evals/
 | shot-drawer「重写文本」按钮静默失败 | `single_shot_rewrite` route handler 已按 CLAUDE.md 要求移除，但 shot-drawer 还在调用 | 从 shot-drawer.tsx 移除该按钮及 state；用分镜页「批量优化文本」替代 |
 | registry.ts 用 `require()` 加载 storyboard-supervision | Next.js App Router 是纯 ESM，`require()` 运行时报 `ReferenceError` | 改为顶部 `import { STORYBOARD_REWRITE_SYSTEM, PLOT_OPTIMIZE_SYSTEM } from "./storyboard-supervision"`（无循环依赖） |
 | prompt-editor.tsx 保留废弃 key 的 hint 映射 | `ref_video_prompt` 和 `single_shot_rewrite` 从 registry 移除后，hint map 未同步清理 | 移除两条废弃 key |
+| 视频生成非正面/非近景首帧导致角色跑偏 | 原 `initialImage` 模式把首帧作为严格首帧锚定，非正面视角时 Seedance 无法同时保持构图和角色外貌 | 引入 `SingleVideoMode` 三态；有命名角色默认走 `multimodal`：首帧作构图参考(@参考1)，角色定妆图作外貌锁定(@参考2+)，cutPoint 继承帧/群演保留 `initialImage` |
+| `frameTarget: "both"` 被服务端默认采用但客户端已停止发送 | 清理时机滞后，服务端 default 为 `"both"` 而客户端全路径已改为显式 `"first"` | 服务端 default 改为 `"first"`，`"both"` 分支整体移除，类型收窄为 `"first" \| "last"` |
+| multimodal 模式 `@参考N` 编号与 refs 数组错位 | prompt 端用全量 `singleVideoShotChars` 构建编号，API 端 refs 只含有磁盘图片的角色，无图角色导致后续编号系统性偏移 | 在 prompt 构建前预先调用 `resolveCharacterImages`（`needPreResolveCharImages`），两端使用同一份已过滤角色列表 |
+| 三/四视图角度变体在视频生成时被忽略 | `buildRefEntries` 未为角度变体分配 `@参考N`，贸然加入 `multimodalRefs` 会导致后续编号整体错位 | 已修复：`SeedanceAsset` 加 `angleImages` 字段，`buildRefEntries` Round 1 每 asset 主图后追加角度变体，prompt 参考定义段生成"XXX四分之三侧面视图（与@参考N同一角色）"说明行，`multimodalRefs` 完全对齐；14 张上限保护优先丢角度变体 |
+| `isCrowdShot` 字符串匹配不稳定导致角色跑偏 bug 在某些镜头上无法修复 | 角色写外号/旁白省略名字时 `filterShotCharacters` 返回空，误将有角色的镜头路由到 `initialImage` | 从 `resolveSingleVideoMode` 移除 `isCrowdShot` 参数；群演统一走 `multimodal`（refs 仅含 anchorFirst，Seedance 降级无害） |
+| LLM 状态路由（武装/日常）选错定妆图 | `determineCharacterState` 用 LLM 判断服装状态，sceneDesc 不含明确服装词时误选 | 移除整个 LLM 路由层（`determineCharacterState`/`STATE_EQUIV`/`isCoveredByTag`）；改为 `isDefault=1` 直接选图，用户在角色页手动设置哪张是当前主定妆图 |
+| 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；分镜抽屉增加「道具参考图」勾选区域；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 14 张上限保护） |
 
 ---
 

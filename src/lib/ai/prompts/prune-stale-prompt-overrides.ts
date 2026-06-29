@@ -3,11 +3,13 @@ import { promptTemplates } from "@/lib/db/schema";
 import { inArray } from "drizzle-orm";
 import { getPromptDefinition } from "./registry";
 
-/** Registry keys removed in 2026-05 Reference 双轨清理 */
+/** Registry keys removed — 废弃的 prompt key 清单，启动时自动清理用户 DB 覆盖数据 */
 export const REMOVED_PROMPT_KEYS = new Set([
   "scene_frame_generate",
   "ref_video_generate",
   "shot_complete",
+  // 2026-06 移除 LLM 状态路由，改为 isDefault 选图
+  "character_state_router",
 ]);
 
 /**

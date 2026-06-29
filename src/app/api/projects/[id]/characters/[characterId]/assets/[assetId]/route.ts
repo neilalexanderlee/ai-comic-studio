@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { characterAssets } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import fs from "node:fs";
 
 /** Delete a file from disk, silently ignoring missing-file errors. */
@@ -18,7 +18,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string; assetId: string }> }
 ) {
-  const { assetId } = await params;
+  const { characterId, assetId } = await params;
   const body = (await request.json()) as {
     tag?: string;
     isDefault?: boolean;
@@ -32,6 +32,20 @@ export async function PATCH(
       .from(characterAssets)
       .where(eq(characterAssets.id, assetId));
     tryDeleteFile(existing?.imagePath);
+  }
+
+  // When setting isDefault=true, clear isDefault on all other morph assets of same character
+  // (排他性：同一角色只能有一张主定妆图)
+  if (body.isDefault === true) {
+    await db
+      .update(characterAssets)
+      .set({ isDefault: 0 })
+      .where(
+        and(
+          eq(characterAssets.characterId, characterId),
+          ne(characterAssets.id, assetId)
+        )
+      );
   }
 
   const updateData: Record<string, unknown> = {};

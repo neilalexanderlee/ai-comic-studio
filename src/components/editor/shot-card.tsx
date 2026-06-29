@@ -99,8 +99,6 @@ interface ShotCardProps {
   chainSourceShotId?: string | null;
   chainSourceType?: string | null;
   chainSourceSequence?: number | null;
-  /** 群演镜头（无命名角色）— 影响视频/尾帧校验 */
-  isCrowdShot?: boolean;
   /** Track 分组标识（Seedance 多参模式批量生成用） */
   track?: string | null;
   /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
@@ -204,14 +202,12 @@ export function ShotCard({
   chainSourceShotId,
   chainSourceType,
   chainSourceSequence,
-  isCrowdShot = false,
   track,
   namedCharacterCount = 0,
 }: ShotCardProps) {
   const t = useTranslations();
   const videoReadiness = getShotVideoReadiness(
-    { anchorFirst, anchorLastAi },
-    isCrowdShot
+    { anchorFirst, anchorLastAi }
   );
   const canGenerateVideo = videoReadiness.ready;
   const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);

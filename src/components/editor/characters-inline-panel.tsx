@@ -19,7 +19,7 @@ interface Character {
     id: string;
     imagePath: string | null;
     tag: string;
-    assetType: "morph" | "blueprint";
+    assetType: "morph" | "blueprint" | "prop";
     isDefault: number;
   }[];
 }

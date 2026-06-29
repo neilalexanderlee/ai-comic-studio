@@ -19,6 +19,8 @@ export async function PATCH(
     anchorFirst: string | null;
     anchorLastAi: string | null;
     videoPrompt: string | null;
+    /** 分镜级道具绑定（JSON 数组字符串，存 character_assets.id） */
+    propRefs: string | null;
   }>;
 
   if (Object.keys(body).length > 0) {
