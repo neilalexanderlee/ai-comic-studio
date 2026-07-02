@@ -404,10 +404,6 @@ export async function POST(
     return handleBatchVideoPrompt(projectId, userId, payload, resolvedModelConfig, episodeId);
   }
 
-  if (action === "ai_optimize_text") {
-    return handleAiOptimizeText(payload, resolvedModelConfig);
-  }
-
   if (action === "split_shot") {
     return handleSplitShot(projectId, userId, payload, resolvedModelConfig, episodeId);
   }
@@ -2919,43 +2915,6 @@ async function handleBatchVideoPrompt(
   const errCount = results.filter((r) => r.status === "error").length;
   console.log(`[BatchVideoPrompt] Done: ${okCount} ok, ${errCount} errors, total ${((Date.now() - bvpStartTime) / 1000).toFixed(1)}s`);
   return NextResponse.json({ results, status: "ok" });
-}
-
-// --- ai_optimize_text: use AI to optimize a text field ---
-
-async function handleAiOptimizeText(
-  payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
-) {
-  const originalText = payload?.originalText as string;
-  const instruction = payload?.instruction as string;
-
-  if (!originalText || !instruction) {
-    return NextResponse.json({ error: "Missing originalText or instruction" }, { status: 400 });
-  }
-  if (!modelConfig?.text) {
-    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
-  }
-
-  const model = createLanguageModel(modelConfig.text);
-  const { text } = await generateText({
-    model,
-    system: `你是一位专业的AI动画内容优化专家。用户会给你一段原始文本和优化指令，请根据指令优化原始文本。
-规则：
-- 只输出优化后的文本，不要添加任何解释、前言或标记
-- 保持原文的语言（中文输入→中文输出）
-- 保持原文的整体结构和用途
-- 根据优化指令做针对性改进`,
-    prompt: `原始文本：
-${originalText}
-
-优化指令：
-${instruction}
-
-请输出优化后的文本：`,
-  });
-
-  return NextResponse.json({ optimizedText: text.trim() });
 }
 
 // ── assign_tracks：为当前版本/剧集的分镜自动分配 Track ──────

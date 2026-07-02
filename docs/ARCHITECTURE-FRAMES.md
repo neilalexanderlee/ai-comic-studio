@@ -179,7 +179,7 @@ flowchart TB
 |---|------|
 | L1 | 参考图选择器仅 **本集当前版本**；跨集用「承接上一集尾帧」，不进选择器 |
 | L5 | **看板**= 进度列 + 点开 `ShotDrawer`；抽屉与列表共用 `useShotFrameActions` / `ShotFrameToolbar` / `ShotFrameAssets` |
-| L6 | 列表 `ShotCard` 与抽屉共用 `useShotFrameActions`、帧组件、`RemoteVideoRecoveryHint`、`ShotVideoEnhanceButton`；列表另保留字段 AI 优化 |
+| L6 | 列表 `ShotCard` 与抽屉共用 `useShotFrameActions`、帧组件、`RemoteVideoRecoveryHint`、`ShotVideoEnhanceButton`；字段级 AI 优化（`AiOptimizeButton`）已移除——单字段无跨镜上下文，破坏 `batch_storyboard_rewrite` 建立的视觉连续性，由批量操作替代 |
 | L2 | 历史仅 `reference_video_url` 的成片已在迁移 0032 并入 `video_url` |
 | L3 | 已删除未注册的 `pipeline/frame-generate.ts` / `video-generate.ts`；生成走 `generate/route` |
 | L4 | 自动衔接跳过（如 `crowd_to_character_cut`）会在视频生成后以 **info Toast** 提示；成功衔接为 success Toast（`shot-auto-link-messages.ts`） |

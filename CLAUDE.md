@@ -762,7 +762,9 @@ src/lib/evals/
 | 三/四视图角度变体在视频生成时被忽略 | `buildRefEntries` 未为角度变体分配 `@参考N`，贸然加入 `multimodalRefs` 会导致后续编号整体错位 | 已修复：`SeedanceAsset` 加 `angleImages` 字段，`buildRefEntries` Round 1 每 asset 主图后追加角度变体，prompt 参考定义段生成"XXX四分之三侧面视图（与@参考N同一角色）"说明行，`multimodalRefs` 完全对齐；14 张上限保护优先丢角度变体 |
 | `isCrowdShot` 字符串匹配不稳定导致角色跑偏 bug 在某些镜头上无法修复 | 角色写外号/旁白省略名字时 `filterShotCharacters` 返回空，误将有角色的镜头路由到 `initialImage` | 从 `resolveSingleVideoMode` 移除 `isCrowdShot` 参数；群演统一走 `multimodal`（refs 仅含 anchorFirst，Seedance 降级无害） |
 | LLM 状态路由（武装/日常）选错定妆图 | `determineCharacterState` 用 LLM 判断服装状态，sceneDesc 不含明确服装词时误选 | 移除整个 LLM 路由层（`determineCharacterState`/`STATE_EQUIV`/`isCoveredByTag`）；改为 `isDefault=1` 直接选图，用户在角色页手动设置哪张是当前主定妆图 |
-| 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；分镜抽屉增加「道具参考图」勾选区域；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 14 张上限保护） |
+| 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；ShotCard 主页和 ShotDrawer 均新增「道具参考图」缩略图勾选区（乐观更新 `localPropRefs`）；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 14 张上限保护） |
+| 角色资产上传规则对新用户不可见 | 定妆图/道具图/主定妆图的最优实践只存在 CLAUDE.md，UI 无引导 | 项目级和分集级角色页均新增可折叠 3 栏资产上传指南卡（蓝/琥珀/黄三列，默认展开）；`character-card.tsx` 「添加形态」和「添加道具图」按钮增加行业规则 tooltip |
+| `AiOptimizeButton` 单字段修改破坏跨镜一致性 | 该组件早于批量重写设计，无跨镜上下文，修改 startFrameDesc/motionScript 等字段会破坏 `batch_storyboard_rewrite` 建立的视觉连续性；`videoPrompt` 为直出字段，单字段 AI 改写与 startFrameDesc/motionScript 来源脱节 | 从 `shot-card.tsx`、`shot-drawer.tsx` 完全移除；`ai_optimize_text` route handler 删除；`ai-optimize-button.tsx` 清空（文件系统限制无法删除，内容已置空，可手动删除）；`ARCHITECTURE-FRAMES.md` L6 同步更新 |
 
 ---
 

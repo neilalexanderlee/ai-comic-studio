@@ -28,7 +28,6 @@ import {
   History,
 
 } from "lucide-react";
-import { AiOptimizeButton } from "./ai-optimize-button";
 import { FrameReferencePicker } from "./frame-reference-picker";
 import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
@@ -103,6 +102,10 @@ interface ShotCardProps {
   track?: string | null;
   /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
   namedCharacterCount?: number;
+  /** 分镜级道具绑定（JSON 数组字符串，存 character_assets.id） */
+  propRefs?: string | null;
+  /** 本镜角色的 prop 类型资产（由 storyboard/page.tsx 传入） */
+  availablePropAssets?: Array<{ id: string; imagePath: string | null; tag: string; characterName: string }>;
 }
 
 type StepState = "done" | "generating" | "error" | "idle";
@@ -204,6 +207,8 @@ export function ShotCard({
   chainSourceSequence,
   track,
   namedCharacterCount = 0,
+  propRefs,
+  availablePropAssets = [],
 }: ShotCardProps) {
   const t = useTranslations();
   const videoReadiness = getShotVideoReadiness(
@@ -235,6 +240,10 @@ export function ShotCard({
   const [editVideoPrompt, setEditVideoPrompt] = useState(videoPrompt ?? "");
   const [editCameraDirection, setEditCameraDirection] = useState(cameraDirection ?? "static");
   const [editDuration, setEditDuration] = useState(duration);
+  // 道具参考图本地选中态（乐观更新）
+  const [localPropRefs, setLocalPropRefs] = useState<string[]>(() => {
+    try { return propRefs ? JSON.parse(propRefs) : []; } catch { return []; }
+  });
 
   // Derived: is the stored duration over the selected video model's limit?
   const durationOverLimit = editDuration > videoModelMax;
@@ -244,6 +253,9 @@ export function ShotCard({
   useEffect(() => { setEditEndFrame(endFrameDesc ?? ""); }, [endFrameDesc]);
   useEffect(() => { setEditMotionScript(motionScript ?? ""); }, [motionScript]);
   useEffect(() => { setEditVideoPrompt(videoPrompt ?? ""); }, [videoPrompt]);
+  useEffect(() => {
+    try { setLocalPropRefs(propRefs ? JSON.parse(propRefs) : []); } catch { setLocalPropRefs([]); }
+  }, [id, propRefs]);
   useEffect(() => { setEditCameraDirection(cameraDirection ?? "static"); }, [cameraDirection]);
   useEffect(() => { setEditDuration(duration); }, [duration]);
 
@@ -573,15 +585,7 @@ export function ShotCard({
         >
           <div className="space-y-2.5">
             <div>
-              <div className="mb-1 flex items-center gap-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.sceneDescription")}</p>
-                <AiOptimizeButton
-                  value={editPrompt}
-                  onOptimized={(v) => { setEditPrompt(v); patchShot({ prompt: v }); }}
-                  fieldLabel="sceneDescription"
-                  projectId={projectId}
-                />
-              </div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.sceneDescription")}</p>
               <Textarea
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
@@ -592,15 +596,7 @@ export function ShotCard({
             </div>
             <>
                 <div>
-                  <div className="mb-1 flex items-center gap-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-500">{t("shot.startFrame")}</p>
-                    <AiOptimizeButton
-                      value={editStartFrame}
-                      onOptimized={(v) => { setEditStartFrame(v); patchShot({ startFrameDesc: v }); }}
-                      fieldLabel="startFrame"
-                      projectId={projectId}
-                    />
-                  </div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-500">{t("shot.startFrame")}</p>
                   <Textarea
                     value={editStartFrame}
                     onChange={(e) => setEditStartFrame(e.target.value)}
@@ -611,15 +607,7 @@ export function ShotCard({
                   />
                 </div>
                 <div>
-                  <div className="mb-1 flex items-center gap-1">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-500">{t("shot.endFrame")}</p>
-                    <AiOptimizeButton
-                      value={editEndFrame}
-                      onOptimized={(v) => { setEditEndFrame(v); patchShot({ endFrameDesc: v }); }}
-                      fieldLabel="endFrame"
-                      projectId={projectId}
-                    />
-                  </div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-amber-500">{t("shot.endFrame")}</p>
                   <Textarea
                     value={editEndFrame}
                     onChange={(e) => setEditEndFrame(e.target.value)}
@@ -631,15 +619,7 @@ export function ShotCard({
                 </div>
             </>
             <div>
-              <div className="mb-1 flex items-center gap-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-600">{t("shot.motionScript")}</p>
-                <AiOptimizeButton
-                  value={editMotionScript}
-                  onOptimized={(v) => { setEditMotionScript(v); patchShot({ motionScript: v }); }}
-                  fieldLabel="motionScript"
-                  projectId={projectId}
-                />
-              </div>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-600">{t("shot.motionScript")}</p>
               <Textarea
                 value={editMotionScript}
                 onChange={(e) => setEditMotionScript(e.target.value)}
@@ -771,6 +751,48 @@ export function ShotCard({
               }
             />
 
+            {/* 道具参考图（分镜级手动绑定，有 prop 资产时显示） */}
+            {availablePropAssets.length > 0 && (
+              <div className="mt-2">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">道具参考图</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {availablePropAssets.map((prop) => {
+                    const isSelected = localPropRefs.includes(prop.id);
+                    const toggle = async () => {
+                      const next = isSelected
+                        ? localPropRefs.filter((x) => x !== prop.id)
+                        : [...localPropRefs, prop.id];
+                      setLocalPropRefs(next);
+                      await patchShot({ propRefs: JSON.stringify(next) });
+                      onUpdate();
+                    };
+                    return (
+                      <button
+                        key={prop.id}
+                        type="button"
+                        title={`${prop.characterName} · ${prop.tag || "道具"}`}
+                        onClick={toggle}
+                        className={`relative h-10 w-10 overflow-hidden rounded-lg border-2 transition-all ${
+                          isSelected
+                            ? "border-amber-400 ring-1 ring-amber-300"
+                            : "border-[--border-subtle] opacity-50 hover:opacity-100"
+                        }`}
+                      >
+                        {prop.imagePath ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={uploadUrl(prop.imagePath)} alt={prop.tag} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full items-center justify-center bg-[--surface-alt] text-[7px] text-[--text-muted]">无图</div>
+                        )}
+                        {isSelected && (
+                          <div className="absolute inset-x-0 bottom-0 bg-amber-400/80 text-center text-[7px] font-bold text-white leading-tight">✓</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </StepRow>
 
@@ -781,22 +803,12 @@ export function ShotCard({
           isNext={nextStep === "prompt"}
         >
           {hasVideoPrompt && (
-            <div className="mb-2">
-              <div className="mb-1 flex items-center gap-1">
-                <AiOptimizeButton
-                  value={editVideoPrompt}
-                  onOptimized={(v) => { setEditVideoPrompt(v); patchShot({ videoPrompt: v }); }}
-                  fieldLabel="videoPrompt"
-                  projectId={projectId}
-                />
-              </div>
-              <Textarea
-                value={editVideoPrompt}
-                onChange={(e) => setEditVideoPrompt(e.target.value)}
-                onBlur={() => patchShot({ videoPrompt: editVideoPrompt })}
-                className="min-h-[5rem] resize-none font-mono text-xs leading-relaxed"
-              />
-            </div>
+            <Textarea
+              value={editVideoPrompt}
+              onChange={(e) => setEditVideoPrompt(e.target.value)}
+              onBlur={() => patchShot({ videoPrompt: editVideoPrompt })}
+              className="mb-2 min-h-[5rem] resize-none font-mono text-xs leading-relaxed"
+            />
           )}
           <Button
             size="xs"

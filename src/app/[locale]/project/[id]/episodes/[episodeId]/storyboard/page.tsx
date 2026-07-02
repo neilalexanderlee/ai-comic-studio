@@ -1061,6 +1061,12 @@ export default function EpisodeStoryboardPage() {
               versionId={selectedVersionId}
               track={(shot as { track?: string | null }).track ?? null}
               namedCharacterCount={shotNamedCharacters.length}
+              propRefs={shot.propRefs ?? null}
+              availablePropAssets={shotNamedCharacters.flatMap((c) =>
+                (c.assets ?? [])
+                  .filter((a) => a.assetType === "prop")
+                  .map((a) => ({ id: a.id, imagePath: a.imagePath, tag: a.tag, characterName: c.name }))
+              )}
             />
             </div>
             );
