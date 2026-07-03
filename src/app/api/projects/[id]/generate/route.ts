@@ -1479,15 +1479,18 @@ function handleBatchStoryboardRewrite(
           .where(eq(projects.id, projectId));
         const rewriteVisualStyle = rewriteProject?.visualStyle ?? "anime_2d";
 
-        // Extract style-specific lighting vocabulary from storyboard.md (sections II & IV)
-        // to anchor the LLM's lighting vocabulary to the project's art style
+        // Extract style-specific vocabulary from storyboard.md:
+        //   Section II  — 光影氛围词库（主光描述锚定）
+        //   Section IV  — 固定风格锚定词
+        //   Section VII — 战斗/动作场景专用技法（打斗镜头词汇）
         let visualStyleContext: string | undefined;
         const storyboardMd = getArtStylePrompt(rewriteVisualStyle, "storyboard");
         if (storyboardMd) {
-          // Extract "光影氛围词库" (section II) and "固定风格锚定词" (section IV) as style context
           const lightingSection = storyboardMd.match(/##\s*[二2]、[\s\S]*?(?=\n##\s*[三3四4]、)/)?.[0] ?? "";
           const styleSection = storyboardMd.match(/##\s*[四4]、[\s\S]*?(?=\n##\s*[五5]、)/)?.[0] ?? "";
-          const combined = [lightingSection, styleSection].filter(Boolean).join("\n\n").trim();
+          // Section VII (战斗技法) — capture everything from 七、 to end of file
+          const combatSection = storyboardMd.match(/##\s*[七7]、[\s\S]*/)?.[0] ?? "";
+          const combined = [lightingSection, styleSection, combatSection].filter(Boolean).join("\n\n").trim();
           if (combined.length > 0) visualStyleContext = combined;
         }
 

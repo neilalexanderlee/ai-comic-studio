@@ -765,6 +765,16 @@ src/lib/evals/
 | 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；ShotCard 主页和 ShotDrawer 均新增「道具参考图」缩略图勾选区（乐观更新 `localPropRefs`）；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 14 张上限保护） |
 | 角色资产上传规则对新用户不可见 | 定妆图/道具图/主定妆图的最优实践只存在 CLAUDE.md，UI 无引导 | 项目级和分集级角色页均新增可折叠 3 栏资产上传指南卡（蓝/琥珀/黄三列，默认展开）；`character-card.tsx` 「添加形态」和「添加道具图」按钮增加行业规则 tooltip |
 | `AiOptimizeButton` 单字段修改破坏跨镜一致性 | 该组件早于批量重写设计，无跨镜上下文，修改 startFrameDesc/motionScript 等字段会破坏 `batch_storyboard_rewrite` 建立的视觉连续性；`videoPrompt` 为直出字段，单字段 AI 改写与 startFrameDesc/motionScript 来源脱节 | 从 `shot-card.tsx`、`shot-drawer.tsx` 完全移除；`ai_optimize_text` route handler 删除；`ai-optimize-button.tsx` 清空（文件系统限制无法删除，内容已置空，可手动删除）；`ARCHITECTURE-FRAMES.md` L6 同步更新 |
+| `startFrameDesc` 含运动词导致扩散模型渲染动态模糊首帧 | `STORYBOARD_REWRITE_SYSTEM` 的静止状态规则表述不够具体，LLM 仍写"转身/迈步/张嘴"等动词 | 在 `storyboard-supervision.ts` 添加禁用动词清单（走向/转身/迈步/抬手/张嘴/伸出/挥/喷/冲/跑/跳/正在/已经）及静态替代写法示例（将动作改为"起始瞬间身体的空间定格"） |
+| `batch_plot_optimize` 写入 `△承接上镜:` 前缀到 DB 字段 | `PLOT_OPTIMIZE_SYSTEM` 指示 LLM 在跨镜衔接处加"△承接上镜：[说明]"前缀，该前缀被原样写入 `shots.prompt`，下游 LLM 收到时无法理解"上镜"指谁 | 将"△承接上镜："写法改为自然融入正文；承接说明以叙事语言开头而非特殊标注；`PLOT_OPTIMIZE_SYSTEM` 跨镜修复策略表和承接词写法说明均已更新 |
+| 动漫打斗场景 motionScript 缺乏战斗质感，仅描述动作轨迹不写物理效果 | `STORYBOARD_REWRITE_SYSTEM` 的动作规范只讲"不写伤害结果"，未提供正向的动漫战斗物理词汇 | 在 `storyboard-supervision.ts` 的"动作场景描写规范"后插入"动画战斗物理词汇"完整章节：流线模糊写法、冲击波帧、镜头震动（Screen Shake）、startFrameDesc 战斗冻帧补充细节（环境粒子/冲击波/残影）、战斗序列镜头时长规范与景别交替铁律 |
+| 写实真人风格（realistic）生成质量远低于万物生参考prompt规格 | 三大系统性缺口：①`realistic/video.md` 无王家卫/Nolan摄影词汇，只有3行基础tag；②`realistic/storyboard.md` 无声音设计框架（【关键音效】），无多光源分层词库，无摄影机语言词汇；③`STORYBOARD_REWRITE_SYSTEM` 对写实风格无专项规范，"同一帧不超过两个光源"规则与真实电影摄影冲突 | 三项升级：（1）重写 `realistic/video.md` —— 添加王家卫/Nolan风格标签、T1.4景深、ARRI Alexa/Kodak Vision3胶片词、handheld vs locked-off选择指南、人物比例-景框约束；（2）扩充 `realistic/storyboard.md` —— 新增【关键音效】三层设计框架（底噪/事件音/空间感 + 词库）、王家卫三层命名光源分层、写实摄影机语言词库（支撑方式/运动/特殊效果）；（3）在 `STORYBOARD_REWRITE_SYSTEM` 添加"写实真人风格专项规范"：motionScript 末尾追加【关键音效】必须项、多光源例外（写实风格允许三层命名光源）、摄影机支撑方式词汇；"同一帧两光源"禁止规则加上"动漫/2D风格"限定语 |
+| `PLOT_OPTIMIZE_SYSTEM` 缺少节奏架构意识、行为真实性规范、换场首镜建立规则 | 优化剧情用"剧情动作"驱动写 prompt，缺乏导演级预扫描；行为描写影视化夸张；换场第一镜未强制空间落地 | （1）新增"第零步：节奏架构扫描"——A.场景节奏类型分类（快切/慢凝/急停/悬念延迟）；B.情绪命门标出；C.声音节奏骨架识别（2-3关键声音事件）；（2）新增"规则1b 行为真实性"——区分日常真实反应vs影视式表演，附4个行为真实特征和正反例；（3）新增"规则4c 换场首镜落地三步法"——空间物理感+氛围感官锚点+然后才进入动作 |
+| `STORYBOARD_REWRITE_SYSTEM` 缺少战斗 1 秒时长例外和战斗色彩语法 | motionScript 规则强制"每段2-4秒"，击中定格/冲击波扩散等节奏密片段被强制撑到2秒失真；无冷青主基调+战斗点缀光的配色规范 | 在 motionScript 规则加"战斗峰值例外"（允许1秒段，单镜≤2个）；在动漫战斗词汇章节新增"战斗色彩语法"表格（冷青主基调/金白弧/蓝白电火花/强逆光轮廓光） |
+| `cel_shaded_action` 被创建又撤销 | 该风格仅适用于三渲二特定 CG 风格，用户实际需求是在现有 `anime_2d` 风格内实现 S 级战斗分镜 | 移除 `cel_shaded_action` 风格注册；将全部战斗词汇整合进 `anime_2d/storyboard.md` 第七章 + `anime_2d/video.md` 战斗标签；`visual-style-presets.ts` 不添加新条目 |
+| `batch_storyboard_rewrite` 战斗词汇对 LLM 不可见 | `generate/route.ts` 的 `visualStyleContext` 提取正则只匹配第 II 章（光影）和第 IV 章（风格锚定），新加的第 VII 章（战斗技法）从未被传入 LLM | 在 route.ts 加 `combatSection` 提取（`/##\s*[七7]、[\s\S]*/`），三段合并后传入；`buildRewriteUserPrompt` section 标题扩展为"写所有视觉字段时必须参照此词库：光影描述 / 战斗动作词汇 / 摄影机语言 / 场景质感" |
+| `STORYBOARD_REWRITE_SYSTEM` 五要素编号错误：③ 出现两次 | 角色姿态和主光均被标为 ③，LLM 对"五要素"的结构理解混乱 | 修正为 ①机位 ②景别 ③角色姿态 ④主光 ⑤(情绪解剖+背景锚定词)，五要素总数正确 |
+| "禁止同一帧写两个以上光源"规则缺风格限定语 | 该规则写在主光 ④ 要素说明内，无风格前提，写实项目 LLM 看到后不敢使用三层命名光源（与写实专项规范矛盾） | 加上"动漫/2D/3DCG风格"前缀，并追注"写实真人风格可用三层命名光源，见下方写实专项规范" |
 
 ---
 

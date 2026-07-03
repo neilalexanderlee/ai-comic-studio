@@ -26,6 +26,8 @@ export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string; 
     description: "3D动画渲染 · 赛璐珞质感 · 电影级光影",
     tag: "3D动画渲染风格，赛璐珞质感，电影级打光，柔和光影层次，清晰轮廓线，高细节材质",
   },
+
+
   chinese_ink: {
     label: "国风二次元",
     description: "新国潮 · 赛璐璐平涂 · 东方古韵 · 电影构图",
