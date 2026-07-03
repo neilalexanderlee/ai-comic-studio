@@ -775,6 +775,8 @@ src/lib/evals/
 | `batch_storyboard_rewrite` 战斗词汇对 LLM 不可见 | `generate/route.ts` 的 `visualStyleContext` 提取正则只匹配第 II 章（光影）和第 IV 章（风格锚定），新加的第 VII 章（战斗技法）从未被传入 LLM | 在 route.ts 加 `combatSection` 提取（`/##\s*[七7]、[\s\S]*/`），三段合并后传入；`buildRewriteUserPrompt` section 标题扩展为"写所有视觉字段时必须参照此词库：光影描述 / 战斗动作词汇 / 摄影机语言 / 场景质感" |
 | `STORYBOARD_REWRITE_SYSTEM` 五要素编号错误：③ 出现两次 | 角色姿态和主光均被标为 ③，LLM 对"五要素"的结构理解混乱 | 修正为 ①机位 ②景别 ③角色姿态 ④主光 ⑤(情绪解剖+背景锚定词)，五要素总数正确 |
 | "禁止同一帧写两个以上光源"规则缺风格限定语 | 该规则写在主光 ④ 要素说明内，无风格前提，写实项目 LLM 看到后不敢使用三层命名光源（与写实专项规范矛盾） | 加上"动漫/2D/3DCG风格"前缀，并追注"写实真人风格可用三层命名光源，见下方写实专项规范" |
+| `STORYBOARD_REWRITE_SYSTEM` 台词内嵌示例后有孤立 bullet 缺 header | 示例代码块后面的两条禁用规则（"说话人面部表情随台词情绪流动""同场景连续镜头背景锚定词不同"）没有 `❌ 禁止` header，LLM 解析时这两条规则的约束语义丢失 | 在两条 bullet 前添加 `❌ **台词内嵌禁止：**` header，并补充括号说明每条的失败原因 |
+| `write_shot_rewrite` 工具 schema 描述错误 | `startFrameDesc`/`endFrameDesc` 描述写"四要素"（已过时），`motionScript` 描述写"四要素，≤80字"（完全描述错误——motionScript 是 `[]` 时间轴格式，非四要素）；LLM 以 JSON schema description 作为工具行为指导 | 更新 `startFrameDesc`/`endFrameDesc` 为"五要素：机位坐标；景别+取景范围；角色位置姿态；主光叙述；情绪解剖+背景锚定词"；`motionScript` 更新为"[] 包裹格式，时间段求和=镜头时长，末尾 \| 朝向：标注" |
 
 ---
 

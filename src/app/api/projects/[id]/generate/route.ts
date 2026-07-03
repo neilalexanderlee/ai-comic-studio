@@ -1567,9 +1567,9 @@ function handleBatchStoryboardRewrite(
             type: "object",
             properties: {
               shotId: { type: "string", description: "镜头 ID，必须与输入完全一致" },
-              startFrameDesc: { type: "string", description: "重写后的首帧描述（四要素）" },
-              endFrameDesc: { type: "string", description: "重写后的尾帧描述（四要素，必须与首帧不同）" },
-              motionScript: { type: "string", description: "重写后的运动脚本（四要素，≤80字）" },
+              startFrameDesc: { type: "string", description: "重写后的首帧描述（五要素：机位坐标；景别+取景范围；角色位置姿态；主光叙述；情绪解剖+背景锚定词）" },
+              endFrameDesc: { type: "string", description: "重写后的尾帧描述（五要素，必须与首帧有可见空间位移，光源方向须一致）" },
+              motionScript: { type: "string", description: "重写后的运动脚本（[] 包裹格式，时间段求和=镜头时长，末尾 | 朝向：标注）" },
               cameraDirection: { type: "string", description: "重写后的镜头朝向" },
             },
             required: ["shotId", "startFrameDesc", "endFrameDesc", "motionScript", "cameraDirection"],
