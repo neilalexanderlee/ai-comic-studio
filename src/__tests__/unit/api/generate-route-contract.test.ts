@@ -40,21 +40,9 @@ describe("POST /api/projects/[id]/generate contract", () => {
 
   it("returns 404 when project not owned", async () => {
     ownerSelectWhere.mockResolvedValueOnce([]);
-    const res = await POST(makeRequest("batch_frame_generate"), {
+    const res = await POST(makeRequest("single_frame_generate"), {
       params: Promise.resolve({ id: "proj-1" }),
     });
     expect(res.status).toBe(404);
   });
-
-  it.each(["batch_frame_generate", "batch_video_generate", "frame_generate"])(
-    "returns 410 for deprecated action %s",
-    async (action) => {
-      const res = await POST(makeRequest(action), {
-        params: Promise.resolve({ id: "proj-1" }),
-      });
-      expect(res.status).toBe(410);
-      const body = await res.json();
-      expect(body.error).toBeTruthy();
-    }
-  );
 });

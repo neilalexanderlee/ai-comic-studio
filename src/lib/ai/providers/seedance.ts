@@ -293,7 +293,7 @@ export class SeedanceProvider implements VideoProvider {
   /**
    * 多模态参考模式：「多模态参考生视频」，对应 Toonflow 的 imageReference 数组模式。
    *
-   * 用于 Track 级批量生成（多镜合一视频），将角色定妆图、场景图、分镜首帧一并作为视觉参考。
+   * 用于单镜/批量视频生成，将角色定妆图、角度图、分镜首帧一并作为视觉参考（场景图已移除）。
    * 与单镜首帧模式互斥：此模式无严格首帧约束，内容由 prompt 的 @参考N 系统驱动。
    *
    * API content 顺序（与 @参考N 编号完全对应）：

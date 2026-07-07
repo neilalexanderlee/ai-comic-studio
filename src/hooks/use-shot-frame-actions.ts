@@ -12,11 +12,11 @@ import type { FrameReferenceChoice, FrameRefPickerShot } from "@/components/edit
 const API_MAX_REF_IMAGES = 14;
 
 /**
- * 每个命名角色预估自动注入的参考图数量（每角色 1 张定妆图）
- * 加上可能的场景图 1 张，作为保守预留值。
+ * 每个命名角色预估自动注入的参考图数量（每角色 1 张定妆图）。
+ * 注：场景图已于 migration 0045/0046 完全移除，不再预留场景图名额。
  */
 function estimateAutoRefCount(namedCharacterCount: number): number {
-  return namedCharacterCount + 1; // 1 per char (costume ref) + 1 scene
+  return namedCharacterCount; // 1 张定妆图/角色
 }
 
 export type UseShotFrameActionsOptions = {
@@ -194,7 +194,7 @@ export function useShotFrameActions({
     setFrameRefPickerOpen,
     pendingFrameTarget,
     frameRefShots,
-    /** 用户最多可手选的跨镜参考图数量（API 上限 14 减去自动注入的角色/场景图预留） */
+    /** 用户最多可手选的跨镜参考图数量（Seedream API 上限 14 减去自动注入的角色定妆图预留） */
     crossShotRefLimit: Math.max(1, API_MAX_REF_IMAGES - estimateAutoRefCount(namedCharacterCount)),
     handleGenerateFrames,
     handleGenerateFirstFrameFresh,

@@ -69,11 +69,12 @@ type ReferenceVideoParams = {
  * 多模态参考模式：用于 Track 级批量生成（多镜合一视频）。
  *
  * 对应 Toonflow 的 imageReference 数组模式：
- *   - 所有图片（角色定妆图 + 场景图 + 分镜首帧）→ role: "reference_image"
+ *   - 所有图片（角色定妆图 + 角度图 + 分镜首帧 + 道具图）→ role: "reference_image"
  *   - 所有音频（角色音色克隆参考）→ role: "reference_audio"
+ *   注：场景图已于 migration 0045/0046 移除。
  *
  * 顺序必须与 buildRefEntries() 的 @参考N 编号完全一致：
- *   先全部图片（资产图 → 场景图 → 分镜首帧），再全部音频。
+ *   先全部图片（角色主图+角度图 → 分镜首帧 → 道具图），再全部音频。
  *
  * 此模式无严格首帧约束，视频内容由 prompt 中的 @参考N 引用驱动。
  */

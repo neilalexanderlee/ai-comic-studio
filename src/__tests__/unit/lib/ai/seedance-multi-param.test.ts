@@ -1,7 +1,7 @@
 /**
  * Unit tests for seedance-multi-param.ts
  *
- * 覆盖角度变体的 @参考N 编号、参考定义段格式、14 张上限等核心行为。
+ * 覆盖角度变体的 @参考N 编号、参考定义段格式、9 张上限（Seedance 2.0 多模态视频生成）等核心行为。
  */
 
 import { describe, it, expect } from "vitest";

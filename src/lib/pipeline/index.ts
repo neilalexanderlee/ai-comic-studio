@@ -4,7 +4,6 @@ import { handleCharacterExtract } from "./character-extract";
 import { handleCharacterImage } from "./character-image";
 import { handleVideoAssemble } from "./video-assemble";
 
-/** D4-B: frame_generate / video_generate 已废弃，请使用 generate/route 的 single_* / batch_* */
 export function registerPipelineHandlers() {
   registerHandlers({
     script_parse: handleScriptParse,

@@ -69,8 +69,8 @@ interface FrameReferencePickerProps {
   onConfirm: (choice: FrameReferenceChoice) => void;
   /**
    * 用户最多可手选的参考图数量。
-   * 由父组件根据本镜命名角色数动态计算（API 上限 14 减去自动注入的角色/场景图预留）。
-   * 默认 10（0 个角色时的保守上限）。
+   * 由父组件根据本镜命名角色数动态计算（Seedream API 上限 14 减去自动注入的角色定妆图数）。
+   * 默认 14（0 个角色时全额可选）。
    */
   maxSelectable?: number;
 }

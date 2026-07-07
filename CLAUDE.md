@@ -326,10 +326,12 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 
 `multimodalRefs` 顺序与 `buildRefEntries` 完全对齐：第一轮角色主图+角度变体、第二轮 anchorFirst、第三轮音频。
 
-**14 张上限保护**（Seedance API 硬限制）：
-- 预算 = 14 − 主图数 − anchorFirst(1) − 音频文件数
-- 角度变体按预算分配；超出时后面的角度（back 先丢）自然跳过
-- 优先级：主图 > anchorFirst > 音频文件 > 角度变体
+**9 张图片上限保护**（Seedance 2.0 官方文档硬限制：多模态参考生视频 1~9 张图片）：
+- 音频走独立的 `audio_url` 类型，**不占图片名额**（音频另有上限 3 个，`MAX_AUDIO_REFS=3`）
+- 图片优先级（高→低）：主图 > anchorFirst > **道具图** > 角度变体
+- 预算 = 9 − 主图数 − anchorFirst(1) − propReserve（道具图预留槽位）
+- 角度变体按剩余预算分配；超出时后面的角度（back 先丢）自然跳过
+- 道具图在第四轮用 `imageCount < 9` 检查（只数 image 类型，不含 audio）
 
 实现位置：`handleSingleVideoGenerate`（`generate/route.ts`）三路分流代码块。`resolveCharacterImages`（`character-router.ts`）返回 `angleImages` 和 `audioPath` 字段。
 
@@ -759,10 +761,11 @@ src/lib/evals/
 | 视频生成非正面/非近景首帧导致角色跑偏 | 原 `initialImage` 模式把首帧作为严格首帧锚定，非正面视角时 Seedance 无法同时保持构图和角色外貌 | 引入 `SingleVideoMode` 三态；有命名角色默认走 `multimodal`：首帧作构图参考(@参考1)，角色定妆图作外貌锁定(@参考2+)，cutPoint 继承帧/群演保留 `initialImage` |
 | `frameTarget: "both"` 被服务端默认采用但客户端已停止发送 | 清理时机滞后，服务端 default 为 `"both"` 而客户端全路径已改为显式 `"first"` | 服务端 default 改为 `"first"`，`"both"` 分支整体移除，类型收窄为 `"first" \| "last"` |
 | multimodal 模式 `@参考N` 编号与 refs 数组错位 | prompt 端用全量 `singleVideoShotChars` 构建编号，API 端 refs 只含有磁盘图片的角色，无图角色导致后续编号系统性偏移 | 在 prompt 构建前预先调用 `resolveCharacterImages`（`needPreResolveCharImages`），两端使用同一份已过滤角色列表 |
-| 三/四视图角度变体在视频生成时被忽略 | `buildRefEntries` 未为角度变体分配 `@参考N`，贸然加入 `multimodalRefs` 会导致后续编号整体错位 | 已修复：`SeedanceAsset` 加 `angleImages` 字段，`buildRefEntries` Round 1 每 asset 主图后追加角度变体，prompt 参考定义段生成"XXX四分之三侧面视图（与@参考N同一角色）"说明行，`multimodalRefs` 完全对齐；14 张上限保护优先丢角度变体 |
+| 三/四视图角度变体在视频生成时被忽略 | `buildRefEntries` 未为角度变体分配 `@参考N`，贸然加入 `multimodalRefs` 会导致后续编号整体错位 | 已修复：`SeedanceAsset` 加 `angleImages` 字段，`buildRefEntries` Round 1 每 asset 主图后追加角度变体，prompt 参考定义段生成"XXX四分之三侧面视图（与@参考N同一角色）"说明行，`multimodalRefs` 完全对齐；9 张上限保护优先丢角度变体 |
 | `isCrowdShot` 字符串匹配不稳定导致角色跑偏 bug 在某些镜头上无法修复 | 角色写外号/旁白省略名字时 `filterShotCharacters` 返回空，误将有角色的镜头路由到 `initialImage` | 从 `resolveSingleVideoMode` 移除 `isCrowdShot` 参数；群演统一走 `multimodal`（refs 仅含 anchorFirst，Seedance 降级无害） |
 | LLM 状态路由（武装/日常）选错定妆图 | `determineCharacterState` 用 LLM 判断服装状态，sceneDesc 不含明确服装词时误选 | 移除整个 LLM 路由层（`determineCharacterState`/`STATE_EQUIV`/`isCoveredByTag`）；改为 `isDefault=1` 直接选图，用户在角色页手动设置哪张是当前主定妆图 |
-| 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；ShotCard 主页和 ShotDrawer 均新增「道具参考图」缩略图勾选区（乐观更新 `localPropRefs`）；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 14 张上限保护） |
+| 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；ShotCard 主页和 ShotDrawer 均新增「道具参考图」缩略图勾选区（乐观更新 `localPropRefs`）；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 9 张上限保护） |
+| Seedance 2.0 多模态参考图上限误记为 14 | 沿用了 Seedream 图片生成的 14 张上限，未查 Seedance 视频生成官方文档；且误将音频计入图片配额（音频走独立的 `audio_url` 类型，另有上限 3 个） | 官方文档确认 Seedance 2.0 多模态参考生视频 1~9 张图片；`MAX_MULTIMODAL_REFS` 改为 9；budget 计算移除 `audioCount`（`generate/route.ts`） |
 | 角色资产上传规则对新用户不可见 | 定妆图/道具图/主定妆图的最优实践只存在 CLAUDE.md，UI 无引导 | 项目级和分集级角色页均新增可折叠 3 栏资产上传指南卡（蓝/琥珀/黄三列，默认展开）；`character-card.tsx` 「添加形态」和「添加道具图」按钮增加行业规则 tooltip |
 | `AiOptimizeButton` 单字段修改破坏跨镜一致性 | 该组件早于批量重写设计，无跨镜上下文，修改 startFrameDesc/motionScript 等字段会破坏 `batch_storyboard_rewrite` 建立的视觉连续性；`videoPrompt` 为直出字段，单字段 AI 改写与 startFrameDesc/motionScript 来源脱节 | 从 `shot-card.tsx`、`shot-drawer.tsx` 完全移除；`ai_optimize_text` route handler 删除；`ai-optimize-button.tsx` 清空（文件系统限制无法删除，内容已置空，可手动删除）；`ARCHITECTURE-FRAMES.md` L6 同步更新 |
 | `startFrameDesc` 含运动词导致扩散模型渲染动态模糊首帧 | `STORYBOARD_REWRITE_SYSTEM` 的静止状态规则表述不够具体，LLM 仍写"转身/迈步/张嘴"等动词 | 在 `storyboard-supervision.ts` 添加禁用动词清单（走向/转身/迈步/抬手/张嘴/伸出/挥/喷/冲/跑/跳/正在/已经）及静态替代写法示例（将动作改为"起始瞬间身体的空间定格"） |
@@ -777,6 +780,12 @@ src/lib/evals/
 | "禁止同一帧写两个以上光源"规则缺风格限定语 | 该规则写在主光 ④ 要素说明内，无风格前提，写实项目 LLM 看到后不敢使用三层命名光源（与写实专项规范矛盾） | 加上"动漫/2D/3DCG风格"前缀，并追注"写实真人风格可用三层命名光源，见下方写实专项规范" |
 | `STORYBOARD_REWRITE_SYSTEM` 台词内嵌示例后有孤立 bullet 缺 header | 示例代码块后面的两条禁用规则（"说话人面部表情随台词情绪流动""同场景连续镜头背景锚定词不同"）没有 `❌ 禁止` header，LLM 解析时这两条规则的约束语义丢失 | 在两条 bullet 前添加 `❌ **台词内嵌禁止：**` header，并补充括号说明每条的失败原因 |
 | `write_shot_rewrite` 工具 schema 描述错误 | `startFrameDesc`/`endFrameDesc` 描述写"四要素"（已过时），`motionScript` 描述写"四要素，≤80字"（完全描述错误——motionScript 是 `[]` 时间轴格式，非四要素）；LLM 以 JSON schema description 作为工具行为指导 | 更新 `startFrameDesc`/`endFrameDesc` 为"五要素：机位坐标；景别+取景范围；角色位置姿态；主光叙述；情绪解剖+背景锚定词"；`motionScript` 更新为"[] 包裹格式，时间段求和=镜头时长，末尾 \| 朝向：标注" |
+| `estimateAutoRefCount` 预留过时的场景图名额（`+1`） | migration 0045/0046 移除了 scenes 表，但 `use-shot-frame-actions.ts` 的 `estimateAutoRefCount` 仍返回 `namedCharacterCount + 1`，导致 0 个角色镜头 `crossShotRefLimit = 13` 而非 14 | 改为 `return namedCharacterCount`，同步更新注释 |
+| 道具图优先级低于角度变体，被角度变体耗尽槽位后静默丢弃 | `angleSlotBudget` 计算未预留道具图名额；若4个角色各带角度图填满9槽，用户手选的道具图全被丢 | 计算时提前 `propReserve = min(propIds.length, 9 - mainCount - anchorCount)`，`angleSlotBudget` 再减去 `propReserve` | 
+| 音频引用无上限，超过3个会触发 Seedance API 错误 | 第三轮无条件 push 所有角色音频，4个角色均有音色时推4个音频，超出官方上限3个 | 加 `MAX_AUDIO_REFS = 3`，第三轮加 `audioRefCount < MAX_AUDIO_REFS` 检查 |
+| 道具图第四轮检查用 `multimodalRefs.length` 含音频条目 | 第三轮 audio 加入 `multimodalRefs` 后，第四轮用 `multimodalRefs.length < 9` 实际把音频计入图片配额，音频多时道具图被错误拒绝 | 改为 `multimodalRefs.filter(r => r.type === "image").length < MAX_MULTIMODAL_REFS` |
+| 帧描述（`startFrameDesc`/`endFrameDesc`）中使用否定短语导致扩散模型渲染出被禁止的元素 | "无伤痕"/"背景无人"等否定词会让模型聚焦于否定对象，反而渲染出来 | 在 `STORYBOARD_REWRITE_SYSTEM` 绝对禁止段新增否定词规则：改为肯定描述（"皮肤完好"/"空旷走廊仅二人"） |
+| `generate-route-deprecations.ts` 残留废弃 action 的 410 处理逻辑引发误解 | `batch_video_generate` 等 action 早已移除，但 deprecations 文件仍包含完整逻辑，看起来像仍在维护的能力 | 删除 `generate-route-deprecations.ts` 及其测试文件内容（文件系统限制无法删除，已置空，可手动删除）；从 `route.ts` 移除 import 和调用；从 `generate-route-contract.test.ts` 移除废弃 action 测试；`pipeline/index.ts` 删除过时注释 |
 | 系统缺少万物生5个核心维度（集级色温弧/呼吸镜头/对话覆盖节律/集末视觉钩/前景叙事层） | `STORYBOARD_REWRITE_SYSTEM` 只优化单镜质量，无集级视觉弧线；"黄金6秒规则"主动排斥情绪收束镜头；对话场景无聆听方身体反应镜头规范；无集末悬念截断规则 | 在 `storyboard-supervision.ts` 新增：Q0集级色温弧（冷→暖/暖→冷等弧线类型+色温渐变规则）；情感收束镜头检查（物理自检第8条，呼吸镜头豁免黄金6秒）；对话场景覆盖节律（六步节律+步骤3聆听方身体反应镜头+前景叙事层选项）；规则5b集末视觉钩（信息截断/情绪强切/空间悬念三种钩型） |
 
 ---

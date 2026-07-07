@@ -65,7 +65,6 @@ import {
   generateAndPersistDirectVideoPrompt,
   syncVideoPromptIfStale,
 } from "@/lib/storyboard/shot-video-prompt-sync.server";
-import { resolveDeprecatedGenerateAction } from "@/lib/storyboard/generate-route-deprecations";
 import { buildVideoCutPointUpdate } from "@/lib/storyboard/video-cut-point";
 import { resolveVideoMotionAndScene } from "@/lib/ai/prompts/ref-video-prompt-generate";
 
@@ -381,11 +380,6 @@ export async function POST(
 
   if (action === "frame_prompt_preview") {
     return handleFramePromptPreview(projectId, userId, payload, episodeId);
-  }
-
-  const deprecated = resolveDeprecatedGenerateAction(action);
-  if (deprecated) {
-    return NextResponse.json({ error: deprecated.error }, { status: deprecated.status });
   }
 
   if (action === "single_frame_generate") {
@@ -1997,11 +1991,9 @@ async function handleFramePromptPreview(
  * Toonflow 参考图数量限制（API 上限约 10 张）。
  *
  * Toonflow 的做法：超出10张时把第10张之后的合并为一张合成图。
- * 本项目暂无 sharp，改用优先级截断：角色参考图在前，场景图在后，
- * 跨镜参考图排最前，然后是角色定妆图、场景图，整体截取前 MAX_REFERENCE_IMAGES 张。
+ * 本项目暂无 sharp，改用优先级截断：跨镜参考图排最前，然后是角色主图、角度图、道具图。
  * Seedream API 最大支持 14 张参考图，此处设 14 以充分利用 API 能力。
- *
- * 实际使用中：1-4 角色 + 0-1 场景 = 2-5 张，极少超限。
+ * 注：场景图已于 migration 0045/0046 移除，实际使用中 1-4 角色 = 1-4 张，极少超限。
  */
 const MAX_REFERENCE_IMAGES = 14; // Seedream API 最大支持 14 张参考图
 
@@ -2648,23 +2640,39 @@ async function handleSingleVideoGenerate(
       //   第一轮：角色资产主图 + 紧跟该角色的角度变体（3q → profile → back）
       //   第二轮：分镜首帧 anchorFirst（构图锚点）
       //   第三轮：音频（音色克隆参考）
+      //   第四轮：道具参考图（分镜级手动绑定，不占 @参考N 编号）
       //
-      // 14 张上限保护（Seedance API 硬限制）：
-      //   优先级：主图 > anchorFirst > 音频文件 > 角度变体
-      //   超出时按 back → profile → 3q 顺序裁剪角度变体（character-router 已保证 3q→profile→back 顺序，
-      //   角度预算耗尽时后面的角度自然被跳过，即背面先丢）
-      const MAX_MULTIMODAL_REFS = 14;
+      // 图片优先级（高→低）：主图 > anchorFirst > 道具图 > 角度变体
+      //   道具图是用户为特定镜头手动选的，比角度变体更关键，必须先预留槽位。
+      //   角度变体超出时按 back → profile → 3q 顺序裁剪（character-router 已保证 3q→profile→back
+      //   顺序，角度预算耗尽时后面的角度自然被跳过，即背面先丢）。
+      //
+      // API 上限（Seedance 2.0 官方文档硬限制）：
+      //   图片：1~9 张（type:"image"）
+      //   音频：最多 3 个（type:"audio"，独立类型，不占图片名额）
+      const MAX_MULTIMODAL_REFS = 9; // Seedance 2.0：多模态参考图片上限 9 张
+      const MAX_AUDIO_REFS = 3;      // Seedance 2.0：多模态参考音频上限 3 个
       const charMainCount = charImagesForVideo.filter(
         (ci) => ci.imagePath && shotFrameFileOnDisk(ci.imagePath)
       ).length;
       const anchorCount =
         shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst) ? 1 : 0;
-      const audioCount = charImagesForVideo.filter(
-        (ci) => !!ci.audioPath && fs.existsSync(ci.audioPath)
-      ).length;
+
+      // 预先获取道具图 ID，计算需预留的槽位（道具 > 角度变体）
+      const videoPropRefIds: string[] = (() => {
+        if (!shot.propRefs) return [];
+        try { return JSON.parse(shot.propRefs) as string[]; }
+        catch { return []; }
+      })();
+      // 保守预留（实际磁盘存在数可能更少，但预留不足比过度预留危害更大）
+      const propReserve = Math.min(
+        videoPropRefIds.length,
+        Math.max(0, MAX_MULTIMODAL_REFS - charMainCount - anchorCount)
+      );
+      // 角度变体可用槽位 = 总图片预算 − 主图 − anchorFirst − 道具预留
       let angleSlotBudget = Math.max(
         0,
-        MAX_MULTIMODAL_REFS - charMainCount - anchorCount - audioCount
+        MAX_MULTIMODAL_REFS - charMainCount - anchorCount - propReserve
       );
 
       const multimodalRefs: import("@/lib/ai/types").MultimodalRefItem[] = [];
@@ -2685,25 +2693,24 @@ async function handleSingleVideoGenerate(
       if (shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst)) {
         multimodalRefs.push({ type: "image", path: shotForVideo.anchorFirst });
       }
-      // 第三轮：音频（对应 buildRefEntries 的 asset_audio 轮）
+      // 第三轮：音频（对应 buildRefEntries 的 asset_audio 轮），最多 MAX_AUDIO_REFS 个
+      let audioRefCount = 0;
       for (const ci of charImagesForVideo) {
-        if (ci.audioPath && fs.existsSync(ci.audioPath)) {
+        if (ci.audioPath && fs.existsSync(ci.audioPath) && audioRefCount < MAX_AUDIO_REFS) {
           multimodalRefs.push({ type: "audio", path: ci.audioPath });
+          audioRefCount++;
         }
       }
-      // 第四轮：道具参考图（分镜级手动绑定，追加到末尾，不占角色编号位置）
-      const videoPropRefIds: string[] = (() => {
-        if (!shot.propRefs) return [];
-        try { return JSON.parse(shot.propRefs) as string[]; }
-        catch { return []; }
-      })();
+      // 第四轮：道具参考图（不占 @参考N 编号，仅用图片配额保护）
+      // imageCount 只计 image 类型，不把第三轮的 audio 计入图片配额
       if (videoPropRefIds.length > 0) {
         const videoPropAssets = await db
           .select({ imagePath: characterAssets.imagePath })
           .from(characterAssets)
           .where(inArray(characterAssets.id, videoPropRefIds));
         for (const pa of videoPropAssets) {
-          if (pa.imagePath && shotFrameFileOnDisk(pa.imagePath) && multimodalRefs.length < MAX_MULTIMODAL_REFS) {
+          const imageCount = multimodalRefs.filter((r) => r.type === "image").length;
+          if (pa.imagePath && shotFrameFileOnDisk(pa.imagePath) && imageCount < MAX_MULTIMODAL_REFS) {
             multimodalRefs.push({ type: "image", path: pa.imagePath });
           }
         }
