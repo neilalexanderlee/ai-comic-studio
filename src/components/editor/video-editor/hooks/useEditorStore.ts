@@ -49,6 +49,10 @@ interface EditorState {
   setPlaying: (playing: boolean) => void;
   setZoom: (pps: number) => void;
 
+  // ── 画布尺寸（竖屏短剧支持）──────────────────────
+  /** 根据项目 videoRatio（"16:9" | "9:16" | "1:1"）设置画布像素尺寸 */
+  setCanvasSize: (ratio: string) => void;
+
   // ── 选中 ────────────────────────────────────────
   selectClip: (clipId: string | null) => void;
   toggleMultiSelectClip: (clipId: string) => void;
@@ -89,6 +93,18 @@ const DEFAULT_GLOBAL_SUBTITLE_STYLE: SubtitleStyle = {
   textAlign: "center",
   y: 0.82,
 };
+
+const DEFAULT_CANVAS_SIZE = { canvasWidth: 1920, canvasHeight: 1080 };
+
+/** ratio 字符串 → 画布像素尺寸（长边固定 1920/1080，短边按比例换算） */
+function ratioToCanvasSize(ratio: string): { canvasWidth: number; canvasHeight: number } {
+  switch (ratio) {
+    case "9:16": return { canvasWidth: 1080, canvasHeight: 1920 };
+    case "1:1": return { canvasWidth: 1080, canvasHeight: 1080 };
+    case "16:9": return { canvasWidth: 1920, canvasHeight: 1080 };
+    default: return { ...DEFAULT_CANVAS_SIZE };
+  }
+}
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   tracks: [],
@@ -271,6 +287,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPlayhead: (time) => set({ playhead: Math.max(0, time) }),
   setPlaying: (playing) => set({ isPlaying: playing }),
   setZoom: (pps) => set({ pixelsPerSecond: Math.max(10, Math.min(500, pps)) }),
+
+  setCanvasSize: (ratio) => set(ratioToCanvasSize(ratio)),
   selectClip: (clipId) => {
     if (!clipId) {
       set({ selectedClipId: null, selectedClipIds: [] });
@@ -421,5 +439,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   loadFromSnapshot: (tracks) => set({ tracks, playhead: 0, selectedClipId: null, selectedClipIds: [] }),
 
-  reset: () => set({ tracks: [], globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE }, playhead: 0, isPlaying: false, selectedClipId: null }),
+  reset: () => set({
+    tracks: [],
+    globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE },
+    playhead: 0,
+    isPlaying: false,
+    selectedClipId: null,
+    ...DEFAULT_CANVAS_SIZE,
+  }),
 }));

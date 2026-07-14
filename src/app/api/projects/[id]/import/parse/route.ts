@@ -6,6 +6,7 @@ import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { addImportLog, extractTextFromFile } from "@/lib/import-utils";
 
 export const maxDuration = 60;
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
 export async function POST(
   request: Request,
@@ -29,6 +30,9 @@ export async function POST(
   if (!file) {
     return NextResponse.json({ error: "No file" }, { status: 400 });
   }
+  if (file.size > MAX_FILE_SIZE) {
+    return NextResponse.json({ error: "文件不能超过 20MB" }, { status: 413 });
+  }
 
   await addImportLog(projectId, 1, "running", `开始解析文件: ${file.name}`);
 
@@ -42,6 +46,7 @@ export async function POST(
     }
 
     await addImportLog(projectId, 1, "done", `解析完成，共 ${text.length} 字`, {
+      phase: "file_parse",
       charCount: text.length,
     });
 

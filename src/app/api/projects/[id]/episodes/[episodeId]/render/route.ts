@@ -130,6 +130,8 @@ function buildAssFile(
   clips: SubtitleClip[],
   tmpDir: string,
   globalStyle?: SubtitleStyle,
+  canvasWidth = 1920,
+  canvasHeight = 1080,
 ): string | null {
   if (clips.length === 0) return null;
 
@@ -137,16 +139,16 @@ function buildAssFile(
   // ASS Default Style 字段
   const fontSize  = gs.fontSize  ?? 32;
   const color     = gs.color     ? hexToAssColor(gs.color) : "&H00FFFFFF";
-  // 垂直边距：y∈[0,1] → MarginV 像素（从底部算）
-  const marginV   = gs.y !== undefined ? Math.round((1 - gs.y) * 1080) : 80;
+  // 垂直边距：y∈[0,1] → MarginV 像素（从底部算，按实际画布高度换算，竖屏 9:16 也要正确定位）
+  const marginV   = gs.y !== undefined ? Math.round((1 - gs.y) * canvasHeight) : 80;
   // 对齐：左1 / 中2（默认） / 右3，位于底部（ASS alignment 1-3 = 底部行）
   const align     = gs.textAlign === "left" ? 1 : gs.textAlign === "right" ? 3 : 2;
 
   const header = [
     "[Script Info]",
     "ScriptType: v4.00+",
-    "PlayResX: 1920",
-    "PlayResY: 1080",
+    `PlayResX: ${canvasWidth}`,
+    `PlayResY: ${canvasHeight}`,
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
@@ -295,7 +297,13 @@ export async function POST(
         ]);
 
         // ── Step 3：字幕烧录（如有）──────────────────────────────────────
-        const assPath = buildAssFile(subtitleClips, tmpDir, globalSubtitleStyle);
+        const assPath = buildAssFile(
+          subtitleClips,
+          tmpDir,
+          globalSubtitleStyle,
+          timeline.canvasWidth ?? 1920,
+          timeline.canvasHeight ?? 1080,
+        );
         let videoWithSubsPath = concatVideoPath;
 
         if (assPath) {

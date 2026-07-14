@@ -9,6 +9,7 @@ import { getUserIdFromRequest } from "@/lib/get-user-id";
 import {
   addImportLog,
   chunkText,
+  mapWithConcurrency,
   splitMarkdownByEpisodeHeadings,
 } from "@/lib/import-utils";
 import { buildScriptSplitPrompt } from "@/lib/ai/prompts/script-split";
@@ -93,8 +94,10 @@ export async function POST(
 
   let allEpisodes: SplitEpisode[];
   try {
-    const chunkResults = await Promise.all(
-      chunks.map(async (chunk, idx) => {
+    const chunkResults = await mapWithConcurrency(
+      chunks,
+      3,
+      async (chunk, idx) => {
         await addImportLog(
           projectId, 3, "running",
           `正在处理第 ${idx + 1}/${chunks.length} 块...`
@@ -131,7 +134,7 @@ export async function POST(
           });
           return JSON.parse(extractJSON(retry.text)) as SplitEpisode[];
         }
-      })
+      }
     );
     allEpisodes = chunkResults
       .flat()

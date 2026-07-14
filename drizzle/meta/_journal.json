@@ -365,6 +365,20 @@
       "when": 1779000027000,
       "tag": "0051_shot_prop_refs",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1779000028000,
+      "tag": "0052_project_video_ratio",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1779000029000,
+      "tag": "0053_ark_asset_library",
+      "breakpoints": true
     }
   ]
 }

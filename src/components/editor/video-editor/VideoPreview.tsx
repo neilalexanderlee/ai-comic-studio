@@ -24,8 +24,6 @@ import {
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { apiFetch } from "@/lib/api-fetch";
 
-const CANVAS_W = 1920;
-const CANVAS_H = 1080;
 const TRIM_MARGIN = 0.1; // 安全边界（秒），避免 split 边界报错
 
 // ─── 转场信息 ─────────────────────────────────────────────────────────────────
@@ -78,6 +76,9 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   const setPlayhead = useEditorStore((s) => s.setPlayhead);
   const setPlaying = useEditorStore((s) => s.setPlaying);
   const getClipById = useEditorStore((s) => s.getClipById);
+  // 画布尺寸：由项目 videoRatio 决定（16:9 → 1920x1080 / 9:16 → 1080x1920 / 1:1 → 1080x1080）
+  const canvasWidth = useEditorStore((s) => s.canvasWidth);
+  const canvasHeight = useEditorStore((s) => s.canvasHeight);
 
   const total = totalDuration();
 
@@ -96,8 +97,8 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
     const avCanvas = new AVCanvas(el, {
       bgColor: "#000000",
-      width: CANVAS_W,
-      height: CANVAS_H,
+      width: canvasWidth,
+      height: canvasHeight,
     });
     avCanvasRef.current = avCanvas;
 
@@ -121,7 +122,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       for (const frame of clipFrameCacheRef.current.values()) frame.close();
       clipFrameCacheRef.current.clear();
     };
-  }, []);
+  }, [canvasWidth, canvasHeight]);
 
   // ─── 转场检测 ──────────────────────────────────────────────────────────────
 
@@ -537,19 +538,19 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         const { width: vw, height: vh } = mp4Clip.meta;
         if (vw && vh) {
           const vAspect = vw / vh;
-          const cAspect = CANVAS_W / CANVAS_H;
+          const cAspect = canvasWidth / canvasHeight;
           if (vAspect > cAspect) {
-            const h = Math.round(CANVAS_W / vAspect);
-            sprite.rect.w = CANVAS_W; sprite.rect.h = h;
-            sprite.rect.x = 0; sprite.rect.y = Math.round((CANVAS_H - h) / 2);
+            const h = Math.round(canvasWidth / vAspect);
+            sprite.rect.w = canvasWidth; sprite.rect.h = h;
+            sprite.rect.x = 0; sprite.rect.y = Math.round((canvasHeight - h) / 2);
           } else {
-            const w = Math.round(CANVAS_H * vAspect);
-            sprite.rect.w = w; sprite.rect.h = CANVAS_H;
-            sprite.rect.x = Math.round((CANVAS_W - w) / 2); sprite.rect.y = 0;
+            const w = Math.round(canvasHeight * vAspect);
+            sprite.rect.w = w; sprite.rect.h = canvasHeight;
+            sprite.rect.x = Math.round((canvasWidth - w) / 2); sprite.rect.y = 0;
           }
         } else {
           sprite.rect.x = 0; sprite.rect.y = 0;
-          sprite.rect.w = CANVAS_W; sprite.rect.h = CANVAS_H;
+          sprite.rect.w = canvasWidth; sprite.rect.h = canvasHeight;
         }
 
         sprite.interactable = "disabled";
@@ -653,7 +654,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ timeline: { tracks, canvasWidth: CANVAS_W, canvasHeight: CANVAS_H, globalSubtitleStyle: useEditorStore.getState().globalSubtitleStyle } }),
+          body: JSON.stringify({ timeline: { tracks, canvasWidth, canvasHeight, globalSubtitleStyle: useEditorStore.getState().globalSubtitleStyle } }),
         }
       );
       if (!res.ok || !res.body) throw new Error("Render request failed");
@@ -714,7 +715,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         <div
           ref={containerRef}
           className="max-h-full max-w-full"
-          style={{ aspectRatio: "16/9" }}
+          style={{ aspectRatio: `${canvasWidth}/${canvasHeight}` }}
         />
 
         {/* 字幕 DOM 叠加 */}

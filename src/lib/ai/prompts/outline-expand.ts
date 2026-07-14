@@ -37,11 +37,33 @@ export async function resolveOutlineExpandSystem(
   return system;
 }
 
-export function buildOutlineExpandPrompt(outline: string): string {
-  return `请将以下故事大纲扩写为完整的 S 级漫剧分镜剧本（严格遵守系统格式）：
+export type WholeDramaSourceType = "idea" | "novel";
 
---- 故事大纲 ---
-${outline}
+export const NOVEL_CONDENSE_SYSTEM = `你是一名漫剧改编策划。你的任务是从小说分段中提取后续整剧改编所需的事实，不创作分镜，不续写剧情。
+必须保留：角色标准名与关系、时间顺序、核心冲突、关键行动、因果关系、伏笔与结局信息。
+删除：重复修辞、环境铺陈和不影响主线的细枝末节。输出简洁的中文结构化摘要。`;
+
+export function buildNovelCondensePrompt(chunk: string, index: number, total: number): string {
+  return `以下是小说第 ${index + 1}/${total} 段。请提取本段中不可丢失的改编事实，控制在 800 字以内。
+
+--- 小说分段 ---
+${chunk}
+--- END ---`;
+}
+
+export function buildOutlineExpandPrompt(
+  sourceText: string,
+  sourceType: WholeDramaSourceType = "idea"
+): string {
+  const sourceLabel = sourceType === "novel" ? "小说正文或梗概" : "故事想法";
+  const task = sourceType === "novel"
+    ? "请将以下小说正文或梗概改编为完整的 S 级漫剧分镜剧本。保留原作核心人物关系、主线冲突与关键转折，将叙述性文字转化为可拍摄场面；允许为节奏压缩或合并支线，但不要凭空新增改变主线的重大设定。"
+    : "请将以下故事想法扩写为完整的 S 级漫剧分镜剧本。补全世界观、人物弧光与多集剧情结构，但不得偏离输入中的核心冲突。";
+
+  return `${task}（严格遵守系统格式）：
+
+--- ${sourceLabel} ---
+${sourceText}
 --- END ---
 
 关键要求：

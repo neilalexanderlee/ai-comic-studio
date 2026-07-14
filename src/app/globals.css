@@ -169,6 +169,13 @@
   }
   html {
     @apply scroll-smooth;
+    /* Firefox doesn't support ::-webkit-scrollbar — without this it falls back
+       to the OS-default thick, square scrollbar, which looks broken inside any
+       rounded-corner container (e.g. modal dialogs) since it isn't clipped to
+       the border-radius. scrollbar-width/scrollbar-color are inherited, so
+       setting them here covers every scrollable element, not just html/body. */
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
   }
 
   ::-webkit-scrollbar {

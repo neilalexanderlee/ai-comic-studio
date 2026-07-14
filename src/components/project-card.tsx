@@ -52,6 +52,9 @@ export function ProjectCard({ id, title, status, createdAt }: ProjectCardProps) 
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const projectHref = status === "processing"
+    ? `/${locale}/project/${id}/auto-pipeline?resume=1`
+    : `/${locale}/project/${id}/episodes`;
 
   async function handleDelete() {
     setDeleting(true);
@@ -68,7 +71,7 @@ export function ProjectCard({ id, title, status, createdAt }: ProjectCardProps) 
 
   return (
     <>
-      <Link href={`/${locale}/project/${id}/episodes`} className="group block">
+      <Link href={projectHref} className="group block">
         <div className="relative flex flex-col rounded-xl border border-[--border-subtle] bg-white p-4 transition-all duration-200 hover:border-[--border-hover] hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]">
           {/* Delete button — top right */}
           <button

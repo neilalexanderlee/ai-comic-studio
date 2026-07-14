@@ -38,12 +38,15 @@ function toDataUrl(filePath: string): string {
   return `data:${mime};base64,${base64}`;
 }
 
-// 支持本地路径或 http(s) URL（图片）
+// 支持本地路径、http(s) URL，或火山方舟私域素材库的 asset:// 引用（图片）
 function toImageUrl(imagePathOrUrl: string): string {
   if (
     imagePathOrUrl.startsWith("http://") ||
-    imagePathOrUrl.startsWith("https://")
+    imagePathOrUrl.startsWith("https://") ||
+    imagePathOrUrl.startsWith("asset://")
   ) {
+    // asset:// 是私域虚拟人像素材资产库注册后的永久引用，原样传给 Seedance API，
+    // 绕过真人人脸拦截（见 ark-asset-library.ts）。不能走 toDataUrl（本地无此文件）。
     return imagePathOrUrl;
   }
   return toDataUrl(imagePathOrUrl);

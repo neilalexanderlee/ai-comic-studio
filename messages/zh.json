@@ -200,7 +200,7 @@
     "noEpisodes": "还没有分集，点击上方按钮创建一个吧",
     "deleteConfirm": "确定要删除这一集吗？该集的所有分镜和客串角色将被删除。",
     "uploadScript": "上传剧本",
-    "importRecord": "导入记录",
+    "importRecord": "导入剧本",
     "cannotDeleteLast": "无法删除最后一集",
     "created": "分集已创建",
     "backToList": "返回分集列表",

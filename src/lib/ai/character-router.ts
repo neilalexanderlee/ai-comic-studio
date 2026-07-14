@@ -21,6 +21,13 @@ export type ResolvedCharacterImage = {
   /** 角度变体图（3q / profile / back），与主图同一服装状态，文件已确认存在 */
   angleImages: AngleImage[];
   audioPath?: string | null;
+  /**
+   * 若主图已注册进火山方舟私域虚拟人像素材资产库且状态为 active，这里是该素材的永久 ID
+   * （不含 asset:// 前缀）。视频生成时应优先用 `asset://<arkAssetId>` 替代 imagePath，
+   * 绕过 Seedance 2.0 真人人脸拦截，且与分镜静图用的是同一张脸。
+   */
+  arkAssetId?: string | null;
+  arkAssetStatus?: "none" | "pending" | "active" | "failed" | null;
 };
 
 export async function resolveCharacterImages(
@@ -52,16 +59,22 @@ export async function resolveCharacterImages(
 
     let finalPath: string | null = null;
     let selectedTag: string | null = null;
+    let selectedArkAssetId: string | null = null;
+    let selectedArkAssetStatus: "none" | "pending" | "active" | "failed" | null = null;
 
     if (primaryAssets.length > 1) {
       // Multiple morph assets → prefer isDefault=1, fallback to first
       const defaultAsset = primaryAssets.find(a => a.isDefault === 1) ?? primaryAssets[0];
       finalPath = defaultAsset.imagePath;
       selectedTag = defaultAsset.tag;
+      selectedArkAssetId = defaultAsset.arkAssetId ?? null;
+      selectedArkAssetStatus = defaultAsset.arkAssetStatus ?? null;
     } else if (primaryAssets.length === 1) {
       // Single morph → use it directly
       finalPath = primaryAssets[0].imagePath;
       selectedTag = primaryAssets[0].tag;
+      selectedArkAssetId = primaryAssets[0].arkAssetId ?? null;
+      selectedArkAssetStatus = primaryAssets[0].arkAssetStatus ?? null;
     } else {
       // No morphs → fall back to blueprint
       finalPath = blueprintAssets[0]?.imagePath || null;
@@ -85,12 +98,14 @@ export async function resolveCharacterImages(
         .where(eq(characterAssets.characterId, c.id));
       const audioPath = audioAssets.find((a) => !!a.audioPath)?.audioPath ?? null;
 
-      console.log(`[CharacterRouter] "${c.name}" → tag="${selectedTag}" isDefault path="${finalPath}"${angleImages.length ? ` +${angleImages.length}角度变体` : ""}`);
+      console.log(`[CharacterRouter] "${c.name}" → tag="${selectedTag}" isDefault path="${finalPath}"${angleImages.length ? ` +${angleImages.length}角度变体` : ""}${selectedArkAssetStatus === "active" ? " [已锁定私域素材库]" : ""}`);
       resolved.push({
         name: c.name,
         imagePath: finalPath,
         angleImages,
         audioPath,
+        arkAssetId: selectedArkAssetId,
+        arkAssetStatus: selectedArkAssetStatus,
       });
     }
   }

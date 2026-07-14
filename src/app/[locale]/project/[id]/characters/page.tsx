@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, use } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { ArrowLeft, Loader2, ImageIcon, Mic, ChevronDown, ChevronUp, Star, Sword, Sparkles } from "lucide-react";
+import { ArrowLeft, Loader2, ImageIcon, Mic, ChevronDown, ChevronUp, Star, Sword, Sparkles, Palette } from "lucide-react";
 import { apiFetch } from "@/lib/api-fetch";
 import { CharacterCard } from "@/components/editor/character-card";
 import Link from "next/link";
@@ -56,8 +56,10 @@ export default function CharactersPage({
   const [loading, setLoading] = useState(true);
   const [generatingImages, setGeneratingImages] = useState(false);
   const [generatingVoices, setGeneratingVoices] = useState(false);
+  const [restylingCharacters, setRestylingCharacters] = useState(false);
   const [guideOpen, setGuideOpen] = useState(true);
   const [voiceProgress, setVoiceProgress] = useState<{ done: number; total: number } | null>(null);
+  const [restyleProgress, setRestyleProgress] = useState<{ done: number; total: number } | null>(null);
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const imageGuard = useModelGuard("image");
 
@@ -154,6 +156,65 @@ export default function CharactersPage({
     fetchData();
   }
 
+  async function handleBatchRestyleCharacters() {
+    if (!confirm("将按项目当前画风重新改写所有角色的视觉描述和识别码，尽量保留角色身份但会替换旧画风/旧时代的服装场景元素。确定继续吗？")) return;
+    setRestylingCharacters(true);
+    setRestyleProgress(null);
+    try {
+      const response = await apiFetch(`/api/projects/${projectId}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "batch_character_restyle",
+          modelConfig: getModelConfig(),
+        }),
+      });
+      if (!response.body) throw new Error("No stream");
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split("\n\n");
+        buf = parts.pop() ?? "";
+        for (const part of parts) {
+          const line = part.replace(/^data: /, "").trim();
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.type === "start") setRestyleProgress({ done: 0, total: evt.totalCount });
+            if (evt.type === "progress") {
+              setRestyleProgress({ done: evt.updatedCount, total: evt.totalCount });
+              if (evt.characterId && evt.description) {
+                setCharacters((prev) =>
+                  prev.map((c) =>
+                    c.id === evt.characterId
+                      ? { ...c, description: evt.description, visualHint: evt.visualHint ?? c.visualHint }
+                      : c
+                  )
+                );
+              }
+            }
+            if (evt.type === "done") {
+              toast.success(`已按当前画风重新改写 ${evt.updatedCount}/${evt.totalCount} 个角色`);
+              setRestyleProgress(null);
+              fetchData();
+            }
+            if (evt.type === "error") toast.error(evt.error ?? "生成失败");
+          } catch {}
+        }
+      }
+    } catch (err) {
+      console.error("Batch character restyle error:", err);
+      toast.error(tc("generationFailed"));
+    }
+    setRestylingCharacters(false);
+    setRestyleProgress(null);
+    fetchData();
+  }
+
   async function handleDelete(characterId: string, name: string) {
     if (!confirm(tChar("deleteConfirm", { name }))) return;
     await apiFetch(`/api/projects/${projectId}/characters/${characterId}`, {
@@ -196,6 +257,24 @@ export default function CharactersPage({
         </div>
         {characters.length > 0 && (
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              onClick={handleBatchRestyleCharacters}
+              disabled={restylingCharacters}
+              size="sm"
+              variant="outline"
+              title="切换项目画风后，角色视觉描述/识别码不会自动更新；点此按当前画风重新改写所有角色"
+            >
+              {restylingCharacters ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Palette className="h-3.5 w-3.5" />
+              )}
+              {restylingCharacters
+                ? restyleProgress
+                  ? `${restyleProgress.done}/${restyleProgress.total}`
+                  : tc("generating")
+                : "按画风重新生成角色描述"}
+            </Button>
             <Button
               onClick={handleBatchGenerateVoices}
               disabled={generatingVoices}

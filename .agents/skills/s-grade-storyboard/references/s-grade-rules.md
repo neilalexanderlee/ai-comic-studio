@@ -37,11 +37,15 @@ XXX表情随台词变化
 ```
 → 替换为具体的声音事件和声音质感
 
-### 【videoScript】字段禁用写法：
+### 【motionScript】字段禁用写法：
 ```
 角色深吸一口气，充满了坚定（抽象情绪）
 镜头展现了XXX的美好（镜头主体不明）
 四人同时展示各自的情绪（多主体模糊）
+整段没有时间轴分段
+时间段总和与镜头时长不一致
+有命名角色但末尾没有｜朝向：标注
+配乐响起 / 悲壮BGM / 弦乐渐强（音乐不得进入视频动作提示）
 ```
 
 ---
@@ -99,7 +103,7 @@ S级分镜用**身体解剖语言**替代情绪形容词。
 | 紧张/危机 | handheld + rapid intercutting | 快 |
 | 沉重/悲痛 | static / very slow push | 极慢 |
 | 觉醒/力量爆发 | low angle + tilt up | 慢→快 |
-| 亲密/暧昧 | rack focus + shallow DOF | 慢 |
+| 亲密/暧昧 | slow push in + shallow DOF | 慢 |
 | 混乱战场 | 360 orbit + whip pan | 快 |
 | 孤独/宿命 | slow pull back（镜头远离） | 慢 |
 

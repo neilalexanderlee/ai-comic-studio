@@ -110,6 +110,8 @@ interface ProjectData {
   id: string;
   title: string;
   finalVideoUrl?: string | null;
+  /** 项目画面比例，驱动编辑器画布尺寸（16:9 / 9:16 / 1:1） */
+  videoRatio?: string;
   shots: Shot[];
 }
 
@@ -127,6 +129,7 @@ export default function EditorPage({
   const updateClip = useEditorStore((s) => s.updateClip);
   const tracks = useEditorStore((s) => s.tracks);
   const reset = useEditorStore((s) => s.reset);
+  const setCanvasSize = useEditorStore((s) => s.setCanvasSize);
   const globalSubtitleStyle = useEditorStore((s) => s.globalSubtitleStyle);
   const setGlobalSubtitleStyle = useEditorStore((s) => s.setGlobalSubtitleStyle);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
@@ -147,6 +150,7 @@ export default function EditorPage({
         ]);
 
         setProject(projectData);
+        setCanvasSize(projectData.videoRatio ?? "16:9");
 
         if (snapshotData.editorState) {
           const parsed = JSON.parse(snapshotData.editorState) as

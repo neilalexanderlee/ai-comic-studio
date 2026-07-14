@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useTranslations } from "next-intl";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { useModelStore, type ModelRef } from "@/stores/model-store";
-import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music, FileDown, Star, Sword } from "lucide-react";
+import { Sparkles, Loader2, Copy, Check, Trash2, Upload, X, Plus, Mic, MicOff, Music, FileDown, Star, Sword, ShieldCheck, ShieldAlert } from "lucide-react";
 import { InlineModelPicker } from "@/components/editor/model-selector";
 import { apiFetch } from "@/lib/api-fetch";
 import { useModelGuard } from "@/hooks/use-model-guard";
@@ -97,6 +97,10 @@ export interface CharacterAsset {
   angle?: string | null;
   /** 若是角度变体资产，指向来源正面资产的 ID */
   sourceAssetId?: string | null;
+  /** 火山方舟私域素材库注册状态：none=未注册，pending=处理中，active=可用，failed=失败 */
+  arkAssetStatus?: "none" | "pending" | "active" | "failed" | null;
+  /** 注册成功后拿到的素材 ID（asset-xxxxx） */
+  arkAssetId?: string | null;
 }
 
 export interface EpisodeRef {
@@ -218,6 +222,28 @@ export function CharacterCard({
       toast.error("扩展角度失败：" + (err instanceof Error ? err.message : String(err)));
     } finally {
       setExpandingAssetId(null);
+    }
+  }
+
+  const [lockingAssetId, setLockingAssetId] = useState<string | null>(null);
+
+  /** 把定妆图注册进火山方舟私域虚拟人像素材资产库，绕过 Seedance 2.0 真人人脸拦截 */
+  async function handleLockToArk(assetId: string) {
+    setLockingAssetId(assetId);
+    try {
+      const response = await apiFetch(
+        `/api/projects/${projectId}/characters/${id}/assets/${assetId}/lock-to-ark`,
+        { method: "POST" }
+      );
+      const data = (await response.json()) as { error?: string; status?: string };
+      if (!response.ok) throw new Error(data.error || "锁定失败");
+      toast.success("已锁定到私域素材库，视频生成时将优先使用该素材");
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "锁定失败");
+      onUpdate(); // 刷新状态（后端已写入 failed）
+    } finally {
+      setLockingAssetId(null);
     }
   }
 
@@ -584,6 +610,29 @@ export function CharacterCard({
             </div>
           )}
 
+          {/* 私域素材库锁定状态徽标（仅正面定妆图，与角度/道具标签同角，互不冲突） */}
+          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "active" && (
+            <div
+              className="absolute bottom-1 right-1 z-10 rounded-md bg-emerald-600/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5"
+              title="已锁定到私域素材库，视频生成时优先使用此素材绕过真人人脸拦截"
+            >
+              <ShieldCheck className="h-2 w-2" />已锁定
+            </div>
+          )}
+          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "pending" && (
+            <div className="absolute bottom-1 right-1 z-10 rounded-md bg-blue-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5">
+              <Loader2 className="h-2 w-2 animate-spin" />审核中
+            </div>
+          )}
+          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "failed" && (
+            <div
+              className="absolute bottom-1 right-1 z-10 rounded-md bg-red-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5"
+              title="火山审核未通过，可能被判定为疑似真人；可更换图片后重试"
+            >
+              <ShieldAlert className="h-2 w-2" />失败
+            </div>
+          )}
+
           {/* 主定妆图星标（isDefault=1 常驻显示；有多张主图时 hover 显示切换按钮） */}
           {asset.assetType === "morph" && !asset.angle && (
             asset.isDefault === 1 ? (
@@ -614,6 +663,24 @@ export function CharacterCard({
               <><Loader2 className="h-2.5 w-2.5 animate-spin" />扩展中...</>
             ) : (
               <><Sparkles className="h-2.5 w-2.5" />扩展角度</>
+            )}
+          </button>
+        )}
+
+        {/* 锁定到私域素材库：仅正面原图（angle=null）且有图片时显示，用于真人写实风格视频生成解锁 */}
+        {!asset.angle && asset.assetType === "morph" && asset.imagePath && asset.arkAssetStatus !== "active" && (
+          <button
+            onClick={() => handleLockToArk(asset.id)}
+            disabled={lockingAssetId === asset.id}
+            title="注册进火山方舟私域虚拟人像素材资产库，绕过 Seedance 2.0 真人人脸拦截，且视频里的脸与此定妆图一致"
+            className="mt-1 flex w-full items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 transition-colors"
+          >
+            {lockingAssetId === asset.id ? (
+              <><Loader2 className="h-2.5 w-2.5 animate-spin" />注册中...</>
+            ) : asset.arkAssetStatus === "failed" ? (
+              <><ShieldAlert className="h-2.5 w-2.5" />重试锁定</>
+            ) : (
+              <><ShieldCheck className="h-2.5 w-2.5" />锁定到素材库</>
             )}
           </button>
         )}

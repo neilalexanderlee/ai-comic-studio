@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { streamText } from "ai";
+import { generateText, streamText } from "ai";
 import { createLanguageModel } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
@@ -9,9 +9,14 @@ import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { addImportLog } from "@/lib/import-utils";
 import {
   buildOutlineExpandPrompt,
+  buildNovelCondensePrompt,
+  NOVEL_CONDENSE_SYSTEM,
   resolveOutlineExpandSystem,
+  type WholeDramaSourceType,
 } from "@/lib/ai/prompts/outline-expand";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
+import { chunkText } from "@/lib/import-utils";
+import { validateWholeDramaSourceLength } from "@/lib/whole-drama/limits";
 
 export const maxDuration = 600;
 
@@ -33,6 +38,7 @@ export async function POST(
 
   const body = (await request.json()) as {
     outline: string;
+    sourceType?: WholeDramaSourceType;
     modelConfig: { text: (ProviderConfig & { providerId?: string }) | null };
   };
 
@@ -46,9 +52,46 @@ export async function POST(
     return NextResponse.json({ error: "Outline is required" }, { status: 400 });
   }
 
-  await addImportLog(projectId, 1, "running", "开始扩写大纲，正在调用大模型...");
+  const sourceType: WholeDramaSourceType = body.sourceType === "novel" ? "novel" : "idea";
+  const actionLabel = sourceType === "novel" ? "小说改编" : "故事扩写";
+  const lengthError = validateWholeDramaSourceLength(sourceType, body.outline);
+  if (lengthError) {
+    return NextResponse.json({ error: lengthError }, { status: 400 });
+  }
+
+  await addImportLog(projectId, 1, "running", `开始${actionLabel}，正在调用大模型...`);
 
   const model = createLanguageModel(resolvedModelConfig.text);
+  let sourceText = body.outline;
+
+  if (sourceType === "novel") {
+    const chunks = chunkText(body.outline);
+    if (chunks.length > 1) {
+      await addImportLog(
+        projectId,
+        1,
+        "running",
+        `小说较长，先提炼 ${chunks.length} 个分段的角色、主线与关键转折...`
+      );
+      try {
+        const summaries = await Promise.all(
+          chunks.map(async (chunk, index) => {
+            const result = await generateText({
+              model,
+              system: NOVEL_CONDENSE_SYSTEM,
+              prompt: buildNovelCondensePrompt(chunk, index, chunks.length),
+            });
+            return `## 原文分段 ${index + 1}\n${result.text.trim()}`;
+          })
+        );
+        sourceText = summaries.join("\n\n");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "小说分段提炼失败";
+        await addImportLog(projectId, 1, "error", `小说分段提炼失败: ${message}`);
+        return NextResponse.json({ error: message }, { status: 500 });
+      }
+    }
+  }
 
   const outlineSystem = await resolveOutlineExpandSystem(
     { userId, projectId },
@@ -58,7 +101,7 @@ export async function POST(
   const result = streamText({
     model,
     system: outlineSystem,
-    prompt: buildOutlineExpandPrompt(body.outline),
+    prompt: buildOutlineExpandPrompt(sourceText, sourceType),
     onFinish: async ({ text }) => {
       try {
         // Save the generated script to the project
@@ -69,8 +112,8 @@ export async function POST(
 
         await addImportLog(
           projectId, 1, "done",
-          `大纲扩写完成，共生成 ${text.length} 字`,
-          { scriptLength: text.length }
+          `${actionLabel}完成，共生成 ${text.length} 字`,
+          { phase: "source_transform", sourceType, scriptLength: text.length }
         );
       } catch (err) {
         console.error("[ExpandOutline] onFinish error:", err);

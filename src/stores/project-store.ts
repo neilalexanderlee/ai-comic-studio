@@ -70,6 +70,8 @@ interface Project {
   finalVideoUrl: string | null;
   useProjectPrompts?: number;
   visualStyle: string;
+  /** 画面比例："16:9" | "9:16" | "1:1"，驱动帧/视频生成 ratio 与视频编辑器画布尺寸 */
+  videoRatio?: string;
   characters: Character[];
   shots: Shot[];
   versions: StoryboardVersion[];
@@ -83,6 +85,7 @@ interface ProjectStore {
   updateIdea: (idea: string) => void;
   updateScript: (script: string) => void;
   updateVisualStyle: (visualStyle: string) => void;
+  updateVideoRatio: (videoRatio: string) => void;
   setProject: (project: Project) => void;
 }
 
@@ -129,6 +132,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   updateVisualStyle: (visualStyle: string) => {
     set((state) => ({
       project: state.project ? { ...state.project, visualStyle } : null,
+    }));
+  },
+
+  updateVideoRatio: (videoRatio: string) => {
+    set((state) => ({
+      project: state.project ? { ...state.project, videoRatio } : null,
     }));
   },
 

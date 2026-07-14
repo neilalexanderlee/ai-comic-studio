@@ -17,9 +17,14 @@ export const VISUAL_STYLE_PRESETS: Record<string, { label: string; tag: string; 
     tag: "90年代日式动画风格，手绘平涂上色，清晰流畅线条，柔和暖色调，电影感光影层次",
   },
   realistic: {
-    label: "写实真人",
-    description: "现代都市写实 · 影视级纪实 · 强对比度",
-    tag: "真人写实摄影，都市写实纪实，影视级摄影质感，强对比度，极致细节",
+    label: "写实真人（现代都市）",
+    description: "真人实拍电影摄影 · 摄影机语法 · 自然光与城市色谱",
+    tag: "真人实拍摄影，真人电影剧照，当代中国都市，电影级摄影，自然光与人造光调度，真实色彩科学",
+  },
+  realistic_ancient: {
+    label: "写实真人（古风）",
+    description: "古风写实纪实 · 影视级质感 · 东方古典气韵",
+    tag: "真人写实摄影，古风写实纪实，影视级摄影质感，强对比度，极致细节，东方古典气韵",
   },
   cg_3d: {
     label: "写实3D CG",

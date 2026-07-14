@@ -21,6 +21,35 @@ export async function addImportLog(
 
 export const CHUNK_SIZE = 10000;
 
+/**
+ * 有界并发地处理长剧本分块，并保持结果顺序。
+ * 避免大文件一次发起几十个模型请求而触发限流或耗尽连接。
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    throw new Error("concurrency 必须是大于 0 的整数");
+  }
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker())
+  );
+  return results;
+}
+
 function compactKey(s: string): string {
   return s.replace(/\s+/g, "").toLowerCase();
 }
@@ -218,6 +247,17 @@ export function chunkText(text: string): string[] {
   let current = "";
 
   for (const para of paragraphs) {
+    // 单个超长段落（例如 PDF 提取后没有空行）也必须硬切，避免整段绕过上限。
+    if (para.length > CHUNK_SIZE) {
+      if (current.trim()) {
+        chunks.push(current.trim());
+        current = "";
+      }
+      for (let offset = 0; offset < para.length; offset += CHUNK_SIZE) {
+        chunks.push(para.slice(offset, offset + CHUNK_SIZE).trim());
+      }
+      continue;
+    }
     if (current.length + para.length + 2 > CHUNK_SIZE && current.length > 0) {
       chunks.push(current.trim());
       current = "";

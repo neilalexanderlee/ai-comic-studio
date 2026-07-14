@@ -3,10 +3,11 @@
 import { DefaultModelPicker } from "@/components/settings/default-model-picker";
 import { ProviderSection } from "@/components/settings/provider-section";
 import { AiMediaKitSection } from "@/components/settings/ai-mediakit-section";
+import { ArkAssetLibrarySection } from "@/components/settings/ark-asset-library-section";
 import { AuthSection } from "@/components/settings/auth-section";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music } from "lucide-react";
+import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 export default function SettingsPage() {
@@ -66,7 +67,7 @@ export default function SettingsPage() {
             label={t("languageModels")}
             icon={<Type className="h-3.5 w-3.5" />}
             defaultProtocol="openai"
-            defaultBaseUrl="https://api.openai.com"
+            defaultBaseUrl="https://api.openai.com/v1"
           />
 
           {/* Image Models section */}
@@ -109,6 +110,20 @@ export default function SettingsPage() {
 
           {/* AI MediaKit 画质增强 */}
           <AiMediaKitSection />
+
+          {/* 私域素材库分类标题 */}
+          <div className="flex items-center gap-2 pt-2">
+            <div className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-100 text-emerald-600">
+              <ShieldCheck className="h-3 w-3" />
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+              真人形象视频（Seedance 2.0 人脸拦截解锁）
+            </span>
+            <div className="flex-1 border-t border-[--border-subtle]" />
+          </div>
+
+          {/* 私域虚拟人像素材资产库 */}
+          <ArkAssetLibrarySection />
 
           {/* Account / Auth */}
           <AuthSection />

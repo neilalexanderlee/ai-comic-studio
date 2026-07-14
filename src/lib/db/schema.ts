@@ -14,6 +14,8 @@ export const projects = sqliteTable("projects", {
   finalVideoUrl: text("final_video_url"),
   useProjectPrompts: integer("use_project_prompts").notNull().default(0),
   visualStyle: text("visual_style").notNull().default("anime_2d"),
+  /** 画面比例："16:9" | "9:16" | "1:1"，驱动帧/视频生成 ratio 与视频编辑器画布尺寸 */
+  videoRatio: text("video_ratio").notNull().default("16:9"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
@@ -71,6 +73,12 @@ export const characters = sqliteTable("characters", {
   episodeId: text("episode_id").references(() => episodes.id, {
     onDelete: "cascade",
   }),
+  /**
+   * 火山方舟「私域虚拟人像素材资产库」的素材组合 ID（group-xxxxx）。
+   * 一个角色对应一个素材组，组内可放该角色的多张素材（全身正面图+人脸特写图）。
+   * 由 ark-asset-library.ts 的 createAssetGroup() 首次注册时创建并写入。
+   */
+  arkAssetGroupId: text("ark_asset_group_id"),
 });
 
 export const episodeCharacters = sqliteTable("episode_characters", {
@@ -112,6 +120,17 @@ export const characterAssets = sqliteTable("character_assets", {
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
+  /**
+   * 火山方舟私域素材库 —— 该资产注册后拿到的素材 ID（asset-xxxxx，不含 asset:// 前缀）。
+   * 永久有效（不像「信任模型产物」有 30 天窗口）。
+   * 视频生成时优先用 `asset://<arkAssetId>` 替代本地图片路径，绕过 Seedance 2.0 真人人脸拦截。
+   */
+  arkAssetId: text("ark_asset_id"),
+  /** none=未注册，pending=已提交等待火山处理，active=可用，failed=处理失败需重传 */
+  arkAssetStatus: text("ark_asset_status", { enum: ["none", "pending", "active", "failed"] })
+    .notNull()
+    .default("none"),
+  arkAssetRegisteredAt: integer("ark_asset_registered_at", { mode: "timestamp" }),
 });
 
 export const storyboardVersions = sqliteTable("storyboard_versions", {
@@ -281,6 +300,25 @@ export const providerSecrets = sqliteTable("provider_secrets", {
   providerId: text("provider_id").notNull(),
   apiKey: text("api_key").notNull().default(""),
   secretKey: text("secret_key"),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/**
+ * 火山方舟「私域虚拟人像素材资产库」账号级凭证。
+ * 与 provider_secrets（Bearer API Key）分开存储 —— 素材库管控面 API（CreateAssetGroup/
+ * CreateAsset/GetAsset）用的是 AK/SK 签名鉴权，不是普通 Bearer Key。
+ * 每个用户最多一套凭证（够用：私域素材库是账号级能力，不区分 Provider/模型）。
+ */
+export const arkAssetLibraryCredentials = sqliteTable("ark_asset_library_credentials", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  accessKeyId: text("access_key_id").notNull().default(""),
+  secretAccessKey: text("secret_access_key").notNull().default(""),
+  /** 素材组/素材所属的方舟项目名，默认 default；需与调用视频生成 API 的 Key 所属项目一致 */
+  projectName: text("project_name").notNull().default("default"),
+  region: text("region").notNull().default("cn-beijing"),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

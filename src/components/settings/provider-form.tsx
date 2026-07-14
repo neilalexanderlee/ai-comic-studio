@@ -16,7 +16,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { toast } from "sonner";
 
 const DEFAULT_BASE_URLS: Record<Protocol, string> = {
-  openai: "https://api.openai.com",
+  openai: "https://api.openai.com/v1",
   gemini: "https://generativelanguage.googleapis.com",
   seedance: "https://ark.cn-beijing.volces.com/api/v3",
   kling: "https://api.klingai.com",
@@ -277,7 +277,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               onChange={(e) =>
                 updateProvider(provider.id, { baseUrl: e.target.value })
               }
-              placeholder="https://api.openai.com"
+              placeholder="https://api.openai.com/v1"
             />
           </div>
           <div className="space-y-1.5">

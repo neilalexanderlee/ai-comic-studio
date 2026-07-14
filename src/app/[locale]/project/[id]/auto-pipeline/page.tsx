@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLocale } from "next-intl";
 import {
   ArrowLeft,
@@ -21,27 +21,20 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useModelStore } from "@/stores/model-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { toast } from "sonner";
+import {
+  resolveWholeDramaResume,
+  type WholeDramaCharacter,
+  type WholeDramaEpisode,
+  type WholeDramaImportLog,
+  type WholeDramaSnapshot,
+  type WholeDramaSource,
+} from "@/lib/whole-drama/pipeline-resume";
+import { validateWholeDramaSourceLength } from "@/lib/whole-drama/limits";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface ExtractedCharacter {
-  name: string;
-  aliases?: string[];
-  frequency: number;
-  description: string;
-  visualHint?: string;
-  voiceHint?: string;
-  scope?: string;
-}
-
-interface SplitEpisode {
-  title: string;
-  description: string;
-  keywords: string;
-  idea: string;
-  script?: string;
-  characters?: string[];
-}
+type ExtractedCharacter = WholeDramaCharacter;
+type SplitEpisode = WholeDramaEpisode;
 
 type StepStatus = "idle" | "running" | "done" | "error";
 type StepNum = 1 | 2 | 3 | 4;
@@ -50,6 +43,17 @@ interface StepState {
   status: StepStatus;
   message: string;
 }
+
+const EMPTY_SNAPSHOT: WholeDramaSnapshot = {
+  hasInit: false,
+  script: "",
+  step1Done: false,
+  characters: [],
+  step2Done: false,
+  episodes: [],
+  step3Done: false,
+  step4Done: false,
+};
 
 const STEP_META: {
   num: StepNum;
@@ -73,6 +77,13 @@ export default function AutoPipelinePage({
   const { id: projectId } = use(params);
   const locale = useLocale();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedSource = searchParams.get("source");
+  const initialSourceType: WholeDramaSource =
+    requestedSource === "novel" || requestedSource === "script" ? requestedSource : "idea";
+  const [sourceType, setSourceType] = useState<WholeDramaSource>(initialSourceType);
+  const autoStartRequested =
+    searchParams.get("autoStart") === "1" || searchParams.get("resume") === "1";
   const textGuard = useModelGuard("text");
   const getModelConfig = useModelStore((s) => s.getModelConfig);
 
@@ -91,6 +102,8 @@ export default function AutoPipelinePage({
   });
   const [logs, setLogs] = useState<string[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const autoStartHandled = useRef(false);
+  const resumeSnapshot = useRef<WholeDramaSnapshot>(EMPTY_SNAPSHOT);
 
   // Step data
   const generatedScript = useRef<string>("");
@@ -104,18 +117,51 @@ export default function AutoPipelinePage({
   useEffect(() => {
     async function load() {
       try {
-        const res = await apiFetch(`/api/projects/${projectId}`);
-        const data = await res.json();
-        setOutline(data.idea || "");
+        const [projectRes, logsRes] = await Promise.all([
+          apiFetch(`/api/projects/${projectId}`),
+          apiFetch(`/api/projects/${projectId}/import/logs`),
+        ]);
+        if (!projectRes.ok) throw new Error("无法加载项目信息");
+        if (!logsRes.ok) throw new Error("无法读取整剧流程记录，请刷新后重试");
+
+        const data = await projectRes.json();
+        const serverLogs: WholeDramaImportLog[] = await logsRes.json();
+        const resume = resolveWholeDramaResume(data, serverLogs, requestedSource);
+        resumeSnapshot.current = resume.snapshot;
+
+        setSourceType(resume.sourceType);
+        setOutline(resume.sourceText);
         setProjectTitle(data.title || "");
-      } catch {
-        toast.error("无法加载项目信息");
+        setLogs(serverLogs.map((log) => `[Step ${log.step}] ${log.message}`));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "无法加载项目信息");
       } finally {
         setProjectLoaded(true);
       }
     }
     load();
-  }, [projectId]);
+  }, [projectId, requestedSource]);
+
+  const stepMeta = STEP_META.map((step) => {
+    if (step.num !== 1) return step;
+    if (sourceType === "novel") {
+      return { ...step, label: "改编小说", desc: "保留主线并转换为完整漫剧剧本" };
+    }
+    if (sourceType === "script") {
+      return { ...step, label: "读取剧本", desc: "使用已有剧本直接进入资产提取" };
+    }
+    return step;
+  });
+  const sourceLabel = sourceType === "novel"
+    ? "小说正文或梗概"
+    : sourceType === "script"
+    ? "已有剧本"
+    : "故事想法";
+  const pipelineSummary = sourceType === "script"
+    ? "系统将直接使用已有剧本，自动提取角色、分集并写入数据库。完成后可进入各集解析分镜。"
+    : sourceType === "novel"
+    ? "系统将保留小说主线完成漫剧改编，再自动提取角色、分集并写入数据库。完成后可进入各集解析分镜。"
+    : "系统将根据故事想法规划完整剧本，再自动提取角色、分集并写入数据库。完成后可进入各集解析分镜。";
 
   // ── Log helpers ──────────────────────────────────────────────────────────
 
@@ -138,7 +184,16 @@ export default function AutoPipelinePage({
   // ── Pipeline steps ───────────────────────────────────────────────────────
 
   async function step1_expandOutline() {
-    setStep(1, "running", "正在扩写大纲...");
+    if (sourceType === "script") {
+      setStep(1, "running", "正在读取已有剧本...");
+      generatedScript.current = outline;
+      setStreamedChars(outline.length);
+      setStep(1, "done", `剧本已就绪，共 ${outline.length} 字`);
+      return;
+    }
+
+    const actionLabel = sourceType === "novel" ? "改编小说" : "扩写故事";
+    setStep(1, "running", `正在${actionLabel}...`);
 
     const modelConfig = getModelConfig();
     let script = "";
@@ -148,8 +203,13 @@ export default function AutoPipelinePage({
       const res = await apiFetch(`/api/projects/${projectId}/auto-pipeline/expand`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outline, modelConfig }),
+        body: JSON.stringify({ outline, sourceType, modelConfig }),
       });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || `${actionLabel}失败`);
+      }
 
       if (!res.body) throw new Error("No response body");
 
@@ -166,7 +226,7 @@ export default function AutoPipelinePage({
       }
 
       generatedScript.current = script;
-      setStep(1, "done", `扩写完成，共生成 ${charCount} 字`);
+      setStep(1, "done", `${actionLabel}完成，共生成 ${charCount} 字`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "扩写失败";
       setStep(1, "error", `扩写失败: ${msg}`);
@@ -175,6 +235,11 @@ export default function AutoPipelinePage({
   }
 
   async function step2_extractCharacters() {
+    const lengthError = validateWholeDramaSourceLength("script", generatedScript.current);
+    if (lengthError) {
+      setStep(2, "error", lengthError);
+      throw new Error(lengthError);
+    }
     setStep(2, "running", "正在提取角色...");
 
     try {
@@ -186,6 +251,10 @@ export default function AutoPipelinePage({
           modelConfig: getModelConfig(),
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "角色提取失败");
+      }
       const data = await res.json();
       characters.current = data.characters;
       setStep(2, "done", `提取完成: ${data.characters.length} 个角色`);
@@ -209,6 +278,10 @@ export default function AutoPipelinePage({
           modelConfig: getModelConfig(),
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "分集失败");
+      }
       const data = await res.json();
       episodes.current = data.episodes;
       setStep(3, "done", `分集完成，共 ${data.episodes.length} 集`);
@@ -229,8 +302,14 @@ export default function AutoPipelinePage({
         body: JSON.stringify({
           episodes: episodes.current,
           characters: characters.current,
+          fullScript: generatedScript.current,
+          replaceEpisodes: true,
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "写入失败");
+      }
       const data = await res.json();
       createdEpisodeIds.current = (data.episodes as { id: string }[]).map((e) => e.id);
       setStep(
@@ -249,29 +328,62 @@ export default function AutoPipelinePage({
 
   async function startPipeline() {
     if (!outline.trim()) {
-      toast.error("请先填写故事大纲");
+      toast.error(`请先填写${sourceLabel}`);
+      return;
+    }
+    const snapshot = resumeSnapshot.current;
+    const lengthError = snapshot.step1Done
+      ? validateWholeDramaSourceLength("script", snapshot.script)
+      : validateWholeDramaSourceLength(sourceType, outline);
+    if (lengthError) {
+      toast.error(lengthError);
       return;
     }
     if (!textGuard()) return;
 
     setStarted(true);
-    setStreamedChars(0);
-    setLogs([]);
-    generatedScript.current = "";
-    characters.current = [];
-    episodes.current = [];
+    setStreamedChars(snapshot.script.length);
+    generatedScript.current = snapshot.step1Done ? snapshot.script : "";
+    characters.current = snapshot.step2Done ? snapshot.characters : [];
+    episodes.current = snapshot.step3Done ? snapshot.episodes : [];
     createdEpisodeIds.current = [];
+    setSteps({
+      1: snapshot.step1Done
+        ? { status: "done", message: `剧本已恢复，共 ${snapshot.script.length} 字` }
+        : { status: "idle", message: "" },
+      2: snapshot.step2Done
+        ? { status: "done", message: `已恢复 ${snapshot.characters.length} 个角色` }
+        : { status: "idle", message: "" },
+      3: snapshot.step3Done
+        ? { status: "done", message: `已恢复 ${snapshot.episodes.length} 集` }
+        : { status: "idle", message: "" },
+      4: snapshot.step4Done
+        ? { status: "done", message: "剧集与角色已写入" }
+        : { status: "idle", message: "" },
+    });
 
-    // Clear old import logs
-    try {
-      await apiFetch(`/api/projects/${projectId}/import/logs`, { method: "DELETE" });
-    } catch { /* ignore */ }
+    if (!snapshot.hasInit) {
+      setLogs([]);
+      await apiFetch(`/api/projects/${projectId}/import/logs`, { method: "DELETE" }).catch(() => null);
+    }
 
     try {
-      await step1_expandOutline();
-      await step2_extractCharacters();
-      await step3_splitEpisodes();
-      await step4_generate();
+      await apiFetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "processing" }),
+      });
+
+      if (!snapshot.step1Done) await step1_expandOutline();
+      if (!snapshot.step2Done) await step2_extractCharacters();
+      if (!snapshot.step3Done) await step3_splitEpisodes();
+      if (!snapshot.step4Done) await step4_generate();
+
+      await apiFetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "draft" }),
+      });
 
       toast.success("项目创建完成！正在跳转...");
       setTimeout(() => {
@@ -281,6 +393,14 @@ export default function AutoPipelinePage({
       // Error already set in the relevant step function
     }
   }
+
+  useEffect(() => {
+    if (!autoStartRequested || !projectLoaded || autoStartHandled.current || !outline.trim()) return;
+    autoStartHandled.current = true;
+    void startPipeline();
+    // 创建项目后的自动启动只消费一次 URL 意图，后续重试由页面按钮负责。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStartRequested, projectLoaded, outline]);
 
   // ── Retry ────────────────────────────────────────────────────────────────
 
@@ -326,6 +446,12 @@ export default function AutoPipelinePage({
         await step4_generate();
       }
 
+      await apiFetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "draft" }),
+      });
+
       toast.success("项目创建完成！正在跳转...");
       setTimeout(() => {
         router.push(`/${locale}/project/${projectId}/episodes`);
@@ -364,7 +490,7 @@ export default function AutoPipelinePage({
           <div className="flex items-center gap-2 mb-1">
             <Wand2 className="h-4 w-4 text-primary" />
             <h2 className="font-display text-base font-bold text-[--text-primary]">
-              AI 全自动创建
+              整剧模式
             </h2>
           </div>
           {projectTitle && (
@@ -374,7 +500,7 @@ export default function AutoPipelinePage({
 
         {/* Step indicators */}
         <div className="flex flex-col gap-2">
-          {STEP_META.map(({ num, icon: Icon, label, desc }) => {
+          {stepMeta.map(({ num, icon: Icon, label, desc }) => {
             const { status } = steps[num];
             const isCurrent = currentStep === num;
 
@@ -482,10 +608,10 @@ export default function AutoPipelinePage({
                   <Wand2 className="h-7 w-7 text-primary" />
                 </div>
                 <h1 className="font-display text-2xl font-bold text-[--text-primary]">
-                  AI 全自动生成项目
+                  整剧模式 · 一键规划
                 </h1>
                 <p className="mt-1.5 text-sm text-[--text-muted]">
-                  系统将根据下方大纲，自动生成完整剧本、提取角色、分集并写入数据库。分镜解析请进入各集手动触发。
+                  {pipelineSummary}
                 </p>
               </div>
 
@@ -494,7 +620,7 @@ export default function AutoPipelinePage({
                 <div className="mb-3 flex items-center gap-2">
                   <FileText className="h-4 w-4 text-[--text-muted]" />
                   <span className="text-sm font-medium text-[--text-secondary]">
-                    故事大纲
+                    {sourceLabel}
                   </span>
                   <span className="ml-auto text-xs text-[--text-muted]">
                     {outline.length} 字
@@ -511,19 +637,19 @@ export default function AutoPipelinePage({
                   </p>
                 ) : (
                   <p className="text-sm text-[--text-muted] italic">
-                    未找到故事大纲。请返回首页重新创建项目并填写大纲。
+                    未找到{sourceLabel}。请返回项目首页重新创建，并补充输入内容。
                   </p>
                 )}
               </div>
 
               {/* Pipeline preview */}
               <div className="flex items-center justify-center gap-2 text-xs text-[--text-muted]">
-                {STEP_META.map(({ num, label }, i) => (
+                {stepMeta.map(({ num, label }, i) => (
                   <div key={num} className="flex items-center gap-2">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary font-medium">
                       {label}
                     </span>
-                    {i < STEP_META.length - 1 && (
+                    {i < stepMeta.length - 1 && (
                       <ChevronRight className="h-3.5 w-3.5 text-[--text-muted]" />
                     )}
                   </div>
@@ -538,7 +664,7 @@ export default function AutoPipelinePage({
                 size="lg"
               >
                 <Sparkles className="mr-2 h-4 w-4" />
-                开始全自动生成
+                开始整剧规划
               </Button>
             </div>
           </div>
@@ -577,7 +703,7 @@ export default function AutoPipelinePage({
                     : hasError
                     ? "出现错误，可点击「重试」从失败步骤继续"
                     : currentStep
-                    ? `正在执行：${STEP_META[currentStep - 1].label}`
+                    ? `正在执行：${stepMeta[currentStep - 1].label}`
                     : "准备中..."}
                 </div>
                 {currentStep && !allDone && !hasError && (

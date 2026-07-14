@@ -20,7 +20,7 @@ import { buildScriptGeneratePrompt } from "@/lib/ai/prompts/script-generate";
 import { buildCharacterExtractPrompt, buildCharacterNameExtractionPrompt, CHARACTER_NAME_EXTRACTION_SYSTEM, resolveCharacterExtractSystemPrompt } from "@/lib/ai/prompts/character-extract";
 import { STORYBOARD_REWRITE_SYSTEM, buildRewriteUserPrompt, PLOT_OPTIMIZE_SYSTEM, buildPlotOptimizeUserPrompt } from "@/lib/ai/prompts/storyboard-supervision";
 import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
-import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
+import { VISUAL_STYLE_PRESETS, buildStyleInstruction } from "@/lib/ai/prompts/visual-style-presets";
 import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
@@ -376,6 +376,10 @@ export async function POST(
 
   if (action === "batch_voice_generate") {
     return handleBatchVoiceGenerate(projectId, resolvedModelConfig);
+  }
+
+  if (action === "batch_character_restyle") {
+    return handleBatchCharacterRestyle(projectId, resolvedModelConfig);
   }
 
   if (action === "frame_prompt_preview") {
@@ -1431,6 +1435,139 @@ async function handleBatchVoiceGenerate(
   });
 }
 
+// --- batch_character_restyle: re-render existing characters' description/visualHint under the CURRENT project.visualStyle ---
+//
+// 背景：character_extract 生成 description 时会把画风锚定词写进 description 开头（STEP1），
+// visualHint 是从 description 提炼的 4-10 字极简识别码。切换项目画风（VisualStylePicker）后，
+// 这两个字段不会自动刷新——旧画风的锚定词/服装/场景元素会被 shot_split「视觉标识必须原文复用」
+// 规则和定妆图生成路径继续原样使用，直接污染新画风下的帧/视频生成提示词。
+// 本 action 让用户手动触发：保留角色核心身份（脸型/气质/标志色等），仅按新画风重写视觉描述。
+function buildCharacterRestyleSystem(visualStyle: string): string {
+  return `你是资深角色设计师与美术指导。你的任务是把一个「已存在」角色的视觉描述，从旧画风改写为项目当前画风，同时尽量保留角色的核心身份识别特征（脸型气质、标志性配色、标志性道具等），除非这些细节与新画风的时代/场景设定冲突（如古风换成现代都市，或反之），此时必须替换为符合新设定的等价元素。
+
+${buildStyleInstruction(visualStyle)}
+
+═══ 输出要求 ═══
+只输出 JSON，不要输出任何其他文字、markdown 代码块标记或解释：
+{
+  "description": "完整改写后的视觉描述，单段落，开头必须是上方画风锚定词（STYLE TAG）原文，涵盖体态/面容/发型/服装/道具等，与旧描述保持同一角色身份，但所有画风/时代相关元素换成新画风设定",
+  "visualHint": "4-10个汉字的极简视觉识别码，基于新的 description 提炼最具辨识度的特征（如：银发金瞳、红甲银纹、素裙青丝），供后续分镜/台词标注中原文复用"
+}
+
+注意：不要改变角色的性别、年龄段、性格特征、姓名。`;
+}
+
+async function handleBatchCharacterRestyle(
+  projectId: string,
+  modelConfig?: ModelConfig
+): Promise<Response> {
+  if (!modelConfig?.text) {
+    return NextResponse.json({ error: "No text model configured" }, { status: 400 });
+  }
+
+  const [restyleProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const visualStyle = restyleProject?.visualStyle || "anime_2d";
+  const restyleSystem = buildCharacterRestyleSystem(visualStyle);
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(sseEvent(data)));
+      };
+
+      try {
+        const charRows = await db
+          .select({
+            id: characters.id,
+            name: characters.name,
+            description: characters.description,
+            visualHint: characters.visualHint,
+          })
+          .from(characters)
+          .where(
+            and(
+              eq(characters.projectId, projectId),
+              sql`(${characters.description} IS NOT NULL AND trim(${characters.description}) != '')`
+            )
+          );
+
+        const total = charRows.length;
+        if (total === 0) {
+          send({ type: "done", updatedCount: 0, totalCount: 0 });
+          controller.close();
+          return;
+        }
+
+        send({ type: "start", totalCount: total });
+        console.log(`[BatchCharacterRestyle] start project=${projectId} style=${visualStyle} chars=${total}`);
+
+        let updatedCount = 0;
+        for (const char of charRows) {
+          let savedDescription: string | null = null;
+          let savedVisualHint: string | null = null;
+          try {
+            const { text } = await generateText({
+              model: createLanguageModel(modelConfig.text!),
+              system: restyleSystem,
+              prompt: `角色名：${char.name}\n旧视觉描述：${char.description}\n旧视觉识别码：${char.visualHint || "无"}`,
+              temperature: 0.4,
+            });
+
+            const parsed = JSON.parse(extractJSON(text)) as {
+              description?: string;
+              visualHint?: string;
+            };
+
+            if (parsed.description) {
+              await db
+                .update(characters)
+                .set({
+                  description: parsed.description,
+                  visualHint: parsed.visualHint ?? char.visualHint ?? "",
+                })
+                .where(eq(characters.id, char.id));
+              updatedCount++;
+              savedDescription = parsed.description;
+              savedVisualHint = parsed.visualHint ?? null;
+              console.log(`[BatchCharacterRestyle] ${char.name} → ${parsed.visualHint ?? "(保留原识别码)"}`);
+            }
+          } catch (charErr) {
+            console.warn(`[BatchCharacterRestyle] Failed for ${char.name}:`, charErr);
+          }
+          send({
+            type: "progress",
+            updatedCount,
+            totalCount: total,
+            characterName: char.name,
+            characterId: char.id,
+            description: savedDescription,
+            visualHint: savedVisualHint,
+          });
+        }
+
+        send({ type: "done", updatedCount, totalCount: total });
+        console.log(`[BatchCharacterRestyle] Done: ${updatedCount}/${total}`);
+      } catch (err) {
+        console.error("[BatchCharacterRestyle] Fatal:", err);
+        send({ type: "error", error: extractErrorMessage(err) });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
+}
 
 // --- batch_storyboard_rewrite: tool-calling approach (Toonflow pattern) ---
 // LLM calls write_shot_rewrite() once per shot → each call writes DB immediately → SSE progress
@@ -2652,9 +2789,12 @@ async function handleSingleVideoGenerate(
       //   音频：最多 3 个（type:"audio"，独立类型，不占图片名额）
       const MAX_MULTIMODAL_REFS = 9; // Seedance 2.0：多模态参考图片上限 9 张
       const MAX_AUDIO_REFS = 3;      // Seedance 2.0：多模态参考音频上限 3 个
-      const charMainCount = charImagesForVideo.filter(
-        (ci) => ci.imagePath && shotFrameFileOnDisk(ci.imagePath)
-      ).length;
+      // 主图可用条件：本地文件存在，或已锁定进私域素材库（asset:// 引用，无需本地文件）
+      const charMainUsable = (ci: (typeof charImagesForVideo)[number]) =>
+        ci.arkAssetStatus === "active" && ci.arkAssetId
+          ? true
+          : !!(ci.imagePath && shotFrameFileOnDisk(ci.imagePath));
+      const charMainCount = charImagesForVideo.filter(charMainUsable).length;
       const anchorCount =
         shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst) ? 1 : 0;
 
@@ -2678,9 +2818,15 @@ async function handleSingleVideoGenerate(
       const multimodalRefs: import("@/lib/ai/types").MultimodalRefItem[] = [];
 
       // 第一轮：角色主图 + 角度变体（顺序对应 buildRefEntries 的 asset_image + asset_angle_image 轮）
+      // 主图已锁定私域素材库（arkAssetStatus === "active"）时优先用 asset://<arkAssetId> 引用，
+      // 绕过 Seedance 2.0 真人人脸拦截；否则走原有本地路径（toImageUrl 转 data URI）。
       for (const ci of charImagesForVideo) {
-        if (ci.imagePath && shotFrameFileOnDisk(ci.imagePath)) {
-          multimodalRefs.push({ type: "image", path: ci.imagePath });
+        if (charMainUsable(ci)) {
+          const useArkAsset = ci.arkAssetStatus === "active" && !!ci.arkAssetId;
+          multimodalRefs.push({
+            type: "image",
+            path: useArkAsset ? `asset://${ci.arkAssetId}` : ci.imagePath,
+          });
           for (const ai of ci.angleImages ?? []) {
             if (angleSlotBudget > 0) {
               multimodalRefs.push({ type: "image", path: ai.path });

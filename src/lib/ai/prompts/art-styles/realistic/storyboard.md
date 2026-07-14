@@ -1,7 +1,7 @@
 ---
-name: director_storyboard
+name: liveaction_urban_storyboard
 description: 导演分镜提示词技法 · 真人都市写实
-metaData: director_skills
+metaData: director_liveaction_urban_skills
 ---
 
 # 分镜提示词 · 真人都市写实 · 风格专属技法
@@ -10,163 +10,192 @@ metaData: director_skills
 
 ## 适用范围
 
-本 Skill 专用于**真人都市写实**风格的分镜提示词生成。
+本 Skill 专用于**真人都市写实**风格的分镜提示词生成，适配都市剧情、职场成长、青春治愈、市井生活、都市悬疑等真人实拍影视题材的分镜创作。
 
 ---
 
-## 情绪 → 面容/眼神词映射
+## 一、情绪 → 面容、眼神词映射
 
-| 情绪输入 | 面容词 | 眼神词 | 微表情补充 |
-|----------|--------|--------|-----------|
-| 心动 / 欣喜 | 嘴角微扬，眼底笑意 | 眼神明亮，目光专注 | 脸颊微红，表情自然 |
-| 悲伤 / 失落 | 面色沉静，神情低落 | 眼神黯淡，目光游离 | 眉心轻蹙，表情内敛 |
-| 愤怒 / 压迫 | 眉眼凌厉，神情冷峻 | 目光如炬，眼神强势 | 唇线收紧，气场压迫 |
-| 温柔 / 深情 | 神情柔和，眉目温润 | 眼神专注，目光深情 | 嘴角轻扬，表情克制温暖 |
-| 坚定 / 决绝 | 神情严肃，面容沉着 | 眼神坚定，目光清冽 | 眉眼平静，气质干练 |
-| 惊讶 / 震惊 | 神情微愣，面色微变 | 眼神放大，目光骤聚 | 眉梢轻挑，唇形微张 |
-| 冷漠 / 疏离 | 面容冷淡，神情漠然 | 眼神空远，目光无波 | 表情几乎凝固，气质疏离 |
-| 喜悦 / 雀跃 | 神情鲜活，笑容灿烂 | 眼神明亮有神，笑眼弯弯 | 嘴角上扬，表情生动自然 |
-| 紧张 / 慌乱 | 表情略带茫然，神态慌张 | 眼神飘忽，目光四顾 | 眉心微蹙，表情生动真实 |
-| 隐忍 / 克制 | 神情内敛，面容沉静 | 眼神深沉，眼底有情绪压抑 | 唇线收紧，喉结微动 |
+> 真人都市写实的情绪不来自"义体光效"或"渲染参数"，而来自真人演员在摄影机前的微表情。以下映射面向摄影机捕捉真实人物的方式。
 
----
-
-## 光影氛围词库（真人都市写实）
-
-### 时间段光线
-
-| 时间段 | 主光词 | 色调词 | 气氛词 |
-|--------|--------|--------|---------|
-| 清晨 | 散射晨光，漫射柔光 | 冷白/中性色调 | 城市苏醒感，空气清新 |
-| 午后 | 柔和斜侧光，漫射散光 | 暖调为主，轻暖调 | 光影斑驳，层次分明 |
-| 傍晚/黄昏 | 暖调侧逆光，斜射余晖 | 暖调为主，局部暖光点缀 | 长影拉伸，光感温馨 |
-| 夜间 | 窗光冷蓝，室内暖点光源 | 冷暖对比 | 光影幽深，明暗强对比 |
-| 雨天/阴天 | 漫射冷光，无主光源 | 灰蓝主调 | 空气潮湿感，低饱和度 |
-| 办公室/室内 | 顶光+环境光 | 中性灰调 | 柔和均匀，专业感 |
-
-### 情绪光影
-
-| 情绪基调 | 光线类型 | 补充约束 |
-|----------|----------|---------|
-| 心动/温情 | 柔和侧逆光，散射暖光局部 | 轮廓光勾勒，浅景深柔化背景 |
-| 对峙/压迫 | 硬侧光，高对比度强打光 | 阴影硬朗，明暗分割明显 |
-| 压抑/悲伤 | 漫射冷光，顶光或侧冷光 | 低调打光，面部局部暗部留存 |
-| 神秘/肃穆 | 冷蓝侧光，逆光剪影 | 光晕控制，边缘光精准 |
-| 空灵/意境 | 散射软光，背光过曝微调 | 空气透视感，远景虚淡 |
+| 情绪输入 | 面容描述 | 眼神描述 | 微表情补充 |
+|---|---|---|---|
+| 干练 / 沉稳 | 神情利落，面部线条自然不紧绷 | 眼神笃定，直视前方不飘忽 | 唇线平直，下颌微收，气场沉稳克制 |
+| 忧伤 / 落寞 | 眉眼低垂，面部肌肉松弛 | 目光涣散失焦，望向窗外或地面 | 嘴角自然下沉，表情怅然，不刻意 |
+| 温柔 / 治愈 | 眉目舒展，面部柔和 | 眼神温润专注，像在认真听对方说话 | 嘴角自然微扬，不是笑，是有温度 |
+| 冷峻 / 戒备 | 面部线条微微绷紧，不夸张 | 眼神锐利但不过度，注视有力 | 下颌收紧，表情克制，身体语言防御 |
+| 惊讶 / 触动 | 眼尾微抬，眉毛自然上扬 | 眼神骤然聚焦，瞳孔微扩 | 嘴角微启，表情鲜活不夸张 |
+| 沉思 / 内省 | 神情淡然，眼部周围肌肉放松 | 目光放远失焦，像在看但不在看 | 表情平静，可能单手托腮或手指轻点 |
+| 喜悦 / 鲜活 | 眼角出现自然笑纹，眼型微弯 | 眼神明亮有光，眼角有笑意牵动 | 嘴角上扬，面颊微红，表情生动但不夸张 |
+| 疲惫 / 倦怠 | 眼窝微陷，面部整体松弛 | 目光朦胧，眼皮微沉 | 眉眼低垂，可能的黑眼圈，表情松弛 |
+| 期待 / 憧憬 | 眉眼微扬，面部有克制的小幅度活动 | 眼神发亮，瞳孔有光 | 嘴角微微上扬，面部有压抑的笑意 |
+| 决绝 / 坚定 | 面部线条清晰，下颌微抬 | 眼神笔直向前，不回避不躲闪 | 下巴微收或微抬，表情果敢但不凶悍 |
 
 ---
 
-## 场景质感约束词（按场景类型）
+## 二、光影氛围词库
 
-| 场景类型 | 必加约束词 |
-|----------|-----------|
-| 办公室 | 玻璃隔断反光，办公桌面整洁，电脑屏幕光，现代办公椅 |
-| 咖啡厅/餐厅 | 木质桌椅纹理，咖啡杯细节，暖色吊灯，窗外街景虚化 |
-| 居家空间 | 沙发布料质感，地毯纹理，台灯暖光，生活杂物细节 |
-| 街头/广场 | 沥青路面反光，建筑立面细节，霓虹灯招牌，人群虚化 |
-| 商场/室内空间 | 大理石地面反光，玻璃橱窗，现代照明，商业空间纵深感 |
-| 车内 | 座椅皮革质感，车窗反射，仪表盘光，窗外街景虚化 |
-| 卧室/私密空间 | 床单褶皱，床头灯暖光，衣物随意摆放，生活气息 |
+### 2.1 自然光时刻
+
+| 时刻 | 光源行为 | 色温与色调 | 空间氛围 |
+|---|---|---|---|
+| 清晨 | 低角度暖白日光，通过窗户斜入室内；室外街道阳光刚越过建筑、长阴影 | 3500-4500K暖白，空气微冷 | 静谧未醒、晨雾清冽、一切尚未开始 |
+| 上午 | 日光升高，冷白清澈，阴影锐利；室外建筑表面材质清晰；室内窗光面积最大 | 5000-6000K中性偏冷 | 秩序建立、日常运转、高效清晰 |
+| 正午 | 顶光或近乎顶光，阴影短而浓重；室外材质反光强；室内窗光从上方入射 | 5500-6500K冷调 | 暂停感、午间空隙、日复一日的顶点 |
+| 午后 | 日光偏西，暖调渐强，斜光穿过窗或树形成长阴影和光斑 | 4000-5000K渐暖 | 慵懒、时间变慢、一天中最长的那一段 |
+| 金色时刻 | 极低角度暖金漫射，长阴影到极致，一切表面镀上金边 | 2800-3500K极暖 | 转瞬即逝的珍贵、温情回忆段落的唯一光源 |
+| 蓝调时刻 | 太阳沉入地平线后，天空深蓝紫，自然光极暗极冷，人工光源刚刚亮起 | 8000-10000K天空+暖点人工光 | 过渡、诗意、白天已尽夜晚尚未接管 |
+| 深夜 | 仅靠人工光源——街灯、台灯、屏幕光、车灯。大部分区域沉入暗部 | 暖光源2800-3200K / 冷光源4000-6500K | 孤独或私密、世界安静了 |
+
+### 2.2 Seedance 2.0 光源语句法（每个镜头必须包含）
+
+```
+[光源] 主光：{光源类型}，{方向}，{色温值K}，{软硬}
+[光源] 辅光/环境光：{光源类型}，{方向}，{色温值K}
+[光比] 约1:{X}
+```
+
+### 2.3 情绪 → 光源矩阵（Seedance 2.0 可直接填入）
+
+| 情绪基调 | 光线配方 | 光比 | 视觉关键词 |
+|---|---|---|---|
+| 职场克制 | 窗光冷白主光（5000-5500K）从落地窗方向侧入，屏幕冷光（6500K）补面 | 1:3 | 中性偏冷，材质清晰 |
+| 日常松弛 | 大面积窗光漫射（5000K），窗帘柔化 | 1:1.5 | 通透、低反差、治愈 |
+| 温馨亲密 | 台灯暖光主光源（2800-3200K），暗部保留物体轮廓 | 1:4 | 暖调包裹、私密 |
+| 市井烟火 | 多光源混杂——钠灯街灯暖黄（2000-2200K）为主，店铺冷白（4000K）局部对冲 | 1:5 | 暖调主导、热闹 |
+| 雨夜孤独 | 湿路面反射街灯暖黄光斑（2800K），环境冷调（6000K天空漫射），窗玻璃雨痕散射 | 1:6 | 冷暖共存、诗意孤独 |
+| 悬疑紧张 | 侧方硬窗光（冷白5000K）单光源，暗部深但有微弱轮廓 | 1:8 | 压抑、不确定 |
+| 治愈新生 | 充足自然光漫射（5000-5500K），天空光+地面反射补光 | 1:1.5 | 高调通透、希望 |
+| 深夜脆弱 | 单一暖光源——台灯/窗外路灯（2800-3200K）形成孤岛式照明，面部一侧亮一侧暗 | 1:8 | 极简光源、私密脆弱 |
+
+### 2.4 冷暖色调与叙事阶段
+
+- **冷光主导**（5000K+）：职场克制、悬疑紧张、清冷独处、雨夜
+- **暖光主导**（2000-3500K）：温情亲密、市井烟火、居家日常、金色时刻
+- **冷暖共存**：过渡时刻（蓝调时刻+初亮暖灯）、雨夜（冷环境+暖光斑）
+- **光源变化 = 叙事信号**：窗外天空从日间冷白渐变至傍晚暖金=时间流逝；从办公室冷白走到街道暖黄街灯下=场景与情绪的切换
+
+### 2.5 Seedance 2.0 光影适配要点
+
+- 色温数字帮助模型校准白平衡倾向：`色温约3200K` 优于 `暖光`
+- 光比数字帮助模型建立明暗意识：`光比约1:4` 优于 `柔和的阴影`
+- 光源必须有明确来源：`从画面左侧窗户45°斜入` 优于 `侧光`
+- 环境光的反射路径描述：`湿路面反射街灯暖黄光斑` 优于 `地面有暖色反光`
 
 ---
 
-## 固定风格锚定词（所有输出必须包含）
+## 三、场景质感约束词
 
-**真人写实锚定（必选）：**
+| 场景类型 | 摄影必须捕捉的元素 |
+|---|---|
+| 写字楼/办公室 | 玻璃隔断多层反射和透射、百叶窗条纹光影、工位桌面的个人物品散落、会议桌上打开的半瓶矿泉水、屏幕冷光映在脸上 |
+| 出租屋/公寓 | 落地窗或小窗的自然光方向明确、墙面的贴纸残留和钉子孔、沙发上的毯子随意搭着、茶几上的遥控器和半杯水、地板轻微磨损 |
+| 咖啡厅/奶茶店 | 吧台暖光和咖啡机蒸汽、窗边座位的光最珍贵、杯具和托盘的使用痕迹、落地玻璃上的手印、窗外的街景是另一个图层 |
+| 老城区/巷弄 | 斑驳墙面和爬墙青苔、电线杆和架空线的真实城市肌理、老式路灯的暖黄光、晾晒的衣物、沿街摊贩和手写招牌 |
+| 城市街道/路口 | 斑马线和红绿灯、行道树和路灯、路面标线和磨损、店铺橱窗和霓虹招牌、公交站牌和等车的人的空位 |
+| 便利店（深夜） | 荧光灯管的冷白孤岛式照明、货架的秩序感、冰柜的冷光和雾面玻璃、落地窗外深黑的街道、店员区域的暖光小角落 |
+| 地铁站/车厢 | 日光灯冷白照明、广告灯箱的发光、屏蔽门的反光、车厢座椅的磨损、隧道里的流动光影 |
+| 天台/屋顶 | 城市天际线全景、护栏和通风管道、地面防水层的磨损、晾衣绳和杂物、天空的色温和云的状态 |
+| 医院走廊/病房 | 长走廊的日光灯冷光、地面的反光、白墙和扶手的洁净感与冷感、窗外的自然光是唯一的暖色 |
+| 校园/教室 | 课桌椅的排列和使用痕迹、黑板上的粉笔字残留、窗户的自然光打进教室、走廊的纵深透视 |
 
-真人写实摄影，电影级画质，超现实主义纪实，强对比度，极致细节，纹理超清晰
+---
+
+## 四、固定风格锚定词
+
+**摄影锚定（必选）：**
+
+真人实拍摄影，真人电影剧照，当代中国都市，电影级摄影，自然光与人造光调度，真实色彩科学
 
 **人物质感（含人物镜头时必选）：**
 
-皮肤细腻，面容细腻渲染，五官立体，发丝根根分明，发丝细腻渲染
+真人写实摄影质感，真实皮肤纹理毛孔可见，不磨皮不硅胶脸，发丝自然质感有碎发，服饰面料纹理可见有穿着褶皱，自然微表情，真实肢体语言
 
-**服饰质感（含人物镜头时必选）：**
+**场景质感（含场景镜头时必选）：**
 
-现代服饰布料质感清晰，纹理细节超清晰，衣物随动态自然垂坠，现代剪裁合身
+真人实拍都市场景摄影，真实建筑材质和岁月痕迹（墙面斑驳/地面磨损/玻璃指印），光源方向明确可追溯，大气透视自然，非样板间非效果图
 
-**一致性锚定（参考图模式必选）：**
+**参考图一致性锚定（参考图模式必选）：**
 
-保持人物面容与参考图一致，保持服饰配色与参考图一致，保持场景光线风格统一
+保持人物造型、面容、发型、服饰与参考图完全一致，保持场景风格与参考图一致，保持光影色彩基调统一，所有镜头呈现为同一人物的连续摄影记录
 
 **风格收尾（固定）：**
 
-都市写实美学，现代东方气质，电影级分镜构图
+真人写实摄影，当代中国都市电影质感，电影级摄影画面，非3D非渲染非CG
 
-**画质锁定词（所有输出必须包含，置于风格收尾之后）：**
+**画质锁定词：**
 
-模式A（中文）——默认（画面无画内文字需求时）：
-超清4K画质，高细节，自然锐度，写实清晰感，画面无字幕、无水印、无标题叠字
+模式A（中文）——默认：
+真人摄影高清画质，电影级画面质感，画面无字幕、无水印、无标题叠字、无UI元素
+
+模式A（中文）——画内文字场景（画面中含招牌/路牌/屏幕/书籍等道具文字时）：
+真人摄影高清画质，电影级画面质感，画面无字幕、无水印、无标题叠字、无UI元素，招牌/路牌/屏幕/书本等场景道具上的文字清晰可辨
 
 模式B（英文）——默认：
-ultra-sharp 4K, high detail, crisp textures, naturalistic sharpness, photorealistic clarity, no subtitles, no captions, no watermark, no title overlay
+live-action cinematic photography, real human skin texture, contemporary urban China, cinematic color science, natural light photography, high detail, no subtitles, no captions, no watermark, no title overlay, no UI elements
 
 模式B（英文）——画内文字场景：
-ultra-sharp 4K, high detail, crisp textures, naturalistic sharpness, photorealistic clarity, no subtitles, no captions, no watermark, no title overlay, legible text on in-scene props such as screens, posters, and signage
+live-action cinematic photography, real human skin texture, contemporary urban China, cinematic color science, natural light photography, high detail, no subtitles, no captions, no watermark, no title overlay, no UI elements, legible text on in-scene props such as signboards, street signs, screens and books
 
 **负向词模板（模式B 必须包含，置于提示词末尾）：**
 
-> ⚠️ Seedream（模式A）**不支持负向提示词**，负向词仅适用于模式B。模式A 通过正向词中的质感锚定和画质锁定来保证画面质量。
+> ⚠️ Seedream（模式A）不支持负向提示词，负向词仅适用于模式B。模式A 通过正向词中的质感锚定和画质锁定来保证画面质量。
 
 模式B（英文）：
-no plastic skin, no beauty filter, no studio lighting, no centered composition, no oversaturation, no AI generated look, no motion blur, no noise, no blurry, no out of focus, no subtitles, no captions, no watermark, no title overlay, no UI text, no ancient costume, no hanfu, no traditional Chinese architecture
+no 3D render, no CGI, no Unreal Engine, no Blender, no PBR material, no game engine, no 2D cartoon, no anime, no illustration, no hand drawn, no painting, no plastic skin, no wax face, no airbrushed, no poreless skin, no silicone face, no ancient Chinese style, no traditional costume, no cyberpunk, no sci-fi, no western fantasy, no medieval, no non-Chinese urban, no plastic mannequin, no symmetrical model pose, no branded new clothes, no showroom, no wrong anatomy, no deformed face, no broken limbs, no distorted body, no subtitles, no captions, no watermark, no title overlay, no UI text
 
 ---
 
-## 美学禁止项（生成时严格规避）
+## 五、美学禁止项
 
 以下词汇/风格不得出现于输出提示词中：
 
-- ❌ 古风/古代/汉服/传统建筑相关词
-- ❌ 动漫/二次元/插画/CG 渲染相关词
-- ❌ 现代元素缺失（必须明确现代场景）
-- ❌ 暖黄主调色调词（可用"局部暖色灯光点缀"）
-- ❌ 柔焦/朦胧感/低对比滤镜词
-- ❌ 撞色/混搭/霓虹/荧光色系
-- ❌ 卡通比例、大眼睛、Q版等变形描述
-- ❌ 赛博朋克/蒸汽朋克/架空西幻元素
-- ❌ 画外叠加文字（字幕、水印、标题卡、旁白叠字、片头字等 UI 层文字，画面必须为纯视觉画面）
-
-> 💡 **例外**：故事世界内的道具文字（角色看手机/电脑屏幕、海报、路牌、招牌等场景中自然存在的文字）**不属于禁止范围**。当分镜画面描述中包含此类内容时，应如实描写其存在并要求文字清晰。
+- ❌ 3D渲染 / 3D建模 / CG / UE引擎 / Blender / PBR材质 / 次世代建模 / 体积光 / 环境光遮蔽 / 光线追踪
+- ❌ 2D手绘 / 插画 / 动画 / 二次元 / 漫画 / Q版 / 低多边形
+- ❌ 写实摄影（英文禁止 photorealistic / realistic photography——真人都市写实是"真人实拍摄影"live-action cinematic photography，不是"拟真渲染"）
+- ❌ 过度磨皮 / 塑料假面 / 零毛孔 / 硅胶脸 / 蜡像感 / AI感平滑
+- ❌ 古风 / 古装 / 汉服 / 仙侠 / 武侠 / 民国 / 赛博朋克 / 科幻 / 西方奇幻 / 中世纪
+- ❌ 人体结构错误 / 肢体畸形 / 面部崩坏 / 比例失调
+- ❌ 高饱和荧光色 / 霓虹溢色 / 廉价滤镜感
+- ❌ 非中国当代都市的架空场景 / 无中文标识的 generic city
 
 ---
 
-## 完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
+## 六、完整生成示例
 
 ### 输入（分镜表行数据）
 
 | 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 林晚独立咖啡厅窗边，窗外雨滴滑落 | 咖啡厅 | 林晚 | 4s | 中景 | 缓推 | 手持咖啡杯，目光望向窗外 | 思念 / 期待 | 暖调侧光+冷蓝窗光 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | 年轻职场女性身着西装站在写字楼落地窗前，手持咖啡杯望向窗外 | 现代写字楼 | 职场女性 | 6s | 中景 | 缓推 | 侧身持杯，目光望向窗外城市天际线 | 干练/沉稳 | 窗光冷白主光，午后斜光 |
 
 ### 示例输出A（模式A · Seedream）
 
 [Prompt]
-真人写实摄影，电影级画质，超现实主义纪实，强对比度，极致细节，纹理超清晰，中景构图，人物半身入镜，皮肤细腻，面容细腻渲染，五官立体，发丝根根分明，发丝细腻渲染，女性主角立于咖啡厅窗边，双手自然捧着一杯咖啡，目光望向窗外，眼神期待又略带思念，咖啡厅暖调侧光，窗外冷蓝雨光勾勒人物边缘，木质桌椅纹理清晰，玻璃窗上的雨滴细节，现代东方气质，电影级分镜构图，超清4K画质，自然锐度，写实清晰感，画面无字幕、无水印、无标题叠字。
-Based on the reference image of 林晚, maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing by the cafe window on a rainy day, holding a coffee cup, gazing outside. Keep character appearance identical to reference.
+真人实拍摄影，真人电影剧照，当代中国都市，电影级摄影，自然光与人造光调度，真实色彩科学，真人写实摄影质感，真实皮肤纹理毛孔可见，不磨皮不硅胶脸，发丝自然质感有碎发，服饰面料纹理可见有穿着褶皱，自然微表情，真实肢体语言，中景构图，年轻职场女性身着西装站在写字楼落地窗前，手持咖啡杯侧身而立，神情利落，眼神笃定直视窗外，午后窗光从侧方斜入（约45°），冷白自然光（5000-5500K）为主光，长阴影穿过地面，玻璃幕墙呈现多层反射和城市天际线倒影，浅景深虚化窗外远景，真人写实摄影，当代中国都市电影质感，电影级摄影画面，非3D非渲染非CG，真人摄影高清画质，电影级画面质感，画面无字幕、无水印、无标题叠字、无UI元素。
+Based on the reference image of 职场女性，maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing in front of the floor-to-ceiling window of a modern office building, holding a coffee cup. Keep visual style identical to reference.
 
 ### 示例输出B（模式B · Nanobanana）
 
 ```xml
 <role>
-You are a cinematographer and storyboard artist.
+You are a live-action urban cinema storyboard photographer.
 Maintain strict visual continuity across all shots.
 </role>
 <character_reference>
-Image [1]: 林晚 — black long hair tied in a half ponytail, gentle eyes, modern casual outfit, slim body shape
+Image [1]: 职场女性 — 真人写实摄影，职场西装，干练气质，真人都市风格
 </character_reference>
 <continuity_rules>
-- Same wardrobe, hairstyle, face features across ALL shots
-- Same environment, lighting style, color grade
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
+- Same outfit, hairstyle, face features across ALL shots
+- Same live-action cinematic photography style, real human skin texture
+- Same contemporary Chinese urban scene lighting
+- Do NOT introduce 3D render, CGI, ancient Chinese style, cyberpunk or non-urban fantasy elements
 </continuity_rules>
 <shot>
-Medium shot, character standing by a cafe window on a rainy day, holding a coffee cup with both hands, gazing outside with an expression of expectation and longing, warm side light, cold blue window light creating rim light effect, wooden table texture, raindrops on glass visible, modern cinematic realism, ultra-sharp 4K, high detail, crisp textures, photorealistic clarity, no subtitles, no captions, no watermark, no title overlay.
+Medium shot, young professional woman in business suit standing in front of the floor-to-ceiling window of a modern office building, holding a coffee cup, side profile looking out the window, sharp and calm expression, determined gaze, afternoon window light entering from side at 45-degree angle, cool white natural daylight 5000-5500K as key light, long soft shadows across the floor, glass curtain wall with multi-layer reflections and city skyline, shallow depth of field blurring the distant city outside, real human skin texture with visible pores, natural hair with flyaway strands, fabric texture with subtle wear wrinkles, live-action cinematic photography, contemporary Chinese urban film look, no subtitles, no captions, no watermark, no title overlay, no UI elements.
 </shot>
 <negative>
-no plastic skin, no beauty filter, no studio lighting, no centered composition, no oversaturation, no AI generated look, no motion blur, no noise, no blurry, no out of focus, no subtitles, no captions, no watermark, no title overlay, no UI text, no ancient costume, no hanfu, no traditional Chinese architecture
+no 3D render, no CGI, no Unreal Engine, no Blender, no PBR material, no game engine, no 2D cartoon, no anime, no illustration, no hand drawn, no painting, no plastic skin, no wax face, no airbrushed, no poreless skin, no silicone face, no ancient Chinese style, no traditional costume, no cyberpunk, no sci-fi, no western fantasy, no medieval, no non-Chinese urban, no plastic mannequin, no symmetrical model pose, no branded new clothes, no showroom, no wrong anatomy, no deformed face, no broken limbs, no distorted body, no subtitles, no captions, no watermark, no title overlay, no UI text
 </negative>
 ```
 
@@ -175,18 +204,34 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 ### 情绪 → 画面词速查
 
 | 情绪 | 面容关键词 | 光线匹配 |
-|------|-----------|---------|
-| 心动 | 嘴角微扬，眼底笑意 | 暖调侧光 |
-| 悲伤 | 面色沉静，眼神黯淡 | 漫射冷光 |
-| 愤怒 | 眉眼凌厉，目光如炬 | 硬侧光高对比 |
-| 温柔 | 神情柔和，眼神专注 | 散射暖光局部 |
-| 坚定 | 神情严肃，眼神坚定 | 中性灰调 |
-| 冷漠 | 面容冷淡，眼神空远 | 冷蓝侧光 |
-| 隐忍 | 面容沉静，眼底压抑 | 低调冷光，阴影留存 |
+|---|---|---|
+| 干练/沉稳 | 神情利落，目光笃定 | 窗光冷白主光 + 轮廓自然反差 |
+| 忧伤/落寞 | 眉眼低垂，目光涣散 | 冷调漫射光 + 低反差，单光源侧打 |
+| 温柔/治愈 | 眉目舒展，眼神温润 | 大面积柔光漫射 + 暖调窗光 |
+| 冷峻/戒备 | 面部微绷，眼神锐利 | 硬光侧打 + 大光比冷暖对冲 |
+| 喜悦/鲜活 | 眼角笑纹，眼神明亮 | 充足自然光 + 高调通透 |
+| 沉思/内省 | 神情淡然，目光放远 | 单点暖光源 + 弱环境光 |
+| 疲惫/倦怠 | 眼窝微陷，目光朦胧 | 柔和漫射光 + 低反差低饱和 |
+| 坚定/决绝 | 下颌微抬，目光笔直 | 侧射硬光 + 清晰轮廓光 |
+
+### 场景 → 光源速查
+
+| 场景 | 默认光源 | 色温 |
+|---|---|---|
+| 写字楼办公室 | 窗光（日间）+ 屏幕冷光补面 | 5000-5500K主 / 6500K屏光 |
+| 咖啡厅 | 暖调顶灯/吊灯 + 窗光 | 2800-3200K主 |
+| 出租屋/公寓 | 窗光（日间）/ 台灯+窗外街灯（夜间） | 4500K日 / 2800K夜 |
+| 城市街道 | 日光（日间）/ 街灯+霓虹+车灯（夜间） | 按时刻变 |
+| 便利店（深夜） | 荧光灯管冷白 + 冰柜冷光 | 4000-5000K |
+| 天台 | 天空光为主，日光/月光/蓝调时刻 | 按时刻变 |
+| 地铁站 | 日光灯冷白 + 广告灯箱 | 4000-5000K |
+| 老城区巷弄 | 街灯暖（夜间）/ 天光+路面反射（日间） | 2000-2800K夜 |
 
 ---
 
-## 写实风格声音设计框架（王家卫/真人写实视频必读）
+## 七、写实进阶技法（声音设计 / 多光源分层 / 摄影机语言）
+
+### 七.1 写实风格声音设计框架（都市真人写实视频必读）
 
 写实真人风格的分镜视频提示词中，**必须在 motionScript 的动作轨迹之后追加 `【关键音效】` 设计块**，声音是写实风格中与画面同等重要的叙事层。
 
@@ -213,31 +258,31 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 **禁止写**：配乐/BGM/弦乐/气氛烘托音/音乐渐强——这些由音频后期统一叠加，单片段生成不写。
 
-### 底噪词库（按场景类型）
+### 底噪词库（按都市场景类型）
 
 | 场景类型 | 底噪组合 |
 |---|---|
-| 化妆间/室内片场 | `远处车流+市井人声+电风扇嗡鸣+空调外机+闷热夏夜` |
-| 片场通道/后台 | `远处片场施工低频底噪+灯架金属轻响+灯泡电流嗡鸣+遥远人声` |
-| 香港街头/都市 | `电车"叮叮"声+人行道嘈杂+远处粤语人声+摩托车引擎` |
-| 出租屋卧室 | `楼上脚步声+远处汽车+冰箱压缩机嗡鸣+城市底噪` |
-| SPA/专业室内 | `空调低鸣+远处轻微环境音乐hum（房间隐约播放）+手部动作细微声` |
-| 儿童剧场/舞台 | `剧场舞台空旷感电流嗡+空调+观众席低声议论窃窃私语（持续）` |
-| 采耳店/安静室内 | `温和低频底噪+轻微金属液体微弱声响+衣料皮革摩擦` |
+| 写字楼办公室 | `空调低鸣+键盘轻敲+远处打印机+电梯提示音（偶尔）` |
+| 咖啡厅/奶茶店 | `咖啡机蒸汽+杯具轻碰+隐约背景人声+door bell偶响` |
+| 城市街道（日间） | `车流胎噪+远处人声+行道树风过叶响+自行车铃` |
+| 城市街道（雨夜） | `雨打路面+车轮碾水声+远处霓虹电流微响+偶尔驶过车辆` |
+| 出租屋/公寓（夜） | `楼上脚步声+远处汽车+冰箱压缩机嗡鸣+城市底噪` |
+| 便利店（深夜） | `冰柜冷风机运转+荧光灯电流嗡鸣+自动门开合+收银提示音` |
+| 地铁站/车厢 | `进站广播+刹车声+人流脚步+隧道风声` |
+| 天台/屋顶 | `风声+远处城市微弱嗡鸣+偶尔的车流声` |
 
 ### 事件音材质词库
 
 | 材质/行为 | 标准声音描述 |
 |---|---|
 | 布料/衣物摩擦 | `布料摩擦"窸窸窣窣"` |
-| 盔甲/armor配件 | `armor碰撞"咔嗒咔嗒"` |
-| 皮靴脚步 | `皮靴"哒哒"踏地（on beat精确同步）` |
-| 木地板脚步 | `木地板"咚咚"踩响` |
+| 皮鞋/高跟鞋脚步 | `皮鞋"哒哒"踏地（on beat精确同步）` |
+| 木地板/瓷砖脚步 | `木地板"咚咚"踩响` / `瓷砖地面"嗒嗒"回响` |
 | 道具放置 | `[道具]放在桌面轻微闷响` |
-| 木质道具取出 | `[道具]从布袋取出轻微木质碰撞声` |
-| 门轴/帘子 | `门轴"吱呀"一声` / `厚重门帘布料"哗——"一声拨动` |
+| 咖啡杯/餐具 | `咖啡杯放在碟子上轻微碰撞声` / `杯底与木质桌面接触的轻响` |
+| 门/玻璃 | `门轴"吱呀"一声` / `玻璃门自动开合的气动声` |
 | 手机/电子 | `手机接通"嘟"一声` / `拨号音` / `手机贴耳塑料摩擦声` |
-| 电流/干扰 | `电流干扰crackling static buzz` / `屏幕电流声戛然而止` |
+| 电流/电子设备 | `键盘敲击"咔咔"声` / `打印机走纸声` |
 | 发声呼吸 | `轻微吸气"嗯！"` / `叹气"哎"` / `短促吸气后呼气` |
 
 ### 空间感描述
@@ -247,22 +292,22 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 - **画外音**：`完全在画面外，带轻微回声` / `从画面外摄影机背后传来`
 - **叠加关系**：`[主要台词]清晰可辨，不抢戏；[底噪]持续在下方`
 
-### 示例（化妆间片段）
+### 示例（写字楼片段）
 
 ```
-0-4s: [动作段落1（布料摩擦声）]
-4-8s: [动作段落2（台词）]
-| 朝向：露夏背对镜头
+0-4s: [动作段落1（转身、走向窗前）]
+4-8s: [动作段落2（持杯望向窗外，台词）]
+| 朝向：职场女性侧身面朝窗外
 
 【关键音效】
-底噪：远处车流+市井人声+电风扇嗡鸣+空调外机+闷热夏夜（全程持续）
-事件音：布料摩擦"窸窸窣窣"（0-8s持续）；armor碰撞"咔嗒"（约4s时）；牛公仔放桌面轻微闷响（4s）
-空间感：露夏台词从画面右上方传来（渐近）；小花台词从画面左边传来
+底噪：空调低鸣+键盘轻敲（渐远）+电梯提示音（偶尔）（全程持续）
+事件音：西装面料摩擦"窸窸窣窣"（0-2s）；皮鞋踏地"哒哒"（0-3s，与步伐同步）；咖啡杯放在边桌轻微闷响（约7s）
+空间感：台词从画面中央传来（近景清晰）；窗外车流声从画面外远处传来（渐弱）
 ```
 
 ---
 
-## 王家卫多色光影分层（写实风格 startFrameDesc 核心技法）
+### 七.2 都市多光源分层（写实风格 startFrameDesc 核心技法）
 
 与动漫风格不同，写实真人风格的 startFrameDesc 第④要素（光影）**允许且推荐**使用三层命名光源结构（这是真实电影摄影的标准做法）：
 
@@ -276,27 +321,27 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 胶片：35mm Kodak Vision3 film grain，anamorphic widescreen 16:9
 ```
 
-### 王家卫调性标准光源组合
+### 都市场景标准光源组合（按七套光影方案取值）
 
 | 场景 | 主光 | 辅光 | 点缀 |
 |---|---|---|---|
-| 霓虹室内（化妆间/夜店） | 饱和粉紫霓虹光大范围泼洒 | 冷蓝窗光从右后方斜射 | 左侧暖橘钨丝灯点缀 |
-| 片场通道/后台 | 顶部工作吊灯（overhead warm）柔和打下 | 冷蓝ambient shadow在通道深处 | 局部霓虹粉紫光斑边缘 |
-| 俯拍地面（caustics） | 冷蓝波光caustics分布地面中央（缓慢流动） | 暖橘化妆台灯泡侧光 | 霓虹粉紫光柱边缘 |
-| 正面平拍（chiaroscuro） | 一侧冷白/暖黄聚光打亮脸一半 | 另一侧深陷阴影（#1A1A1A） | 暗部眼睛反射画外朱砂红/蓝光 |
+| 写字楼落地窗（日间） | 冷白窗光（5000-5500K）大范围漫射铺满室内 | 屏幕冷光（6500K）从桌面方向补面 | 玻璃幕墙反射的暖色天空点缀边缘 |
+| 咖啡厅窗边（黄昏） | 夕照暖金窗光（3000-3500K）45°侧入 | 室内暖调吊灯（2800K）从顶部补光 | 窗外冷蓝暮色透过玻璃点缀轮廓 |
+| 雨夜街道 | 湿地面反射街灯暖黄光斑（2800K）铺满地面 | 天空环境冷调漫射（6000K）作为整体基底 | 远处霓虹招牌粉紫光斑点缀边缘 |
+| 深夜公寓（单人） | 台灯暖光孤岛式照明（2800-3200K）打在人物一侧 | 窗外路灯冷调余光（4000K）从窗帘缝隙渗入 | 手机屏幕冷蓝光点缀面部下方 |
 
 ### 景深与胶片词（追加在光影描述之后）
 
 | 效果 | 描述词 |
 |---|---|
-| 极浅景深 | `极浅景深T1.4，anamorphic椭圆bokeh，背景柔焦成抽象色块` |
-| 前景脏构图 | `前景[道具]清晰锐利，中景[人物]轻度虚化，背景柔焦` |
-| caustics波光 | `[人物]脸上有缓慢流动的冷蓝色调波纹光斑，脸是波光主要承载体，地面有少量波光衬托` |
-| 空气尘埃 | `光柱里空气尘埃粒子清晰可见，暖橘灯下微尘漂浮` |
+| 都市浅景深 | `浅景深f/2.8-f/4，anamorphic椭圆bokeh，背景城市光斑虚化成抽象色块` |
+| 前景脏构图 | `前景[道具/玻璃反射]清晰锐利，中景[人物]轻度虚化，背景柔焦` |
+| 玻璃多层反射 | `[人物]处于玻璃隔断前，画面呈现前景反射+中景人物+背景延伸的多层空间` |
+| 空气尘埃/水汽 | `逆光下微尘漂浮可见，光柱穿过空气，或雨夜车灯光束中的雾气体积感` |
 
 ---
 
-## 写实摄影机语言词库（cameraDirection 专用）
+### 七.3 真人都市写实摄影机语言词库（cameraDirection 专用）
 
 在 cameraDirection 字段中使用以下词汇锁定摄影机风格：
 
@@ -304,28 +349,26 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 | 效果 | 标准词 |
 |---|---|
-| 王家卫静态 | `三脚架完全固定（locked-off shot），画面无运动，不抽帧` |
-| 手持纪实 | `手持晃动handheld camera，广角[X]mm wide lens，自然抖动` |
-| 稳定跟拍 | `steady-cam稳定，持续匀速[方向]跟拍` |
+| 固定观察 | `摄影机固定不动（locked-off shot），画面静止，让时间自己说话` |
+| 手持纪实 | `手持晃动handheld camera，幅度约±2cm，模拟呼吸感的自然抖动` |
+| 稳定器流动 | `steady-cam稳定器，平滑匀速移动，无晃动` |
 
 ### 镜头运动
 
 | 运动类型 | 标准词 |
 |---|---|
-| 推进 | `缓慢dolly in推近` |
-| 拉远 | `缓慢dolly out拉远` / `zoom out向后拉远（保持[X]度俯视角度不变）` |
-| 横移 | `和[主体]严格同步往[方向]匀速横移（绝不Z轴位移，绝不绕弧）` |
-| 环绕 | `counter-clockwise orbit [X]度，以[主体]为圆心` |
-| 跟拍 | `持续匀速倒退跟拍，镜头高度[主体]胸口位，背景纵深向镜头流动` |
-| 下摇 | `pan down向下平移，从[起点]下移到[落点]` |
-| 上摇 | `缓慢pan up跟随[手部动作]上摇，从[起点]到[落点]` |
+| 缓推 | `摄影机向主体缓慢推进，推进速率约每秒0.3米，情绪升温/真相逼近` |
+| 缓拉 | `摄影机向后缓慢拉远，拉远速率约每秒0.3米，离别/收束/揭示全貌` |
+| 跟拍 | `摄影机与人物保持约2米距离同步移动，行走跟随/城市追踪` |
+| 摇镜 | `摄影机原地水平/垂直旋转，视线转移/空间关系交代` |
+| 焦点偏移 | `Rack Focus，焦点从[前景/背景]缓慢转移至[背景/前景]，注意力的转移` |
+| 俯拍/仰拍 | `垂直俯拍，命运感/上帝视角` / `仰拍，压迫感/崇高感` |
 
 ### 特殊效果
 
 | 效果 | 标准词 |
 |---|---|
-| 荷兰角 | `荷兰角（Dutch angle）[X]度，horizon tilted to the left/right` |
-| 俯拍 | `垂直俯拍90度（top-down god's-eye view），锁定镜头` |
-| 画框分屏 | `[竖直/水平]分割线从[方向]移动+经过区域画面替换，双屏对称，持续约1秒` |
-| 跟随行走节拍 | `脚步严格按[音乐/节拍] beat，每步落地与beat精确同步` |
-
+| 玻璃反射叠层 | `透过玻璃隔断拍摄，画面叠加前景反射与后景实景，多层空间感` |
+| 街灯光斑虚化 | `背景街灯/霓虹形成大光斑虚化（bokeh），前景人物清晰` |
+| 雨夜光束 | `车灯光束穿过雨雾，产生体积光效果，光束中雨丝可见` |
+| 蓝调剪影 | `人物逆光呈半剪影状态，轮廓被天空余光勾勒，蓝调时刻天空作背景` |

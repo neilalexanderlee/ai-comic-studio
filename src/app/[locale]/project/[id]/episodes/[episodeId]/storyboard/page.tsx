@@ -86,7 +86,24 @@ export default function EpisodeStoryboardPage() {
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const [generating, setGenerating] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
-  const [videoRatio, setVideoRatio] = useState("16:9");
+  // 画面比例：项目级持久化设置（DB projects.video_ratio），而非页面临时状态，
+  // 这样分镜生成、视频生成、视频编辑器画布尺寸三处才能保持一致。
+  const videoRatio = project?.videoRatio ?? "16:9";
+  async function handleVideoRatioChange(ratio: string) {
+    if (!project || ratio === videoRatio) return;
+    const prevRatio = videoRatio;
+    useProjectStore.getState().updateVideoRatio(ratio);
+    try {
+      await apiFetch(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoRatio: ratio }),
+      });
+    } catch {
+      useProjectStore.getState().updateVideoRatio(prevRatio);
+      toast.error("画面比例保存失败");
+    }
+  }
   const [videoGenerationResolution, setVideoGenerationResolution] = useState<"480p" | "720p">("480p");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [versions, setVersions] = useState<StoryboardVersion[]>([]);
@@ -869,7 +886,7 @@ export default function EpisodeStoryboardPage() {
             <InlineModelPicker capability="text" />
             <InlineModelPicker capability="image" />
             <InlineModelPicker capability="video" />
-            <VideoRatioPicker value={videoRatio} onChange={setVideoRatio} />
+            <VideoRatioPicker value={videoRatio} onChange={handleVideoRatioChange} />
             <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
               {(["480p", "720p"] as const).map((res) => (
                 <button

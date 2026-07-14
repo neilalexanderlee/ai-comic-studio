@@ -9,6 +9,7 @@ import { getUserIdFromRequest } from "@/lib/get-user-id";
 import {
   addImportLog,
   chunkText,
+  mapWithConcurrency,
   canonicalCharacterNameKey,
   displayNameForMergedCharacter,
   pickShorterDisplayName,
@@ -75,22 +76,25 @@ export async function POST(
     ? `[官方角色名称表 — 所有角色名必须与下表完全一致]\n${charTableMatch[0].trim()}\n\n`
     : "";
 
-  // ── Pass 1: LLM name enumeration (full text, no chunks) ──────────────────
-  // Ask the model to list every character name first. Simple task → fast.
-  // The resulting list becomes a mandatory cast list injected into every chunk
-  // in pass-2, preventing characters from being silently dropped.
+  // ── Pass 1: LLM name enumeration ─────────────────────────────────────────
+  // 长剧本逐块枚举并合并名单，避免把完整正文一次塞进模型上下文。
+  // 结果会作为 pass-2 的强制角色名单，减少角色静默遗漏。
   let confirmedNames: string[] = [];
   try {
-    console.log("[ImportChars] ── Pass 1: extracting name list from full text ──");
-    const { text: nameListText } = await generateText({
-      model,
-      system: IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM,
-      prompt: buildImportCharacterNameExtractionPrompt(body.text),
+    console.log(`[ImportChars] ── Pass 1: extracting names from ${chunks.length} chunks ──`);
+    const nameLists = await mapWithConcurrency(chunks, 3, async (chunk) => {
+      const { text: nameListText } = await generateText({
+        model,
+        system: IMPORT_CHARACTER_NAME_EXTRACTION_SYSTEM,
+        prompt: buildImportCharacterNameExtractionPrompt(chunk),
+      });
+      const parsed: unknown = JSON.parse(extractJSON(nameListText));
+      return Array.isArray(parsed)
+        ? parsed.filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+        : [];
     });
-    console.log("[ImportChars] Pass-1 raw:", nameListText.slice(0, 400));
-    const parsed = JSON.parse(extractJSON(nameListText));
-    if (Array.isArray(parsed) && parsed.every((n) => typeof n === "string")) {
-      confirmedNames = parsed.filter((n) => n.trim().length > 0);
+    confirmedNames = [...new Set(nameLists.flat().map((name) => name.trim()))];
+    if (confirmedNames.length > 0) {
       console.log(`[ImportChars] Pass-1 confirmed (${confirmedNames.length}):`, confirmedNames.join("、"));
       await addImportLog(projectId, 2, "running",
         `第一轮名单：${confirmedNames.join("、")}`);
@@ -104,11 +108,13 @@ export async function POST(
     `开始角色提取，共 ${chunks.length} 块`
   );
 
-  // Concurrent extraction from all chunks
+  // Bounded concurrent extraction from all chunks
   let chunkResults: ExtractedChar[][];
   try {
-    chunkResults = await Promise.all(
-      chunks.map(async (chunk, idx) => {
+    chunkResults = await mapWithConcurrency(
+      chunks,
+      3,
+      async (chunk, idx) => {
         await addImportLog(
           projectId, 2, "running",
           `正在处理第 ${idx + 1}/${chunks.length} 块...`
@@ -145,7 +151,7 @@ export async function POST(
           });
           return JSON.parse(extractJSON(retry.text)) as ExtractedChar[];
         }
-      })
+      }
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
