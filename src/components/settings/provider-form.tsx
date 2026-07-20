@@ -149,6 +149,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           protocol: provider.protocol,
+          capability: provider.capability,
           baseUrl: provider.baseUrl,
           apiKey: apiKeyInput.trim(),
         }),
@@ -229,13 +230,13 @@ export function ProviderForm({ provider }: ProviderFormProps) {
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label className="text-xs">Access Key (AK)</Label>
+              <Label className="text-xs">Access Key ID (AK)</Label>
               <div className="relative">
                 <Input
                   type={showKey ? "text" : "password"}
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
-                  placeholder="Access Key..."
+                  placeholder="火山引擎 IAM Access Key ID..."
                   className="pr-10"
                 />
                 <button
@@ -248,13 +249,13 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Secret Key (SK)</Label>
+              <Label className="text-xs">Secret Access Key (SK)</Label>
               <div className="relative">
                 <Input
                   type={showSecretKey ? "text" : "password"}
                   value={secretKeyInput}
                   onChange={(e) => setSecretKeyInput(e.target.value)}
-                  placeholder="Secret Key..."
+                  placeholder="与 AK 同一条密钥的 Secret Access Key..."
                   className="pr-10"
                 />
                 <button
@@ -267,6 +268,11 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               </div>
             </div>
           </div>
+          {(provider.protocol === "jimeng" || provider.protocol === "jimeng-video") && (
+            <p className="text-[11px] leading-relaxed text-[--text-muted]">
+              请填写火山引擎 IAM「访问控制 → 密钥管理」中同一条未禁用的 AK/SK；不是方舟 API Key 或 Bearer Token。
+            </p>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
+import {
+  isGeminiModelCompatible,
+  type ModelCapability,
+} from "@/lib/ai/model-capabilities";
 
 interface ListRequest {
   protocol: string;
   baseUrl: string;
   apiKey: string;
+  capability?: ModelCapability;
 }
 
 interface ModelItem {
@@ -12,7 +17,7 @@ interface ModelItem {
 }
 
 function buildModelsUrl(baseUrl: string): string {
-  let url = baseUrl.replace(/\/+$/, "");
+  const url = baseUrl.replace(/\/+$/, "");
   // If baseUrl already ends with /v1, don't duplicate
   if (url.endsWith("/v1")) {
     return url + "/models";
@@ -41,17 +46,28 @@ async function fetchModels(baseUrl: string, apiKey: string): Promise<ModelItem[]
 
 // Common Gemini models — returned as fallback when googleapis.com is unreachable
 // (e.g. network blocked in some regions). Update this list as new models are released.
-const GEMINI_FALLBACK: ModelItem[] = [
-  { id: "gemini-2.5-pro-preview-05-06",    name: "Gemini 2.5 Pro Preview (05-06)" },
-  { id: "gemini-2.5-flash-preview-05-20",  name: "Gemini 2.5 Flash Preview (05-20)" },
-  { id: "gemini-2.0-flash",                name: "Gemini 2.0 Flash" },
-  { id: "gemini-2.0-flash-lite",           name: "Gemini 2.0 Flash Lite" },
-  { id: "gemini-1.5-pro",                  name: "Gemini 1.5 Pro" },
-  { id: "gemini-1.5-flash",                name: "Gemini 1.5 Flash" },
-  { id: "gemini-1.5-flash-8b",             name: "Gemini 1.5 Flash 8B" },
-];
+const GEMINI_FALLBACK: Record<"text" | "image" | "video", ModelItem[]> = {
+  text: [
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash" },
+  ],
+  image: [
+    { id: "gemini-2.5-flash-image", name: "Nano Banana" },
+    { id: "gemini-3-pro-image-preview", name: "Nano Banana Pro" },
+    { id: "gemini-3.1-flash-image-preview", name: "Nano Banana 2" },
+  ],
+  video: [
+    { id: "veo-3.1-generate-preview", name: "Veo 3.1" },
+    { id: "veo-3.0-generate-001", name: "Veo 3.0" },
+  ],
+};
 
-async function fetchGeminiModels(baseUrl: string, apiKey: string): Promise<ModelItem[]> {
+async function fetchGeminiModels(
+  baseUrl: string,
+  apiKey: string,
+  capability: ModelCapability = "text"
+): Promise<ModelItem[]> {
   const base = baseUrl.replace(/\/+$/, "");
   const url = `${base}/v1beta/models?key=${encodeURIComponent(apiKey)}`;
 
@@ -68,14 +84,10 @@ async function fetchGeminiModels(baseUrl: string, apiKey: string): Promise<Model
     if (!data.models || !Array.isArray(data.models)) {
       throw new Error("Unexpected Gemini response format: missing models array");
     }
-    // Filter to text-capable models only (skip embedding / vision-only)
-    const textModels = data.models.filter(
-      (m) =>
-        m.name.includes("gemini") &&
-        !m.name.includes("embedding") &&
-        !m.name.includes("aqa")
+    const compatibleModels = data.models.filter((m) =>
+      isGeminiModelCompatible(m.name, capability)
     );
-    return textModels.map((m) => {
+    return compatibleModels.map((m) => {
       const id = m.name.replace(/^models\//, "");
       return { id, name: m.displayName || id };
     });
@@ -90,7 +102,10 @@ async function fetchGeminiModels(baseUrl: string, apiKey: string): Promise<Model
         err.message.includes("ENOTFOUND"))
     ) {
       console.warn("[models/list] Gemini API unreachable, returning fallback list:", err.message);
-      return GEMINI_FALLBACK;
+      const fallbackCapability = capability === "image" || capability === "video"
+        ? capability
+        : "text";
+      return GEMINI_FALLBACK[fallbackCapability];
     }
     throw err;
   }
@@ -247,7 +262,7 @@ export async function POST(request: Request) {
 
     const models =
       body.protocol === "gemini"
-        ? await fetchGeminiModels(body.baseUrl, body.apiKey)
+        ? await fetchGeminiModels(body.baseUrl, body.apiKey, body.capability)
         : await fetchModels(body.baseUrl, body.apiKey);
     return NextResponse.json({ models });
   } catch (err) {

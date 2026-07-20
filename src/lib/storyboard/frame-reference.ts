@@ -1,5 +1,13 @@
 export type FrameReferenceType = "anchor_first" | "anchor_last_ai" | "cut_point";
 
+/**
+ * 首帧连续性语义：
+ * - strict_start：anchorFirst 是直拷的承接帧，视频必须以它作为第一帧
+ * - reference_redraw：anchorFirst 是参考上一帧重绘后的新图，视频仍可走 multimodal 锁角色
+ * - null/undefined：普通首帧，或历史数据
+ */
+export type AnchorFirstContinuityMode = "strict_start" | "reference_redraw";
+
 export type FrameReferencePayload = {
   shotId: string;
   frameType: FrameReferenceType;

@@ -66,25 +66,27 @@
 
 | 参数 | 说明 |
 |------|------|
-| `frameTarget` | `first` / `last` / `both` |
-| `frameReference` | 用户显式 `{ shotId, frameType }` → Seedream 参考图重绘，写 `chain_source_*` |
+| `frameTarget` | `first` / `last` |
+| `frameReference` | 用户显式 `{ shotId, frameType }` → Seedream 参考图重绘，写 `chain_source_*` + `anchor_first_continuity_mode='reference_redraw'` |
 
 **无**自动读上一镜尾帧。弹窗默认「独立生成（不参考其他分镜）」。
 
-尾帧：有 `anchor_first` 时 Seedream 生成 `anchor_last_ai`（`both` 或策略 `first_only` 时跳过尾帧）。
+尾帧：有 `anchor_first` 时 Seedream 生成 `anchor_last_ai`；UI 需要用户单独触发生成尾帧。
 
 ### 2.2 生成视频
 
 ```
-群演镜头 OR 磁盘无有效 anchor_last_ai
-  → 首帧参考图模式（仅 anchor_first）
+磁盘有有效 anchor_last_ai
+  → keyframe（anchor_first + anchor_last_ai）
+否则如果 anchor_first_continuity_mode = strict_start
+  → initialImage（严格以 anchor_first 作为视频第一帧）
 否则
-  → 首尾帧模式（anchor_first + anchor_last_ai）
+  → multimodal（anchor_first 作构图参考，角色/道具/音频作多模态参考）
 ```
 
 视频结束后：**只写本镜 `cut_point`**，不写 `anchor_last_ai`。
 
-若项目开启 **`link_shots_via_cut_point`**（UI「镜头衔接（视频尾帧）」），则在同集同版本内自动：`cut_point[i]` **路径直拷** → `anchor_first[i+1]`（见 §2.5）。
+若项目开启 **`link_shots_via_cut_point`**（UI「镜头衔接（视频尾帧）」），则在同集同版本内自动：`cut_point[i]` **路径直拷** → `anchor_first[i+1]`，并写 `anchor_first_continuity_mode='strict_start'`（见 §2.5）。
 
 ### 2.3 UI 衔接
 

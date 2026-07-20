@@ -50,6 +50,7 @@ interface Shot {
   cutPoint?: string | null;
   chainSourceShotId?: string | null;
   chainSourceType?: string | null;
+  anchorFirstContinuityMode?: "strict_start" | "reference_redraw" | null;
   propRefs?: string | null;
   dialogues: Dialogue[];
 }

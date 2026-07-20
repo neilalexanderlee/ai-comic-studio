@@ -201,6 +201,10 @@ export const shots = sqliteTable("shots", {
   chainSourceShotId: text("chain_source_shot_id"),
   /** 首帧参考类型：anchor_first | anchor_last_ai | cut_point */
   chainSourceType: text("chain_source_type"),
+  /** 首帧连续性模式：strict_start = 视频严格从 anchor_first 开始；reference_redraw = 仅追溯参考重绘来源 */
+  anchorFirstContinuityMode: text("anchor_first_continuity_mode", {
+    enum: ["strict_start", "reference_redraw"],
+  }),
   /**
    * 背景音乐注记（从剧本 【背景音】 标签提取）。
    * 仅供后期剪辑参考，绝不注入视频生成 prompt。

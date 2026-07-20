@@ -457,7 +457,9 @@ export function CharacterCard({
       }
     } catch (err) {
       console.error("Gacha generate error:", err);
-      toast.error(t("common.generationFailed"));
+      toast.error(
+        `${t("common.generationFailed")}：${err instanceof Error ? err.message : String(err)}`
+      );
     }
     setIsGachaGenerating(false);
   }
@@ -493,7 +495,7 @@ export function CharacterCard({
             setAssetTagDrafts((prev) => ({ ...prev, [asset.id]: e.target.value }))
           }
           onBlur={async (e) => {
-            let next = e.target.value.trim();
+            const next = e.target.value.trim();
             if (!next) {
               setAssetTagDrafts((prev) => {
                 const { [asset.id]: _, ...rest } = prev;
@@ -610,24 +612,25 @@ export function CharacterCard({
             </div>
           )}
 
-          {/* 私域素材库锁定状态徽标（仅正面定妆图，与角度/道具标签同角，互不冲突） */}
-          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "active" && (
+          {/* 私域素材库锁定状态徽标：正面定妆图与角度变体图都适用（角度图与主图是同一张脸，
+              同样需要绕过 Seedance 真人人脸拦截）。与角度/道具标签同角，故左移让开。 */}
+          {asset.assetType === "morph" && asset.arkAssetStatus === "active" && (
             <div
-              className="absolute bottom-1 right-1 z-10 rounded-md bg-emerald-600/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5"
+              className={`absolute bottom-1 z-10 rounded-md bg-emerald-600/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5 ${asset.angle ? "right-9" : "right-1"}`}
               title="已锁定到私域素材库，视频生成时优先使用此素材绕过真人人脸拦截"
             >
               <ShieldCheck className="h-2 w-2" />已锁定
             </div>
           )}
-          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "pending" && (
-            <div className="absolute bottom-1 right-1 z-10 rounded-md bg-blue-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5">
+          {asset.assetType === "morph" && asset.arkAssetStatus === "pending" && (
+            <div className={`absolute bottom-1 z-10 rounded-md bg-blue-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5 ${asset.angle ? "right-9" : "right-1"}`}>
               <Loader2 className="h-2 w-2 animate-spin" />审核中
             </div>
           )}
-          {asset.assetType === "morph" && !asset.angle && asset.arkAssetStatus === "failed" && (
+          {asset.assetType === "morph" && asset.arkAssetStatus === "failed" && (
             <div
-              className="absolute bottom-1 right-1 z-10 rounded-md bg-red-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5"
-              title="火山审核未通过，可能被判定为疑似真人；可更换图片后重试"
+              className={`absolute bottom-1 z-10 rounded-md bg-red-500/85 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm flex items-center gap-0.5 ${asset.angle ? "right-9" : "right-1"}`}
+              title="火山审核未通过，可能被判定为疑似真人；可重试锁定"
             >
               <ShieldAlert className="h-2 w-2" />失败
             </div>
@@ -667,8 +670,10 @@ export function CharacterCard({
           </button>
         )}
 
-        {/* 锁定到私域素材库：仅正面原图（angle=null）且有图片时显示，用于真人写实风格视频生成解锁 */}
-        {!asset.angle && asset.assetType === "morph" && asset.imagePath && asset.arkAssetStatus !== "active" && (
+        {/* 锁定到私域素材库：正面原图 + 角度变体图都支持，用于真人写实风格视频生成解锁。
+            正面图锁定时会自动带上当时已存在的角度图；这里额外给角度图留一个独立入口，
+            覆盖「角度图是锁定之后才生成」或「自动锁定失败（如限流）」这两种漏网场景。 */}
+        {asset.assetType === "morph" && asset.imagePath && asset.arkAssetStatus !== "active" && (
           <button
             onClick={() => handleLockToArk(asset.id)}
             disabled={lockingAssetId === asset.id}
@@ -706,7 +711,9 @@ export function CharacterCard({
           {assets.map(asset => renderAssetSlot(asset))}
           
           {/* Add Asset Buttons */}
-          <div className="flex-shrink-0 self-end mb-1 flex flex-col gap-2">
+          <div className="flex-shrink-0 flex flex-col gap-1">
+            {/* 占位：与形态卡槽的标签输入框等高，保证下方添加按钮与图片框顶部对齐 */}
+            <div className="invisible select-none text-[11px] font-semibold text-center py-0.5 border border-transparent rounded-full">占位</div>
             <button
               onClick={() => handleAddAsset("morph")}
               title={t("character.addMorphTooltip")}
@@ -720,7 +727,7 @@ export function CharacterCard({
             <button
               onClick={() => handleAddAsset("prop")}
               title={t("character.addPropTooltip")}
-              className="w-[140px] rounded-lg border border-dashed border-amber-300 flex items-center justify-center gap-1.5 py-1.5 text-amber-600 hover:bg-amber-50 hover:border-amber-400 transition-all text-xs font-medium"
+              className="w-[140px] mt-1 rounded-lg border border-dashed border-amber-300 flex items-center justify-center gap-1.5 py-1.5 text-amber-600 hover:bg-amber-50 hover:border-amber-400 transition-all text-xs font-medium"
             >
               <Sword className="h-3 w-3" />
               添加道具图

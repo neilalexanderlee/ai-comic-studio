@@ -3,6 +3,7 @@ import type { AIProvider, TextOptions, ImageOptions } from "../types";
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { isGeminiModelCompatible } from "../model-capabilities";
 
 export class GeminiProvider implements AIProvider {
   private client: GoogleGenAI;
@@ -58,6 +59,11 @@ export class GeminiProvider implements AIProvider {
 
   async generateImage(prompt: string, options?: ImageOptions): Promise<string> {
     const model = options?.model || this.defaultModel;
+    if (!isGeminiModelCompatible(model, "image")) {
+      throw new Error(
+        `Gemini 模型 ${model} 不支持图片输出；请选择模型名包含 image 的 Nano Banana 图片模型`
+      );
+    }
 
     // Build multimodal parts: reference images + text prompt
     const parts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
@@ -108,8 +114,13 @@ CRITICAL CHARACTER CONSISTENCY RULES:
       config: { responseModalities: ["image", "text"] },
     });
 
-    const responseParts = response.candidates?.[0]?.content?.parts;
-    if (!responseParts) throw new Error("No image returned from Gemini");
+    const candidate = response.candidates?.[0];
+    const responseParts = candidate?.content?.parts;
+    if (!responseParts) {
+      throw new Error(
+        `Gemini 未返回图片候选（model=${model}, finishReason=${candidate?.finishReason ?? "unknown"}）`
+      );
+    }
 
     for (const part of responseParts) {
       if (part.inlineData?.data) {
@@ -123,6 +134,15 @@ CRITICAL CHARACTER CONSISTENCY RULES:
         return filepath;
       }
     }
-    throw new Error("No image data found in Gemini response");
+    const responseText = responseParts
+      .map((part) => part.text?.trim())
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 240);
+    throw new Error(
+      `Gemini 未返回图片数据（model=${model}, finishReason=${candidate?.finishReason ?? "unknown"}${
+        responseText ? `, response=${responseText}` : ""
+      }）`
+    );
   }
 }

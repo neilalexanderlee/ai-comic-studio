@@ -284,7 +284,7 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 
 **视频生成模式因此的影响：**
 - `anchorLastAi` 几乎不存在（用户极少主动生成尾帧）
-- 视频生成默认路径：有命名角色 → `multimodal` 模式；cutPoint 继承 → `initialImage` 模式
+- 视频生成默认路径：普通首帧/参考图重绘首帧 → `multimodal` 模式；直拷承接帧（`anchorFirstContinuityMode="strict_start"`）→ `initialImage` 模式
 
 ### 7b. 视频生成三路分流 — SingleVideoMode
 
@@ -294,11 +294,13 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 
 ```
 1. shotFrameFileOnDisk(shot.anchorLastAi) → "keyframe"     // 首尾帧双锁（最强）
-2. shot.chainSourceShotId                 → "initialImage" // cutPoint 继承，时序连续优先
+2. shot.anchorFirstContinuityMode === "strict_start" → "initialImage" // 直拷承接帧，时序连续优先
 3. 其余所有镜头（含群演）                 → "multimodal"   // 角色外貌锁定
 ```
 
 群演镜头（无命名角色）现在也走 `multimodal`：`resolveCharacterImages` 返回空列表，`multimodalRefs` 仅含 `anchorFirst`，Seedance 降级处理，无副作用。旧的 `isCrowdShot` 字符串匹配判断已全面移除（不稳定，误判代价高）。
+
+`chainSourceShotId` / `chainSourceType` 仅表示首帧来源追溯，不再单独决定视频模式。手动选择参考图生成首帧会写 `anchorFirstContinuityMode="reference_redraw"`，继续走 `multimodal`；「承接上一镜尾帧」「承接上一集尾帧」这类路径直拷会写 `strict_start`，才走严格首帧模式。migration `0054` 会按 `anchor_first` 是否等于来源帧路径回填历史链源数据，并补回旧版「承接上一镜尾帧」漏写的链源；历史数据中 `anchorFirstContinuityMode` 为空但 `chainSourceShotId` 非空时，`resolveSingleVideoMode` 仍保留 legacy `initialImage` 兜底。
 
 **multimodal refs 组装顺序**（必须与 `buildRefEntries` 的三轮分配完全一致，否则 `@参考N` 编号错位）：
 
@@ -758,11 +760,12 @@ src/lib/evals/
 | shot-drawer「重写文本」按钮静默失败 | `single_shot_rewrite` route handler 已按 CLAUDE.md 要求移除，但 shot-drawer 还在调用 | 从 shot-drawer.tsx 移除该按钮及 state；用分镜页「批量优化文本」替代 |
 | registry.ts 用 `require()` 加载 storyboard-supervision | Next.js App Router 是纯 ESM，`require()` 运行时报 `ReferenceError` | 改为顶部 `import { STORYBOARD_REWRITE_SYSTEM, PLOT_OPTIMIZE_SYSTEM } from "./storyboard-supervision"`（无循环依赖） |
 | prompt-editor.tsx 保留废弃 key 的 hint 映射 | `ref_video_prompt` 和 `single_shot_rewrite` 从 registry 移除后，hint map 未同步清理 | 移除两条废弃 key |
-| 视频生成非正面/非近景首帧导致角色跑偏 | 原 `initialImage` 模式把首帧作为严格首帧锚定，非正面视角时 Seedance 无法同时保持构图和角色外貌 | 引入 `SingleVideoMode` 三态；有命名角色默认走 `multimodal`：首帧作构图参考(@参考1)，角色定妆图作外貌锁定(@参考2+)，cutPoint 继承帧/群演保留 `initialImage` |
+| 视频生成非正面/非近景首帧导致角色跑偏 | 原 `initialImage` 模式把首帧作为严格首帧锚定，非正面视角时 Seedance 无法同时保持构图和角色外貌 | 引入 `SingleVideoMode` 三态；普通首帧默认走 `multimodal`：首帧作构图参考(@参考1)，角色定妆图作外貌锁定(@参考2+)；仅 `strict_start` 承接帧走 `initialImage` |
 | `frameTarget: "both"` 被服务端默认采用但客户端已停止发送 | 清理时机滞后，服务端 default 为 `"both"` 而客户端全路径已改为显式 `"first"` | 服务端 default 改为 `"first"`，`"both"` 分支整体移除，类型收窄为 `"first" \| "last"` |
 | multimodal 模式 `@参考N` 编号与 refs 数组错位 | prompt 端用全量 `singleVideoShotChars` 构建编号，API 端 refs 只含有磁盘图片的角色，无图角色导致后续编号系统性偏移 | 在 prompt 构建前预先调用 `resolveCharacterImages`（`needPreResolveCharImages`），两端使用同一份已过滤角色列表 |
 | 三/四视图角度变体在视频生成时被忽略 | `buildRefEntries` 未为角度变体分配 `@参考N`，贸然加入 `multimodalRefs` 会导致后续编号整体错位 | 已修复：`SeedanceAsset` 加 `angleImages` 字段，`buildRefEntries` Round 1 每 asset 主图后追加角度变体，prompt 参考定义段生成"XXX四分之三侧面视图（与@参考N同一角色）"说明行，`multimodalRefs` 完全对齐；9 张上限保护优先丢角度变体 |
 | `isCrowdShot` 字符串匹配不稳定导致角色跑偏 bug 在某些镜头上无法修复 | 角色写外号/旁白省略名字时 `filterShotCharacters` 返回空，误将有角色的镜头路由到 `initialImage` | 从 `resolveSingleVideoMode` 移除 `isCrowdShot` 参数；群演统一走 `multimodal`（refs 仅含 anchorFirst，Seedance 降级无害） |
+| 手动参考图重绘首帧误进严格首帧视频模式 | `chainSourceShotId` 同时承担「来源追溯」和「strict 首帧连续性」两种语义 | 增加 `anchor_first_continuity_mode`：直拷承接写 `strict_start`；参考图重绘写 `reference_redraw`；migration `0054` 回填历史链源并补旧上一镜直拷数据；三态分流只把 `strict_start` 送入 `initialImage` |
 | LLM 状态路由（武装/日常）选错定妆图 | `determineCharacterState` 用 LLM 判断服装状态，sceneDesc 不含明确服装词时误选 | 移除整个 LLM 路由层（`determineCharacterState`/`STATE_EQUIV`/`isCoveredByTag`）；改为 `isDefault=1` 直接选图，用户在角色页手动设置哪张是当前主定妆图 |
 | 道具参考图无法按分镜绑定 | 原架构道具（武器/道具）只能通过 FrameReferencePicker 全局手选，无法持久化到特定分镜 | 增加 `shots.prop_refs`（JSON 数组，migration 0051）；ShotCard 主页和 ShotDrawer 均新增「道具参考图」缩略图勾选区（乐观更新 `localPropRefs`）；帧生成时追加到 `refImages` 末尾，视频生成时作第四轮加入 `multimodalRefs`（不占 `@参考N` 编号位置，受 9 张上限保护） |
 | Seedance 2.0 多模态参考图上限误记为 14 | 沿用了 Seedream 图片生成的 14 张上限，未查 Seedance 视频生成官方文档；且误将音频计入图片配额（音频走独立的 `audio_url` 类型，另有上限 3 个） | 官方文档确认 Seedance 2.0 多模态参考生视频 1~9 张图片；`MAX_MULTIMODAL_REFS` 改为 9；budget 计算移除 `audioCount`（`generate/route.ts`） |

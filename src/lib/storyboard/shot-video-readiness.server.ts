@@ -6,12 +6,12 @@ import type { EpisodeVideoBlockedShot, VideoReadinessIssue } from "@/lib/storybo
  * 单镜视频生成模式（三态）：
  *
  *   "keyframe"     — 首尾帧模式：anchorFirst + anchorLastAi 同时存在，两帧强约束（最优）
- *   "initialImage" — 严格首帧模式：仅 cutPoint 继承镜头（像素级时序连续）
+ *   "initialImage" — 严格首帧模式：仅显式 strict_start 承接镜头（像素级时序连续）
  *   "multimodal"   — 多模态参考模式：anchorFirst 作构图参考，角色定妆图锁定外貌
  *
  * 决策顺序：
  *   1. anchorLastAi 在磁盘 → "keyframe"（最强约束，两帧双锁）
- *   2. chainSourceShotId 非空（cutPoint 继承）→ "initialImage"（像素级连续优先）
+ *   2. anchorFirstContinuityMode === "strict_start" → "initialImage"（像素级连续优先）
  *   3. 其余所有镜头（含群演）→ "multimodal"
  *
  * 注意：群演镜头（无命名角色）不再单独路由到 initialImage。
@@ -21,10 +21,16 @@ import type { EpisodeVideoBlockedShot, VideoReadinessIssue } from "@/lib/storybo
 export type SingleVideoMode = "initialImage" | "keyframe" | "multimodal";
 
 export function resolveSingleVideoMode(
-  shot: { anchorLastAi?: string | null; chainSourceShotId?: string | null }
+  shot: {
+    anchorLastAi?: string | null;
+    chainSourceShotId?: string | null;
+    anchorFirstContinuityMode?: string | null;
+  }
 ): SingleVideoMode {
   if (shotFrameFileOnDisk(shot.anchorLastAi)) return "keyframe";
-  if (shot.chainSourceShotId) return "initialImage";
+  if (shot.anchorFirstContinuityMode === "strict_start") return "initialImage";
+  // Legacy rows created before anchorFirstContinuityMode existed used chainSourceShotId as the strict-start signal.
+  if (shot.anchorFirstContinuityMode == null && shot.chainSourceShotId) return "initialImage";
   return "multimodal";
 }
 
@@ -42,7 +48,11 @@ type ShotForVideoScan = {
 
 /** @deprecated 用 resolveSingleVideoMode 替代 */
 export function shouldUseFirstFrameVideoMode(
-  shot: { anchorLastAi?: string | null; chainSourceShotId?: string | null }
+  shot: {
+    anchorLastAi?: string | null;
+    chainSourceShotId?: string | null;
+    anchorFirstContinuityMode?: string | null;
+  }
 ): boolean {
   return resolveSingleVideoMode(shot) !== "keyframe";
 }

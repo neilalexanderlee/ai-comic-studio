@@ -29,7 +29,7 @@ import {
 
 } from "lucide-react";
 import { FrameReferencePicker } from "./frame-reference-picker";
-import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
+import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { Scissors } from "lucide-react";
@@ -87,6 +87,10 @@ interface ShotCardProps {
   prevCutPoint?: string | null;
   /** 上一镜 AI 尾帧 anchor_last_ai（参考用） */
   prevAnchorLastAi?: string | null;
+  /** 上一镜 id，用于承接后进入 strict initialImage 链源模式 */
+  prevChainFrameShotId?: string | null;
+  /** 上一镜实际承接帧类型：优先 cut_point，其次 anchor_last_ai */
+  prevChainFrameType?: FrameReferenceType | null;
   /** 同版本其他分镜（用于首帧参考图选择器） */
   frameRefShots?: Array<{
     id: string;
@@ -98,6 +102,8 @@ interface ShotCardProps {
   chainSourceShotId?: string | null;
   chainSourceType?: string | null;
   chainSourceSequence?: number | null;
+  /** "strict_start"=像素级严格首帧承接；"reference_redraw"/null=普通。决定视频生成用 initialImage 还是 multimodal 模式 */
+  anchorFirstContinuityMode?: string | null;
   /** Track 分组标识（Seedance 多参模式批量生成用） */
   track?: string | null;
   /** 本镜命名角色数量（用于动态计算用户可手选的参考图上限） */
@@ -201,10 +207,13 @@ export function ShotCard({
   videoGenerationResolution,
   prevCutPoint,
   prevAnchorLastAi,
+  prevChainFrameShotId,
+  prevChainFrameType,
   frameRefShots = [],
   chainSourceShotId,
   chainSourceType,
   chainSourceSequence,
+  anchorFirstContinuityMode,
   track,
   namedCharacterCount = 0,
   propRefs,
@@ -212,7 +221,7 @@ export function ShotCard({
 }: ShotCardProps) {
   const t = useTranslations();
   const videoReadiness = getShotVideoReadiness(
-    { anchorFirst, anchorLastAi }
+    { anchorFirst, anchorLastAi, chainSourceShotId, anchorFirstContinuityMode }
   );
   const canGenerateVideo = videoReadiness.ready;
   const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);
@@ -226,6 +235,8 @@ export function ShotCard({
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
+    prevChainFrameShotId,
+    prevChainFrameType,
     namedCharacterCount,
     onUpdate,
   });
@@ -589,7 +600,7 @@ export function ShotCard({
               <Textarea
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
-                onBlur={() => patchShot({ prompt: editPrompt })}
+                onBlur={async () => { await patchShot({ prompt: editPrompt }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.prompt")}
               />
@@ -600,7 +611,7 @@ export function ShotCard({
                   <Textarea
                     value={editStartFrame}
                     onChange={(e) => setEditStartFrame(e.target.value)}
-                    onBlur={() => patchShot({ startFrameDesc: editStartFrame })}
+                    onBlur={async () => { await patchShot({ startFrameDesc: editStartFrame }); onUpdate(); }}
                     rows={2}
                     placeholder={t("shot.startFrame")}
                     className="border-blue-200 bg-blue-50/30 text-sm"
@@ -611,7 +622,7 @@ export function ShotCard({
                   <Textarea
                     value={editEndFrame}
                     onChange={(e) => setEditEndFrame(e.target.value)}
-                    onBlur={() => patchShot({ endFrameDesc: editEndFrame })}
+                    onBlur={async () => { await patchShot({ endFrameDesc: editEndFrame }); onUpdate(); }}
                     rows={2}
                     placeholder={t("shot.endFrame")}
                     className="border-amber-200 bg-amber-50/30 text-sm"
@@ -623,7 +634,7 @@ export function ShotCard({
               <Textarea
                 value={editMotionScript}
                 onChange={(e) => setEditMotionScript(e.target.value)}
-                onBlur={() => patchShot({ motionScript: editMotionScript })}
+                onBlur={async () => { await patchShot({ motionScript: editMotionScript }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.motionScript")}
                 className="border-emerald-200 bg-emerald-50/30 text-sm"
@@ -634,7 +645,7 @@ export function ShotCard({
               <input
                 value={editCameraDirection}
                 onChange={(e) => setEditCameraDirection(e.target.value)}
-                onBlur={() => patchShot({ cameraDirection: editCameraDirection })}
+                onBlur={async () => { await patchShot({ cameraDirection: editCameraDirection }); onUpdate(); }}
                 className="w-full rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
                 placeholder="static / pan-left / zoom-in ..."
               />
@@ -806,7 +817,7 @@ export function ShotCard({
             <Textarea
               value={editVideoPrompt}
               onChange={(e) => setEditVideoPrompt(e.target.value)}
-              onBlur={() => patchShot({ videoPrompt: editVideoPrompt })}
+              onBlur={async () => { await patchShot({ videoPrompt: editVideoPrompt }); onUpdate(); }}
               className="mb-2 min-h-[5rem] resize-none font-mono text-xs leading-relaxed"
             />
           )}

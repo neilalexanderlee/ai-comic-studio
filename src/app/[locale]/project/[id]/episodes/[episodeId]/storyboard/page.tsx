@@ -268,6 +268,8 @@ export default function EpisodeStoryboardPage() {
       remoteVideoLastDownloadAt: shot.remoteVideoLastDownloadAt,
       videoResolution: shot.videoResolution,
       dialogues: shot.dialogues || [],
+      chainSourceShotId: shot.chainSourceShotId,
+      anchorFirstContinuityMode: shot.anchorFirstContinuityMode,
       propRefs: shot.propRefs ?? null,
       availablePropAssets,
     };
@@ -1007,6 +1009,12 @@ export default function EpisodeStoryboardPage() {
               : null;
             const shotTrack = (shot as { track?: string | null }).track ?? null;
             const prevTrack = index > 0 ? ((project.shots[index - 1] as { track?: string | null }).track ?? null) : null;
+            const prevShot = index > 0 ? project.shots[index - 1] : null;
+            const prevChainFrameType = prevShot?.cutPoint
+              ? "cut_point"
+              : prevShot?.anchorLastAi
+                ? "anchor_last_ai"
+                : null;
             const isTrackStart = shotTrack !== null && shotTrack !== prevTrack;
             const trackVideoInfo = shotTrack ? trackVideoMap[shotTrack] : null;
             return (
@@ -1063,11 +1071,14 @@ export default function EpisodeStoryboardPage() {
               isCompact={openDrawerShotId !== null}
               onOpenDrawer={(id) => setOpenDrawerShotId(id)}
               batchGeneratingVideoPrompts={generatingVideoPrompts}
-              prevCutPoint={index > 0 ? project.shots[index - 1]?.cutPoint : null}
-              prevAnchorLastAi={index > 0 ? project.shots[index - 1]?.anchorLastAi : null}
+              prevCutPoint={prevShot?.cutPoint ?? null}
+              prevAnchorLastAi={prevShot?.anchorLastAi ?? null}
+              prevChainFrameShotId={prevChainFrameType ? prevShot?.id : null}
+              prevChainFrameType={prevChainFrameType}
               chainSourceShotId={shot.chainSourceShotId}
               chainSourceType={shot.chainSourceType}
               chainSourceSequence={chainSourceSequence ?? null}
+              anchorFirstContinuityMode={shot.anchorFirstContinuityMode}
               frameRefShots={project.shots.map((s) => ({
                 id: s.id,
                 sequence: s.sequence,
@@ -1094,6 +1105,12 @@ export default function EpisodeStoryboardPage() {
       {openDrawerShotId && (() => {
         const drawerIndex = project.shots.findIndex((s) => s.id === openDrawerShotId);
         const drawerShot = drawerIndex >= 0 ? project.shots[drawerIndex] : null;
+        const prevDrawerShot = drawerIndex > 0 ? project.shots[drawerIndex - 1] : null;
+        const prevDrawerChainFrameType = prevDrawerShot?.cutPoint
+          ? "cut_point"
+          : prevDrawerShot?.anchorLastAi
+            ? "anchor_last_ai"
+            : null;
         const chainSourceSequence = drawerShot?.chainSourceShotId
           ? project.shots.find((s) => s.id === drawerShot.chainSourceShotId)?.sequence ?? null
           : null;
@@ -1116,8 +1133,10 @@ export default function EpisodeStoryboardPage() {
             anyGenerating={anyGenerating}
             videoGenerationResolution={videoGenerationResolution}
             showAdoptPrevEpisode={drawerIndex === 0 && canAdoptPrevEpisode}
-            prevCutPoint={drawerIndex > 0 ? project.shots[drawerIndex - 1]?.cutPoint : null}
-            prevAnchorLastAi={drawerIndex > 0 ? project.shots[drawerIndex - 1]?.anchorLastAi : null}
+            prevCutPoint={prevDrawerShot?.cutPoint ?? null}
+            prevAnchorLastAi={prevDrawerShot?.anchorLastAi ?? null}
+            prevChainFrameShotId={prevDrawerChainFrameType ? prevDrawerShot?.id : null}
+            prevChainFrameType={prevDrawerChainFrameType}
             frameRefShots={project.shots.map((s) => ({
               id: s.id,
               sequence: s.sequence,

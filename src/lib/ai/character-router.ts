@@ -13,7 +13,13 @@ export type CharacterAssets = {
  * Selection logic: isDefault=1 asset first, fallback to first morph, then blueprint.
  * Also returns angle variant images (3q / profile / back) and audio path.
  */
-export type AngleImage = { angle: string; path: string };
+export type AngleImage = {
+  angle: string;
+  path: string;
+  /** 若该角度变体也已注册进私域素材库且状态为 active，视频生成时应优先用 asset:// 引用 */
+  arkAssetId?: string | null;
+  arkAssetStatus?: "none" | "pending" | "active" | "failed" | null;
+};
 
 export type ResolvedCharacterImage = {
   name: string;
@@ -87,7 +93,12 @@ export async function resolveCharacterImages(
       for (const angle of ANGLE_ORDER) {
         const av = angleAssets.find(a => a.tag === selectedTag && a.angle === angle && a.imagePath && fs.existsSync(a.imagePath));
         if (av?.imagePath) {
-          angleImages.push({ angle, path: av.imagePath });
+          angleImages.push({
+            angle,
+            path: av.imagePath,
+            arkAssetId: av.arkAssetId ?? null,
+            arkAssetStatus: av.arkAssetStatus ?? null,
+          });
         }
       }
 

@@ -163,7 +163,16 @@ export function ShotFrameAssets({
 
   async function handleClearFrame(field: EditableField) {
     try {
-      await patchShot({ [field]: null });
+      await patchShot(
+        field === "anchorFirst"
+          ? {
+              anchorFirst: null,
+              chainSourceShotId: null,
+              chainSourceType: null,
+              anchorFirstContinuityMode: null,
+            }
+          : { [field]: null }
+      );
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "清除失败");

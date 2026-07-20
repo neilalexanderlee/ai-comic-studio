@@ -35,9 +35,19 @@ export async function POST(
   const filepath = path.join(dir, filename);
   fs.writeFileSync(filepath, buffer);
 
+  const updateFields =
+    field === "anchorFirst"
+      ? {
+          [field as AllowedField]: filepath,
+          chainSourceShotId: null,
+          chainSourceType: null,
+          anchorFirstContinuityMode: null,
+        }
+      : { [field as AllowedField]: filepath };
+
   const [updated] = await db
     .update(shots)
-    .set({ [field as AllowedField]: filepath })
+    .set(updateFields)
     .where(eq(shots.id, shotId))
     .returning();
 

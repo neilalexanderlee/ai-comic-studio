@@ -65,6 +65,7 @@ export async function POST(
       anchorFirst: tail.path,
       chainSourceShotId: tail.sourceShotId,
       chainSourceType: tail.sourceType,
+      anchorFirstContinuityMode: "strict_start",
     })
     .where(eq(shots.id, shotId));
 
@@ -73,5 +74,6 @@ export async function POST(
     anchorFirst: tail.path,
     chainSourceShotId: tail.sourceShotId,
     chainSourceType: tail.sourceType,
+    anchorFirstContinuityMode: "strict_start",
   });
 }

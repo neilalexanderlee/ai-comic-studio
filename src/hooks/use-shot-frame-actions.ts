@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api-fetch";
 import { useModelStore } from "@/stores/model-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import type { FrameReferenceChoice, FrameRefPickerShot } from "@/components/editor/frame-reference-picker";
+import type { FrameReferenceType } from "@/lib/storyboard/frame-reference";
 
 /** Seedream API 最大参考图数量（与 generate/route.ts 的 MAX_REFERENCE_IMAGES 保持一致） */
 const API_MAX_REF_IMAGES = 14;
@@ -28,6 +29,8 @@ export type UseShotFrameActionsOptions = {
   frameRefShots?: FrameRefPickerShot[];
   prevCutPoint?: string | null;
   prevAnchorLastAi?: string | null;
+  prevChainFrameShotId?: string | null;
+  prevChainFrameType?: FrameReferenceType | null;
   /** 本镜命名角色数量，用于动态计算用户可手选的参考图上限 */
   namedCharacterCount?: number;
   onUpdate: () => void;
@@ -42,6 +45,8 @@ export function useShotFrameActions({
   frameRefShots = [],
   prevCutPoint = null,
   prevAnchorLastAi = null,
+  prevChainFrameShotId = null,
+  prevChainFrameType = null,
   namedCharacterCount = 0,
   onUpdate,
 }: UseShotFrameActionsOptions) {
@@ -166,10 +171,15 @@ export function useShotFrameActions({
   }
 
   async function handleAdoptPrevChainFrame() {
-    if (!prevChainFrame) return;
+    if (!prevChainFrame || !prevChainFrameShotId || !prevChainFrameType) return;
     setAdoptingPrevFrame(true);
     try {
-      await patchShot({ anchorFirst: prevChainFrame });
+      await patchShot({
+        anchorFirst: prevChainFrame,
+        chainSourceShotId: prevChainFrameShotId,
+        chainSourceType: prevChainFrameType,
+        anchorFirstContinuityMode: "strict_start",
+      });
       onUpdate();
       toast.success("已承接上一镜尾帧为本镜首帧");
     } catch (err) {

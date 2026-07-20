@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
-import { formatChainSourceHint } from "@/lib/storyboard/frame-reference";
+import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
 import { FrameReferencePicker, type FrameRefPickerShot } from "./frame-reference-picker";
 import { ShotFrameToolbar } from "./shot-frame-toolbar";
@@ -70,6 +70,8 @@ interface DrawerShot {
   videoResolution?: string | null;
   dialogues: Dialogue[];
   chainSourceShotId?: string | null;
+  /** "strict_start"=像素级严格首帧承接；"reference_redraw"/null=普通。决定视频生成用 initialImage 还是 multimodal 模式 */
+  anchorFirstContinuityMode?: string | null;
   /** 分镜级道具绑定（JSON 数组字符串，存 character_assets.id） */
   propRefs?: string | null;
   /** 本镜角色的道具资产列表（由 storyboard/page.tsx 计算后传入） */
@@ -91,6 +93,8 @@ interface ShotDrawerProps {
   showAdoptPrevEpisode?: boolean;
   prevCutPoint?: string | null;
   prevAnchorLastAi?: string | null;
+  prevChainFrameShotId?: string | null;
+  prevChainFrameType?: FrameReferenceType | null;
   frameRefShots?: FrameRefPickerShot[];
   chainSourceSequence?: number | null;
   chainSourceType?: string | null;
@@ -113,6 +117,8 @@ export function ShotDrawer({
   showAdoptPrevEpisode = false,
   prevCutPoint = null,
   prevAnchorLastAi = null,
+  prevChainFrameShotId = null,
+  prevChainFrameType = null,
   frameRefShots = [],
   chainSourceSequence = null,
   chainSourceType = null,
@@ -180,6 +186,8 @@ export function ShotDrawer({
     frameRefShots,
     prevCutPoint,
     prevAnchorLastAi,
+    prevChainFrameShotId,
+    prevChainFrameType,
     namedCharacterCount,
     onUpdate,
   });
@@ -190,9 +198,12 @@ export function ShotDrawer({
   const hasNext = currentIndex < shots.length - 1;
 
   const hasFrame = !!(shot.anchorFirst || shot.anchorLastAi || shot.cutPoint);
-  const videoReadiness = getShotVideoReadiness(
-    { anchorFirst: shot.anchorFirst, anchorLastAi: shot.anchorLastAi }
-  );
+  const videoReadiness = getShotVideoReadiness({
+    anchorFirst: shot.anchorFirst,
+    anchorLastAi: shot.anchorLastAi,
+    chainSourceShotId: shot.chainSourceShotId,
+    anchorFirstContinuityMode: shot.anchorFirstContinuityMode,
+  });
   const canGenerateVideo = videoReadiness.ready;
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
@@ -236,7 +247,7 @@ export function ShotDrawer({
   async function handleGenerateVideoPrompt() {
     setGeneratingPrompt(true);
     try {
-      await apiFetch(`/api/projects/${projectId}/generate`, {
+      const res = await apiFetch(`/api/projects/${projectId}/generate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -245,6 +256,9 @@ export function ShotDrawer({
           modelConfig: getModelConfig(),
         }),
       });
+      const data = (await res.json()) as { videoPrompt?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || t("common.generationFailed"));
+      if (typeof data.videoPrompt === "string") setEditVideoPrompt(data.videoPrompt);
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));
@@ -338,14 +352,14 @@ export function ShotDrawer({
               <Textarea
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
-                onBlur={() => patchShot({ prompt: editPrompt })}
+                onBlur={async () => { await patchShot({ prompt: editPrompt }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.prompt")}
               />
               <Textarea
                 value={editStartFrame}
                 onChange={(e) => setEditStartFrame(e.target.value)}
-                onBlur={() => patchShot({ startFrameDesc: editStartFrame })}
+                onBlur={async () => { await patchShot({ startFrameDesc: editStartFrame }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.startFrame")}
                 className="border-blue-200 bg-blue-50/30 text-sm"
@@ -353,7 +367,7 @@ export function ShotDrawer({
               <Textarea
                 value={editEndFrame}
                 onChange={(e) => setEditEndFrame(e.target.value)}
-                onBlur={() => patchShot({ endFrameDesc: editEndFrame })}
+                onBlur={async () => { await patchShot({ endFrameDesc: editEndFrame }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.endFrame")}
                 className="border-amber-200 bg-amber-50/30 text-sm"
@@ -361,7 +375,7 @@ export function ShotDrawer({
               <Textarea
                 value={editMotionScript}
                 onChange={(e) => setEditMotionScript(e.target.value)}
-                onBlur={() => patchShot({ motionScript: editMotionScript })}
+                onBlur={async () => { await patchShot({ motionScript: editMotionScript }); onUpdate(); }}
                 rows={2}
                 placeholder={t("shot.motionScript")}
                 className="border-emerald-200 bg-emerald-50/30 text-sm"
@@ -369,7 +383,7 @@ export function ShotDrawer({
               <input
                 value={editCameraDirection}
                 onChange={(e) => setEditCameraDirection(e.target.value)}
-                onBlur={() => patchShot({ cameraDirection: editCameraDirection })}
+                onBlur={async () => { await patchShot({ cameraDirection: editCameraDirection }); onUpdate(); }}
                 className="w-full rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
                 placeholder="static / pan-left / zoom-in ..."
               />
@@ -564,7 +578,7 @@ export function ShotDrawer({
               <Textarea
                 value={editVideoPrompt}
                 onChange={(e) => setEditVideoPrompt(e.target.value)}
-                onBlur={() => patchShot({ videoPrompt: editVideoPrompt })}
+                onBlur={async () => { await patchShot({ videoPrompt: editVideoPrompt }); onUpdate(); }}
                 className="mb-2 min-h-[5rem] resize-none font-mono text-xs leading-relaxed"
               />
             )}

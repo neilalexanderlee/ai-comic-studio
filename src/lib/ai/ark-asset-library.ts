@@ -60,8 +60,8 @@ export function createArkAssetLibraryClient(credentials: ArkAssetLibraryCredenti
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const svc = new (Service as any)({
-    service: "ark",
-    version: "2024-01-01",
+    serviceName: "ark",
+    defaultVersion: "2024-01-01",
     host,
     region,
   });

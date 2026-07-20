@@ -28,10 +28,11 @@ export function VisualStylePicker() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ visualStyle: value }),
       });
-      toast.success("画风已更新");
       // 已提取的角色 description/visualHint 里写死了旧画风的锚定词/服装设定，不会跟着自动刷新。
       // 提醒用户去角色页手动触发「按画风重新生成角色描述」，避免旧画风文字污染新画风的帧/视频生成提示词。
-      toast("提示：已有角色的视觉描述可能还是旧画风文字，建议去「角色」页点击「按画风重新生成角色描述」", {
+      toast.success("画风已更新", {
+        id: "visual-style-updated",
+        description: "已有角色可能仍含旧画风描述，建议去「角色」页点击「按画风重新生成角色描述」",
         duration: 6000,
       });
     } catch {

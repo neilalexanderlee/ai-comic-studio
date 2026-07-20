@@ -35,9 +35,17 @@ import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/vi
 import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
 import { resolveCharacterImages } from "@/lib/ai/character-router";
+import { registerCharacterPortraitToArk } from "@/lib/ai/ark-asset-library";
+import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library-credentials";
+import { uploadUrl } from "@/lib/utils/upload-url";
+import { shouldResolveSeedanceMultimodalCharacterRefs } from "@/lib/ai/seedance-multimodal-refs";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
+import {
+  extractProviderErrorMessage as extractErrorMessage,
+  mapUpstreamErrorHttpStatus,
+} from "@/lib/ai/provider-error";
 import { extractShotsFromScript } from "@/lib/storyboard/extract-shot-script";
 import { filterShotCharacters } from "@/lib/storyboard/filter-shot-characters";
 import {
@@ -139,7 +147,7 @@ function stripBgmContent(text: string, bgmNote?: string | null): string {
 
   // ── 正则兜底：老数据 / LLM 生成的 videoPrompt ──────────────────────────
   // Step 1：剥离整块 【背景音】 段落（极少数情况下 tag 残留在文本里）
-  let result = text.replace(/【背景音[^】]*】[^\n【]*/gi, "").trim();
+  const result = text.replace(/【背景音[^】]*】[^\n【]*/gi, "").trim();
   // Step 2：子句级过滤，仅保留最明确的音乐词汇（不误杀合法音效描述）
   const clauses = result.split(/([，。；\n])/);
   const bgmPatterns = [
@@ -243,47 +251,6 @@ async function resumeRemoteVideoIfAvailable(params: {
       .where(eq(shots.id, params.shotId));
     return null;
   }
-}
-
-function upstreamHttpStatus(err: unknown): number | undefined {
-  if (typeof err !== "object" || err === null) return undefined;
-  const status = (err as { status?: unknown }).status;
-  return typeof status === "number" ? status : undefined;
-}
-
-function mapUpstreamErrorHttpStatus(err: unknown): number {
-  const status = upstreamHttpStatus(err);
-  if (status !== undefined && status >= 500 && status < 600) return 502;
-  return 500;
-}
-
-function extractErrorMessage(err: unknown): string {
-  if (!(err instanceof Error)) return String(err);
-
-  const status = upstreamHttpStatus(err);
-  const code =
-    typeof err === "object" && err !== null && "code" in err
-      ? String((err as { code?: unknown }).code ?? "")
-      : "";
-  const requestId =
-    typeof err === "object" && err !== null && "requestID" in err
-      ? String((err as { requestID?: unknown }).requestID ?? "")
-      : "";
-  const requestIdHint = requestId ? `（请求 ID: ${requestId}）` : "";
-
-  if (status !== undefined && status >= 500) {
-    if (code === "InternalServiceError" || status === 500) {
-      return `图像服务暂时不可用（上游 ${status}），请稍后重试或更换图像模型。${requestIdHint}`;
-    }
-    return `上游服务错误 ${status}：${err.message}${requestIdHint}`;
-  }
-
-  // Try to parse JSON error bodies (e.g. Google GenAI ApiError)
-  try {
-    const parsed = JSON.parse(err.message) as { error?: { message?: string } };
-    if (parsed?.error?.message) return parsed.error.message;
-  } catch {}
-  return err.message;
 }
 
 async function saveShotWarnings(shotId: string) {
@@ -745,31 +712,47 @@ async function handleSingleCharacterImage(
     return NextResponse.json({ error: "Character not found" }, { status: 404 });
   }
 
+  // 项目画风：用于画风硬锁与真人写实锚点注入（CLAUDE.md 核心约定 #3）
+  const [charImgProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const charImgVisualStyle = charImgProject?.visualStyle ?? "anime_2d";
+  const charImgStyleContext = {
+    visualStyle: charImgVisualStyle,
+    visualStyleTag: VISUAL_STYLE_PRESETS[charImgVisualStyle]?.tag ?? "",
+    isRealisticStyle: charImgVisualStyle === "realistic" || charImgVisualStyle === "realistic_ancient",
+  };
+
   // Resolve prompt dynamically based on tag
   let promptKey = "combat_image"; // Default to combat/morph
   if (targetTag === "日常") promptKey = "beauty_image";
   if (targetTag === "四视图") promptKey = "character_image";
 
   const slotContents = await resolveSlotContents(promptKey, { userId, projectId });
-  
+
   let prompt: string;
   if (promptKey === "beauty_image") {
-    prompt = buildBeautyImagePrompt(slotContents, character.name, character.description || "");
+    prompt = buildBeautyImagePrompt(slotContents, character.name, character.description || "", charImgStyleContext);
   } else if (promptKey === "combat_image") {
     // Pass the tag name as part of the description to give AI context
     const enhancedDesc = `${character.description || ""}\n(State: ${targetTag})`;
-    prompt = buildCombatImagePrompt(slotContents, character.name, enhancedDesc);
+    prompt = buildCombatImagePrompt(slotContents, character.name, enhancedDesc, charImgStyleContext);
   } else {
-    prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
+    prompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "", charImgStyleContext);
   }
 
   const ai = resolveImageProvider(modelConfig);
+  // 四视图是横版排版，单人定妆图（日常/战斗）用竖版画幅，把分辨率预算留给人物本身
+  const imageSizeOptions =
+    promptKey === "character_image"
+      ? { size: "2560x1440", aspectRatio: "16:9" }
+      : { aspectRatio: "3:4" };
 
   try {
     const promises = Array.from({ length: count }).map(() =>
       ai.generateImage(prompt, {
-        size: "2560x1440",
-        aspectRatio: "16:9",
+        ...imageSizeOptions,
         quality: "hd",
       })
     );
@@ -806,8 +789,17 @@ async function handleSingleCharacterImage(
 
     return NextResponse.json({ characterId, imagePaths, status: "ok" });
   } catch (err) {
-    console.error(`[SingleCharacterImage] Error for ${character.name}:`, err);
-    return NextResponse.json({ characterId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
+    const status = mapUpstreamErrorHttpStatus(err);
+    const error = extractErrorMessage(err);
+    if (status < 500) {
+      console.warn(`[SingleCharacterImage] Upstream rejected ${character.name}: ${error}`);
+    } else {
+      console.error(`[SingleCharacterImage] Error for ${character.name}:`, err);
+    }
+    return NextResponse.json(
+      { characterId, status: "error", error },
+      { status }
+    );
   }
 }
 
@@ -839,6 +831,19 @@ async function handleBatchCharacterImage(
     allCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
   }
 
+  // 项目画风：用于画风硬锁与真人写实锚点注入（CLAUDE.md 核心约定 #3）
+  const [batchCharImgProject] = await db
+    .select({ visualStyle: projects.visualStyle })
+    .from(projects)
+    .where(eq(projects.id, projectId));
+  const batchCharImgVisualStyle = batchCharImgProject?.visualStyle ?? "anime_2d";
+  const batchCharImgStyleContext = {
+    visualStyle: batchCharImgVisualStyle,
+    visualStyleTag: VISUAL_STYLE_PRESETS[batchCharImgVisualStyle]?.tag ?? "",
+    isRealisticStyle:
+      batchCharImgVisualStyle === "realistic" || batchCharImgVisualStyle === "realistic_ancient",
+  };
+
   const results = await Promise.all(
     allCharacters.map(async (character) => {
       try {
@@ -851,7 +856,12 @@ async function handleBatchCharacterImage(
         const slotContents = await resolveSlotContents("character_image", { userId, projectId });
 
         // Generate Turnaround (Blueprint only — character router falls back to blueprint when no morph exists)
-        const blueprintPrompt = buildCharacterTurnaroundPrompt(slotContents, character.name, character.description || "");
+        const blueprintPrompt = buildCharacterTurnaroundPrompt(
+          slotContents,
+          character.name,
+          character.description || "",
+          batchCharImgStyleContext
+        );
         const blueprintPath = await ai.generateImage(blueprintPrompt, {
           size: "2560x1440",
           aspectRatio: "16:9",
@@ -1506,50 +1516,75 @@ async function handleBatchCharacterRestyle(
         console.log(`[BatchCharacterRestyle] start project=${projectId} style=${visualStyle} chars=${total}`);
 
         let updatedCount = 0;
-        for (const char of charRows) {
+        const failedCharacters: Array<{ name: string; error: string }> = [];
+        const restyleModel = createLanguageModel(modelConfig.text!);
+        for (const [charIndex, char] of charRows.entries()) {
           let savedDescription: string | null = null;
           let savedVisualHint: string | null = null;
-          try {
-            const { text } = await generateText({
-              model: createLanguageModel(modelConfig.text!),
-              system: restyleSystem,
-              prompt: `角色名：${char.name}\n旧视觉描述：${char.description}\n旧视觉识别码：${char.visualHint || "无"}`,
-              temperature: 0.4,
-            });
+          let failureMessage: string | null = null;
 
-            const parsed = JSON.parse(extractJSON(text)) as {
-              description?: string;
-              visualHint?: string;
-            };
+          // 模型偶尔会在合法 JSON 后追加孤立的注释/斜杠。首次解析失败时仅重试当前角色，
+          // 已成功写库的角色不会重复生成。
+          for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+              const { text } = await generateText({
+                model: restyleModel,
+                system: restyleSystem,
+                prompt: `角色名：${char.name}\n旧视觉描述：${char.description}\n旧视觉识别码：${char.visualHint || "无"}${
+                  attempt > 1 ? "\n这是重试请求：必须只返回一个完整 JSON 对象，最后一个右花括号后不要添加任何字符。" : ""
+                }`,
+                temperature: attempt === 1 ? 0.4 : 0.2,
+                maxOutputTokens: 4096,
+              });
 
-            if (parsed.description) {
+              const parsed = JSON.parse(extractJSON(text)) as {
+                description?: string;
+                visualHint?: string;
+              };
+              const description = parsed.description?.trim();
+              if (!description) throw new Error("AI response is missing description");
+
+              const visualHint = parsed.visualHint?.trim() || char.visualHint || "";
               await db
                 .update(characters)
-                .set({
-                  description: parsed.description,
-                  visualHint: parsed.visualHint ?? char.visualHint ?? "",
-                })
+                .set({ description, visualHint })
                 .where(eq(characters.id, char.id));
               updatedCount++;
-              savedDescription = parsed.description;
-              savedVisualHint = parsed.visualHint ?? null;
-              console.log(`[BatchCharacterRestyle] ${char.name} → ${parsed.visualHint ?? "(保留原识别码)"}`);
+              savedDescription = description;
+              savedVisualHint = visualHint;
+              failureMessage = null;
+              console.log(`[BatchCharacterRestyle] ${char.name} → ${visualHint || "(无识别码)"}`);
+              break;
+            } catch (charErr) {
+              failureMessage = extractErrorMessage(charErr);
+              if (attempt === 1) {
+                console.warn(
+                  `[BatchCharacterRestyle] Retry ${char.name} after parse/generation failure:`,
+                  charErr
+                );
+              } else {
+                console.warn(`[BatchCharacterRestyle] Failed for ${char.name}:`, charErr);
+              }
             }
-          } catch (charErr) {
-            console.warn(`[BatchCharacterRestyle] Failed for ${char.name}:`, charErr);
+          }
+
+          if (failureMessage) {
+            failedCharacters.push({ name: char.name, error: failureMessage });
           }
           send({
             type: "progress",
             updatedCount,
+            processedCount: charIndex + 1,
             totalCount: total,
             characterName: char.name,
             characterId: char.id,
             description: savedDescription,
             visualHint: savedVisualHint,
+            error: failureMessage,
           });
         }
 
-        send({ type: "done", updatedCount, totalCount: total });
+        send({ type: "done", updatedCount, totalCount: total, failedCharacters });
         console.log(`[BatchCharacterRestyle] Done: ${updatedCount}/${total}`);
       } catch (err) {
         console.error("[BatchCharacterRestyle] Fatal:", err);
@@ -1698,10 +1733,18 @@ function handleBatchStoryboardRewrite(
             type: "object",
             properties: {
               shotId: { type: "string", description: "镜头 ID，必须与输入完全一致" },
-              startFrameDesc: { type: "string", description: "重写后的首帧描述（五要素：机位坐标；景别+取景范围；角色位置姿态；主光叙述；情绪解剖+背景锚定词）" },
-              endFrameDesc: { type: "string", description: "重写后的尾帧描述（五要素，必须与首帧有可见空间位移，光源方向须一致）" },
+              startFrameDesc: {
+                type: "string",
+                description:
+                  "重写后的首帧描述（五要素：景别+取景范围；角色位置姿态；主光叙述；环境/道具可见细节；情绪解剖+背景锚定词）。只写画面中实际可见内容，严禁出现摄影机/摄像机/相机/机位/镜头高度等拍摄设备词",
+              },
+              endFrameDesc: {
+                type: "string",
+                description:
+                  "重写后的尾帧描述（五要素，必须与首帧有可见空间位移，光源方向须一致）。只写画面中实际可见内容，严禁出现摄影机/摄像机/相机/机位/镜头高度等拍摄设备词",
+              },
               motionScript: { type: "string", description: "重写后的运动脚本（[] 包裹格式，时间段求和=镜头时长，末尾 | 朝向：标注）" },
-              cameraDirection: { type: "string", description: "重写后的镜头朝向" },
+              cameraDirection: { type: "string", description: "重写后的镜头朝向；摄影机位置、镜头高度、运镜、支撑方式只允许写在这里" },
             },
             required: ["shotId", "startFrameDesc", "endFrameDesc", "motionScript", "cameraDirection"],
           }),
@@ -1923,6 +1966,10 @@ function handleBatchPlotOptimize(
                 .where(eq(shots.id, shotId));
 
               writtenShotIds.add(shotId);
+              const contextShot = shotsWithDialogues.find((s) => s.id === shotId);
+              if (contextShot) {
+                contextShot.prompt = newPrompt;
+              }
               updatedCount++;
               send({ type: "progress", updatedCount, totalCount });
               console.log(`[BatchPlotOptimize] wrote shot ${shotId} (${updatedCount}/${totalCount})`);
@@ -1946,59 +1993,45 @@ function handleBatchPlotOptimize(
           const chunkLabel = `chunk ${chunkIdx + 1}/${chunks.length}`;
           console.log(`[BatchPlotOptimize] ${chunkLabel} start (shots ${chunk.map(s => s.sequence).join(",")})`);
 
-          try {
-            const result = streamText({
-              model: createLanguageModel(modelConfig.text!),
-              system: plotSystemPrompt,
-              prompt: buildPlotOptimizeUserPrompt(chunk, shotsWithDialogues),
-              temperature: 0.7,
-              tools: { write_shot_plot: writeShotPlot },
-              stopWhen: stepCountIs(chunk.length + 5),
-            });
+          for (const singleShot of chunk) {
+            if (writtenShotIds.has(singleShot.id)) continue;
 
-            let lastHeartbeat = Date.now();
-            for await (const ch of result.fullStream) {
-              const now = Date.now();
-              if (now - lastHeartbeat > 2000) {
-                send({ type: "thinking", updatedCount, totalCount });
-                lastHeartbeat = now;
-              }
-              void ch;
-            }
-            console.log(`[BatchPlotOptimize] ${chunkLabel} done (${updatedCount}/${totalCount})`);
-          } catch (streamErr) {
-            const errMsg = streamErr instanceof Error ? streamErr.message : String(streamErr);
-            console.warn(`[BatchPlotOptimize] ${chunkLabel} failed: ${errMsg}`);
-            send({ type: "stream_error", error: `${chunkLabel}: ${errMsg}`, updatedCount, totalCount });
+            try {
+              // 逐镜滚动优化：上一镜写回后会同步更新 shotsWithDialogues，
+              // 下一镜 prompt 里的「全集镜头概览」就能看到已优化文本。
+              const beforeCount = updatedCount;
+              const result = streamText({
+                model: createLanguageModel(modelConfig.text!),
+                system: plotSystemPrompt,
+                prompt: buildPlotOptimizeUserPrompt([singleShot], shotsWithDialogues),
+                temperature: 0.7,
+                tools: { write_shot_plot: writeShotPlot },
+                stopWhen: stepCountIs(6),
+              });
 
-            // 降级：逐镜单独重试
-            const unwritten = chunk.filter((s) => !writtenShotIds.has(s.id));
-            for (const singleShot of unwritten) {
-              try {
-                const singleResult = streamText({
-                  model: createLanguageModel(modelConfig.text!),
-                  system: plotSystemPrompt,
-                  prompt: buildPlotOptimizeUserPrompt([singleShot], shotsWithDialogues),
-                  temperature: 0.7,
-                  tools: { write_shot_plot: writeShotPlot },
-                  stopWhen: stepCountIs(6),
-                });
-                let lastHeartbeat = Date.now();
-                for await (const ch of singleResult.fullStream) {
-                  const now = Date.now();
-                  if (now - lastHeartbeat > 2000) {
-                    send({ type: "thinking", updatedCount, totalCount });
-                    lastHeartbeat = now;
-                  }
-                  void ch;
+              let lastHeartbeat = Date.now();
+              for await (const ch of result.fullStream) {
+                const now = Date.now();
+                if (now - lastHeartbeat > 2000) {
+                  send({ type: "thinking", updatedCount, totalCount });
+                  lastHeartbeat = now;
                 }
-              } catch (singleErr) {
-                const msg = singleErr instanceof Error ? singleErr.message : String(singleErr);
-                console.warn(`[BatchPlotOptimize] shot ${singleShot.sequence} fallback failed: ${msg}`);
-                send({ type: "stream_error", error: `shot ${singleShot.sequence} skipped: ${msg}`, updatedCount, totalCount });
+                void ch;
               }
+
+              if (updatedCount === beforeCount && !writtenShotIds.has(singleShot.id)) {
+                const msg = `shot ${singleShot.sequence} produced no write_shot_plot call`;
+                console.warn(`[BatchPlotOptimize] ${msg}`);
+                send({ type: "stream_error", error: msg, updatedCount, totalCount });
+              }
+            } catch (singleErr) {
+              const msg = singleErr instanceof Error ? singleErr.message : String(singleErr);
+              console.warn(`[BatchPlotOptimize] shot ${singleShot.sequence} failed: ${msg}`);
+              send({ type: "stream_error", error: `shot ${singleShot.sequence} skipped: ${msg}`, updatedCount, totalCount });
             }
           }
+
+          console.log(`[BatchPlotOptimize] ${chunkLabel} done (${updatedCount}/${totalCount})`);
         }
 
         send({ type: "done", updatedCount, totalCount });
@@ -2217,7 +2250,7 @@ async function handleSingleFrameGenerate(
     .join("\n");
 
   // Load reference images for the union of all characters in this shot.
-  // 优先用 startFrameDesc（含机位/服装/光影视觉细节）+ prompt（叙事背景），让状态路由有更准确的判断依据
+  // 优先用 startFrameDesc（含构图/服装/光影视觉细节）+ prompt（叙事背景），让状态路由有更准确的判断依据
   const frameSceneDesc = [shot.startFrameDesc, shot.prompt].filter(Boolean).join("\n");
   const resolvedChars = await resolveCharacterImages(
     frameSceneDesc,
@@ -2279,7 +2312,7 @@ async function handleSingleFrameGenerate(
   const frameTarget = (payload?.frameTarget as "first" | "last") ?? "first";
 
   // 解析多参考图（frameReferences 数组，新）或单参考图（frameReference，兼容旧版）
-  // 第一张为主参考（用于 chainSourceShotId/chainSourceType 记录），后续为额外参考。
+  // 第一张为主参考（用于来源追溯），后续为额外参考；参考图重绘不等于 strict 首帧承接。
   const rawFrameRefs = payload?.frameReferences as Array<Partial<FrameReferencePayload>> | undefined;
   const rawFrameRef = payload?.frameReference as Partial<FrameReferencePayload> | undefined;
 
@@ -2315,7 +2348,7 @@ async function handleSingleFrameGenerate(
     resolvedFrameRefs.push(resolved);
   }
 
-  // 主参考（第一张）用于衔接元数据记录；多张全部注入 refImages
+  // 主参考（第一张）用于来源追溯；多张全部注入 refImages
   const continuityRef: ResolvedFrameRef | undefined = resolvedFrameRefs[0];
 
   // 分镜级道具参考图：读取 shot.propRefs（JSON 数组 assetId），查出磁盘上存在的图片路径
@@ -2398,6 +2431,7 @@ async function handleSingleFrameGenerate(
           status: "completed",
           chainSourceShotId: continuityRef?.shotId ?? null,
           chainSourceType: continuityRef?.frameType ?? null,
+          anchorFirstContinuityMode: continuityRef ? "reference_redraw" : null,
         })
         .where(eq(shots.id, shotId));
     };
@@ -2619,19 +2653,19 @@ async function handleSingleVideoGenerate(
       };
     });
 
-    const hasPreGeneratedPrompt = !!shotForVideo.videoPrompt;
     const hasVisualFrameAnchors =
       !useSingleVideoReferenceMode &&
       !!shotForVideo.anchorLastAi &&
       shotFrameFileOnDisk(shotForVideo.anchorLastAi);
 
     // ── multimodal 模式预解析：在 prompt 构建前 resolve 角色图，确保 @参考N 编号与 refs 数组同步 ──
-    // 仅在 multimodal + Seedance + 无预生成 prompt 时提前执行；其余模式延迟到三路分流处。
-    const needPreResolveCharImages =
-      singleVideoMode === "multimodal" &&
-      !shotForVideo.videoPrompt &&
-      isSeedanceProtocol &&
-      singleVideoShotChars.length > 0;
+    // 只要是 Seedance multimodal，就必须解析角色图；已有 videoPrompt 也不能跳过，
+    // 否则会只传 anchorFirst，丢失角色主图、角度变体和音频参考。
+    const needPreResolveCharImages = shouldResolveSeedanceMultimodalCharacterRefs({
+      singleVideoMode,
+      isSeedanceProtocol,
+      namedCharacterCount: singleVideoShotChars.length,
+    });
 
     // charImagesForVideo：multimodal 模式下实际有图（磁盘存在）的角色列表
     // 其余模式为 []，三路分流里 multimodal 分支直接复用，不重复查询
@@ -2645,7 +2679,7 @@ async function handleSingleVideoGenerate(
 
     // ── Seedance 新格式：@参考N + 音色 + 台词类型 ──────────────────────────────
     let videoPromptBase: string;
-    if (!shotForVideo.videoPrompt && isSeedanceProtocol) {
+    if (isSeedanceProtocol && (!shotForVideo.videoPrompt || singleVideoMode === "multimodal")) {
       // 构建角色资产列表：
       //   multimodal 模式：只包含有磁盘图片的角色（与 multimodalRefs 第一轮完全对应）
       //   其余模式：包含所有命名角色（@参考N 空悬无妨，API 不传 refs）
@@ -2686,7 +2720,7 @@ async function handleSingleVideoGenerate(
         duration: effectiveDuration,
         sceneDescription: shotForVideo.prompt || "",
         cameraDirection: shotForVideo.cameraDirection || null,
-        motionScript: resolvedMotionText,
+        motionScript: shotForVideo.videoPrompt || resolvedMotionText,
         soundEffect: shotForVideo.soundEffectNote || null,
         dialogues: dialogueList.map((d) => ({
           characterName: d.characterName,
@@ -2704,7 +2738,7 @@ async function handleSingleVideoGenerate(
         shotForVideo.bgmNote
       );
     } else {
-      // 非 Seedance 或已有预生成 prompt → 沿用原有逻辑
+      // 非 Seedance，或 Seedance keyframe/initialImage 已有预生成 prompt → 沿用原有逻辑
       videoPromptBase = stripBgmContent(
         shotForVideo.videoPrompt ||
           (useSingleVideoReferenceMode
@@ -2770,8 +2804,8 @@ async function handleSingleVideoGenerate(
     } else if (singleVideoMode === "multimodal") {
       // 多模态参考模式：anchorFirst 作构图参考，角色定妆图锁定外貌（修复角色跑偏 bug）
       // charImagesForVideo 已在 prompt 构建前预解析（needPreResolveCharImages），无需重复查询。
-      // 若 videoPrompt 已预生成（shotForVideo.videoPrompt 非空），则为空数组，refs 仅含 anchorFirst。
-      // （预生成 prompt 的 @参考N 编号由生成时决定，当前 multimodal 路径不处理此场景）
+      // 即使 videoPrompt 已预生成，也必须预解析角色图；文本会被 Seedance 多参模板包裹，
+      // 让 @参考N 定义和 multimodalRefs 顺序保持一致。
 
       // 组装 multimodalRefs，顺序必须与 buildSeedanceMultiParamVideoPrompt 的 buildRefEntries 完全一致：
       //   第一轮：角色资产主图 + 紧跟该角色的角度变体（3q → profile → back）
@@ -2829,7 +2863,11 @@ async function handleSingleVideoGenerate(
           });
           for (const ai of ci.angleImages ?? []) {
             if (angleSlotBudget > 0) {
-              multimodalRefs.push({ type: "image", path: ai.path });
+              const useArkAssetForAngle = ai.arkAssetStatus === "active" && !!ai.arkAssetId;
+              multimodalRefs.push({
+                type: "image",
+                path: useArkAssetForAngle ? `asset://${ai.arkAssetId}` : ai.path,
+              });
               angleSlotBudget--;
             }
           }
@@ -2877,7 +2915,7 @@ async function handleSingleVideoGenerate(
         onRemoteResult: onRemoteResultSingle,
       });
     } else {
-      // initialImage 模式：cutPoint 继承帧/群演，像素级时序连续（严格首帧锚定）
+      // initialImage 模式：strict_start 承接帧，像素级时序连续（严格首帧锚定）
       result = await videoProvider.generateVideo({
         initialImage: shotForVideo.anchorFirst!,
         prompt: videoPrompt,
@@ -3334,10 +3372,16 @@ async function handleSplitShot(
  * 从一张正面定妆图自动生成 3/4 侧面、正侧面、背面三个角度变体。
  * 角度变体写入 character_assets 表（angle 字段标记，sourceAssetId 指向来源）。
  * 已存在同角度资产时跳过，不重复生成。
+ *
+ * 若来源正面图已锁定私域素材库（arkAssetStatus=active），新生成的角度变体会
+ * 尽力（best-effort）一并注册进同一素材组合——否则「先锁主图、后扩展角度」这个顺序
+ * 会导致角度图漏锁，视频生成时这几张角度图仍是本地真人照片，一样触发人脸拦截。
+ * 注册失败（限流/凭证缺失等）不影响角度图生成本身的成功返回，只是该图停在
+ * arkAssetStatus=failed，用户可在卡片上对这张角度图单独点「锁定到素材库」重试。
  */
 async function handleExpandCharacterAsset(
   projectId: string,
-  _userId: string,
+  userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig
 ) {
@@ -3366,12 +3410,25 @@ async function handleExpandCharacterAsset(
 
   // 查询所属角色
   const [character] = await db
-    .select({ id: characters.id, name: characters.name, description: characters.description, visualHint: characters.visualHint })
+    .select({
+      id: characters.id,
+      name: characters.name,
+      description: characters.description,
+      visualHint: characters.visualHint,
+      arkAssetGroupId: characters.arkAssetGroupId,
+    })
     .from(characters)
     .where(eq(characters.id, sourceAsset.characterId));
   if (!character) {
     return NextResponse.json({ error: "Character not found" }, { status: 404 });
   }
+
+  // 来源正面图已锁定私域素材库时，新角度变体尽力一并注册（见函数顶部注释）
+  const shouldAutoLockAngles = sourceAsset.arkAssetStatus === "active";
+  const arkPublicBase = process.env.AI_COMIC_APP_PUBLIC_URL?.trim().replace(/\/+$/, "");
+  const arkCredentials = shouldAutoLockAngles
+    ? await resolveArkAssetLibraryClientCredentials(userId)
+    : null;
 
   // 查询项目画风
   const [project] = await db
@@ -3450,6 +3507,30 @@ async function handleExpandCharacterAsset(
         sourceAssetId: assetId,
       });
       generated.push({ id: newId, angle, imagePath });
+
+      if (shouldAutoLockAngles && arkCredentials && arkPublicBase) {
+        await db.update(characterAssets).set({ arkAssetStatus: "pending" }).where(eq(characterAssets.id, newId));
+        try {
+          const arkResult = await registerCharacterPortraitToArk({
+            credentials: arkCredentials,
+            characterName: character.name,
+            existingGroupId: character.arkAssetGroupId,
+            imageUrl: `${arkPublicBase}${uploadUrl(imagePath)}`,
+            label: `${sourceAsset.tag}-${angle}`,
+          });
+          await db
+            .update(characterAssets)
+            .set({
+              arkAssetId: arkResult.assetId,
+              arkAssetStatus: arkResult.status === "Active" ? "active" : "failed",
+              arkAssetRegisteredAt: new Date(),
+            })
+            .where(eq(characterAssets.id, newId));
+        } catch (err) {
+          console.error(`[ExpandCharacterAsset] 角度变体(${angle}) 自动锁定私域素材库失败:`, err);
+          await db.update(characterAssets).set({ arkAssetStatus: "failed" }).where(eq(characterAssets.id, newId));
+        }
+      }
     } catch (err) {
       console.error(`[ExpandCharacterAsset] Failed to generate angle=${angle}:`, err);
     }

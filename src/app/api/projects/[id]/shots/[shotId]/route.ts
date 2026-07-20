@@ -18,6 +18,9 @@ export async function PATCH(
     cameraDirection: string;
     anchorFirst: string | null;
     anchorLastAi: string | null;
+    chainSourceShotId: string | null;
+    chainSourceType: string | null;
+    anchorFirstContinuityMode: "strict_start" | "reference_redraw" | null;
     videoPrompt: string | null;
     /** 分镜级道具绑定（JSON 数组字符串，存 character_assets.id） */
     propRefs: string | null;

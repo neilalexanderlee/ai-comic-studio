@@ -95,7 +95,7 @@ export default function CharactersPage({
       }
     } catch (err) {
       console.error("Batch character image error:", err);
-      toast.error(tc("generationFailed"));
+      toast.error(`${tc("generationFailed")}：${err instanceof Error ? err.message : String(err)}`);
     }
     setGeneratingImages(false);
     fetchData();
@@ -186,7 +186,7 @@ export default function CharactersPage({
             const evt = JSON.parse(line);
             if (evt.type === "start") setRestyleProgress({ done: 0, total: evt.totalCount });
             if (evt.type === "progress") {
-              setRestyleProgress({ done: evt.updatedCount, total: evt.totalCount });
+              setRestyleProgress({ done: evt.processedCount ?? evt.updatedCount, total: evt.totalCount });
               if (evt.characterId && evt.description) {
                 setCharacters((prev) =>
                   prev.map((c) =>
@@ -198,7 +198,19 @@ export default function CharactersPage({
               }
             }
             if (evt.type === "done") {
-              toast.success(`已按当前画风重新改写 ${evt.updatedCount}/${evt.totalCount} 个角色`);
+              const failedNames = Array.isArray(evt.failedCharacters)
+                ? evt.failedCharacters.map((item: { name?: string }) => item.name).filter(Boolean)
+                : [];
+              if (evt.updatedCount === evt.totalCount) {
+                toast.success(`已按当前画风重新改写 ${evt.updatedCount}/${evt.totalCount} 个角色`);
+              } else {
+                toast.warning(`已改写 ${evt.updatedCount}/${evt.totalCount} 个角色`, {
+                  description: failedNames.length > 0
+                    ? `仍失败：${failedNames.join("、")}；可再次点击重试`
+                    : "部分角色生成失败，请重试",
+                  duration: 8000,
+                });
+              }
               setRestyleProgress(null);
               fetchData();
             }

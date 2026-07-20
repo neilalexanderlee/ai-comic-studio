@@ -38,7 +38,7 @@ export function createLanguageModel(config: ProviderConfig): LanguageModel {
  * unescaped quotes, literal newlines, trailing commas, missing brackets, etc.
  */
 export function extractJSON(text: string): string {
-  let processed = stripReasoningFromModelOutput(text);
+  const processed = stripReasoningFromModelOutput(text);
   const match = processed.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = match ? match[1].trim() : processed.trim();
   // Remove non-printable control characters
@@ -46,5 +46,41 @@ export function extractJSON(text: string): string {
   if (!cleaned) {
     throw new Error("AI response was empty after stripping thinking/comments — likely truncated by maxOutputTokens");
   }
-  return jsonrepair(cleaned);
+  return jsonrepair(findFirstCompleteJsonValue(cleaned) ?? cleaned);
+}
+
+/** Ignore trailing model commentary (including a lone `/`) after a complete JSON value. */
+function findFirstCompleteJsonValue(text: string): string | null {
+  const objectStart = text.indexOf("{");
+  const arrayStart = text.indexOf("[");
+  const start = objectStart < 0
+    ? arrayStart
+    : arrayStart < 0
+      ? objectStart
+      : Math.min(objectStart, arrayStart);
+  if (start < 0) return null;
+
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index++) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      stack.push(char);
+    } else if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      if (stack.at(-1) !== expected) return null;
+      stack.pop();
+      if (stack.length === 0) return text.slice(start, index + 1);
+    }
+  }
+  return null;
 }

@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   return NextResponse.json({
     hasCredentials: !!record?.accessKeyId,
     accessKeyId: record?.accessKeyId ?? "",
-    // secretAccessKey 不回传给前端，仅用「已配置」状态展示
+    secretAccessKey: record?.secretAccessKey ?? "",
     projectName: record?.projectName ?? "default",
     region: record?.region ?? "cn-beijing",
   });

@@ -17,7 +17,6 @@ import type { AIProvider, TextOptions, ImageOptions } from "../types";
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
-// @ts-ignore
 import { Service } from "@volcengine/openapi";
 
 function trimCred(v?: string): string {
@@ -56,8 +55,8 @@ export class JimengImageProvider implements AIProvider {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const svc = new (Service as any)({
-      service: "cv",
-      version: "2022-08-31",
+      serviceName: "cv",
+      defaultVersion: "2022-08-31",
       host: this.baseUrl.replace(/^https?:\/\//, ""),
       region: this.region,
     });
@@ -159,8 +158,9 @@ export class JimengImageProvider implements AIProvider {
       const response = await this.submitApi(body);
 
       if (response.ResponseMetadata?.Error) {
+        const upstreamError = response.ResponseMetadata.Error;
         throw new Error(
-          `Jimeng Image submit error: ${response.ResponseMetadata.Error.Message}`
+          `Jimeng Image submit error [${upstreamError.Code ?? "unknown"}]: ${upstreamError.Message ?? "unknown error"}`
         );
       }
 

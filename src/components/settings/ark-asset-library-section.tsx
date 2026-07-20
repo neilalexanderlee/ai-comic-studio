@@ -42,11 +42,13 @@ export function ArkAssetLibrarySection() {
         const data = (await res.json()) as {
           hasCredentials?: boolean;
           accessKeyId?: string;
+          secretAccessKey?: string;
           projectName?: string;
           region?: string;
         };
         if (!active) return;
         setAccessKeyId(data.accessKeyId ?? "");
+        setSecretAccessKey(data.secretAccessKey ?? "");
         setProjectName(data.projectName || "default");
         setRegion(data.region || "cn-beijing");
         setHasCredentials(!!data.hasCredentials);
@@ -67,7 +69,7 @@ export function ArkAssetLibrarySection() {
       toast.error("请输入 Access Key ID");
       return;
     }
-    if (!secretAccessKey.trim() && !hasCredentials) {
+    if (!secretAccessKey.trim()) {
       toast.error("请输入 Secret Access Key");
       return;
     }
@@ -84,7 +86,6 @@ export function ArkAssetLibrarySection() {
         }),
       });
       setHasCredentials(true);
-      setSecretAccessKey("");
       toast.success("私域素材库凭证已保存");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "保存失败");
@@ -160,7 +161,7 @@ export function ArkAssetLibrarySection() {
             value={secretAccessKey}
             onChange={(e) => setSecretAccessKey(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleSave()}
-            placeholder={hasCredentials ? "已保存，留空则不修改" : "请输入 Secret Access Key…"}
+            placeholder={loading ? "加载中…" : "请输入 Secret Access Key…"}
             disabled={loading}
             className="pr-10 font-mono text-xs"
           />
@@ -202,7 +203,6 @@ export function ArkAssetLibrarySection() {
 
       <p className="text-[11px] text-[--text-muted]">
         方舟项目名需与视频生成用的 API Key 所属项目一致，否则注册的素材无法被引用。
-        Secret Access Key 只在服务端保存，页面不会回显明文。
       </p>
 
       {/* Actions */}

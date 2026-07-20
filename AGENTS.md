@@ -131,7 +131,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 32` — `0032_drop_shot_reference_columns`
+**当前最新迁移索引**：`idx 54` — `0054_shot_anchor_first_continuity_mode`
 
 ### 关键表
 
@@ -327,6 +327,24 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 - 集成测试：`src/__tests__/integration/`
 - Eval 用例：`src/lib/evals/cases/`
 
+### Prompt Harness 速查
+
+| 场景 | Harness 文件 | 覆盖点 | 快速运行 |
+|---|---|---|---|
+| 角色定妆图 prompt（`beauty_image` / `combat_image` / `character_image`） | `src/__tests__/unit/lib/ai/character-image-prompts.test.ts` | 真人/真人古风项目必须注入 `visualStyleTag` 与真人摄影锚点；不得回流 `2D动画`、`写实渲染`、`纯白纯色背景`、`最高渲染质量`、`魔法/特效`、`发光特效`、`风格化线条` 等会诱发 CG 假人感的默认槽位词 | `pnpm test src/__tests__/unit/lib/ai/character-image-prompts.test.ts` |
+| 分镜批量优化 prompt（`batch_storyboard_rewrite`） | `src/__tests__/unit/lib/ai/storyboard-supervision.test.ts` | 首帧/尾帧描述只写画面可见内容；摄影机/机位/镜头高度等拍摄设备词必须进入 `cameraDirection`，不得进入首尾帧描述 | `pnpm test src/__tests__/unit/lib/ai/storyboard-supervision.test.ts` |
+| 单镜视频三态分流（`SingleVideoMode`） | `src/__tests__/unit/lib/storyboard/shot-video-readiness.test.ts` | `anchorLastAi` 存在 → `keyframe`；`anchorFirstContinuityMode=strict_start` → `initialImage`；`reference_redraw` 或普通首帧 → `multimodal`；历史链源数据保留 legacy `initialImage` 兜底 | `pnpm test src/__tests__/unit/lib/storyboard/shot-video-readiness.test.ts` |
+| Seedance 多模态参考图解析 | `src/__tests__/unit/lib/ai/seedance-multimodal-refs.test.ts` | `multimodal + Seedance/Doubao + 有命名角色` 时必须解析角色主图/角度变体/音频；不得因为已有 `videoPrompt` 跳过 refs 解析 | `pnpm test src/__tests__/unit/lib/ai/seedance-multimodal-refs.test.ts` |
+
+相关生产文件：
+- `src/lib/ai/prompts/character-image.ts` — 角色定妆 prompt builder；真人/真人古风分支在这里切换为真人摄影专用规则
+- `src/app/api/projects/[id]/generate/route.ts` — `single_character_image` / `batch_character_image` 读取项目 `visualStyle` 并传入 `styleContext`
+- `src/lib/pipeline/character-image.ts` — 队列式 `character_image` 任务读取项目 `visualStyle` 并传入 `styleContext`
+- `src/lib/storyboard/shot-video-readiness.server.ts` — `SingleVideoMode` 三态分流；只把显式 `strict_start` 承接首帧送入严格首帧视频模式
+- `src/hooks/use-shot-frame-actions.ts` — 手动「承接上一镜尾帧」直拷 `anchorFirst` 时写入 `anchorFirstContinuityMode=strict_start`
+- `src/app/api/projects/[id]/generate/route.ts` — 手动选择参考图重绘首帧时写入 `anchorFirstContinuityMode=reference_redraw`
+- `src/lib/ai/seedance-multimodal-refs.ts` — Seedance 多模态视频是否需要解析角色 refs 的纯规则；不要把 `videoPrompt` 是否存在混入该判断
+
 ---
 
 ## 已知陷阱 / 历史修复记录
@@ -343,6 +361,8 @@ pnpm eval              # 运行 AI Eval 评估（需要真实 API Key）
 | 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
 | PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧 |
+| 真人古风定妆图出现 CG 假人感 | 旧 harness 只检查 `visualStyleTag`/真人锚点是否注入，未拦截默认角色设定槽位中的 `写实渲染`、`纯白纯色背景`、`最高渲染质量`、`魔法/特效` 等 CG 诱导词 | `character-image.ts` 真人分支使用摄影专用规则；`character-image-prompts.test.ts` 补充污染词回归 harness |
+| 手动参考图重绘首帧误进严格首帧视频模式 | `chainSourceShotId` 同时承担「来源追溯」和「strict 首帧连续性」两种语义 | 增加 `shots.anchor_first_continuity_mode`：直拷承接写 `strict_start`；参考图重绘写 `reference_redraw`；migration `0054` 按路径相等性回填历史链源/旧上一镜直拷数据；`shot-video-readiness.test.ts` 锁定三态分流 |
 
 ---
 

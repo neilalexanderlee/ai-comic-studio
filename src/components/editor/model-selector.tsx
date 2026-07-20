@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useModelStore, type Capability, type ModelRef } from "@/stores/model-store";
 import { Type, ImageIcon, VideoIcon, ChevronDown, Check } from "lucide-react";
+import { isGeminiModelCompatible } from "@/lib/ai/model-capabilities";
 
 const ICONS: Record<Capability, React.ReactNode> = {
   text: <Type className="h-3 w-3" />,
@@ -42,6 +43,7 @@ export function InlineModelPicker({ capability, value: controlledValue, onChange
   const providers = useModelStore((s) => s.providers);
   const globalValue = useModelStore((s) => s[GETTERS[capability]]);
   const globalSetter = useModelStore((s) => s[SETTERS[capability]]);
+  const toggleModel = useModelStore((s) => s.toggleModel);
   const isControlled = onChange !== undefined;
   const value = isControlled ? controlledValue : globalValue;
   const setter = isControlled ? onChange : globalSetter;
@@ -55,6 +57,7 @@ export function InlineModelPicker({ capability, value: controlledValue, onChange
       if (p.capability !== capability) continue;
       for (const m of p.models) {
         if (!m.checked) continue;
+        if (p.protocol === "gemini" && !isGeminiModelCompatible(m.id, capability)) continue;
         result.push({
           providerId: p.id,
           providerName: p.name,
@@ -66,12 +69,41 @@ export function InlineModelPicker({ capability, value: controlledValue, onChange
     return result;
   }, [providers, capability]);
 
-  // Auto-select first option if nothing is selected (only in uncontrolled mode)
+  const recoveryOption = useMemo(() => {
+    if (!value) return null;
+    const provider = providers.find(
+      (item) => item.id === value.providerId && item.capability === capability
+    );
+    if (!provider || provider.protocol !== "gemini") return null;
+    const model = provider.models.find((item) =>
+      isGeminiModelCompatible(item.id, capability)
+    );
+    if (!model) return null;
+    return {
+      providerId: provider.id,
+      providerName: provider.name,
+      modelId: model.id,
+      modelName: model.name,
+      checked: model.checked,
+    };
+  }, [providers, capability, value]);
+
+  // Auto-select the first compatible option when the persisted selection is missing/invalid.
   useEffect(() => {
-    if (!isControlled && !value && options.length > 0) {
-      globalSetter({ providerId: options[0].providerId, modelId: options[0].modelId } as ModelRef);
+    const hasValidValue = value && options.some(
+      (option) => option.providerId === value.providerId && option.modelId === value.modelId
+    );
+    if (!hasValidValue) {
+      const nextOption = options.find((option) => option.providerId === value?.providerId)
+        ?? recoveryOption
+        ?? options[0];
+      if (!nextOption) return;
+      if ("checked" in nextOption && !nextOption.checked) {
+        toggleModel(nextOption.providerId, nextOption.modelId);
+      }
+      setter({ providerId: nextOption.providerId, modelId: nextOption.modelId } as ModelRef);
     }
-  }, [isControlled, value, options, globalSetter]);
+  }, [value, options, recoveryOption, setter, toggleModel]);
 
   // Close on outside click
   useEffect(() => {

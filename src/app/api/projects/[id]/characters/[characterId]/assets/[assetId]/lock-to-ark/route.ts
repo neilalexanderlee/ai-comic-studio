@@ -17,6 +17,11 @@ import { uploadUrl } from "@/lib/utils/upload-url";
  *
  * 注册是异步的（官方文档：单图处理约 13 秒），这里同步等待轮询结果后再返回，
  * 前端按钮进入 loading 态直到收到 active/failed。
+ *
+ * 锁定正面主图时，同时把它的角度变体图（3q/profile/back，sourceAssetId 指向主图）一并
+ * 注册进同一个素材组合。不这样做的话，视频生成时角度图仍会以本地真人照片传给 Seedance，
+ * 照样触发人脸拦截，跟只锁主图没区别（角度图与主图是同一张脸）。角度图并行注册，失败的
+ * 单张不影响主图锁定结果，也不影响其余角度图。
  */
 export async function POST(
   request: Request,
@@ -107,6 +112,47 @@ export async function POST(
         { error: "火山审核未通过（可能被判定为疑似真人/不符合虚拟人像要求），请更换图片后重试", status: finalStatus },
         { status: 422 }
       );
+    }
+
+    // 主图（非角度变体本身）锁定成功后，把它派生出的角度变体图一并注册进同一素材组合
+    if (!asset.angle) {
+      const angleSiblings = await db
+        .select()
+        .from(characterAssets)
+        .where(eq(characterAssets.sourceAssetId, assetId));
+
+      // 顺序处理，不并发：CreateAsset 账号级限流很低，并发 3 个就会偶发 "rate limit exceeded"。
+      for (const sib of angleSiblings) {
+        if (!sib.imagePath || sib.arkAssetStatus === "active") continue;
+        await db
+          .update(characterAssets)
+          .set({ arkAssetStatus: "pending" })
+          .where(eq(characterAssets.id, sib.id));
+        try {
+          const sibImageUrl = `${publicBase}${uploadUrl(sib.imagePath)}`;
+          const sibResult = await registerCharacterPortraitToArk({
+            credentials,
+            characterName: character.name,
+            existingGroupId: groupId,
+            imageUrl: sibImageUrl,
+            label: `${sib.tag}-${sib.angle}`,
+          });
+          await db
+            .update(characterAssets)
+            .set({
+              arkAssetId: sibResult.assetId,
+              arkAssetStatus: sibResult.status === "Active" ? "active" : "failed",
+              arkAssetRegisteredAt: new Date(),
+            })
+            .where(eq(characterAssets.id, sib.id));
+        } catch (err) {
+          console.error(`[LockToArk] 角度变体(${sib.angle}) 注册失败:`, err);
+          await db
+            .update(characterAssets)
+            .set({ arkAssetStatus: "failed" })
+            .where(eq(characterAssets.id, sib.id));
+        }
+      }
     }
 
     return NextResponse.json({ ok: true, groupId, assetId: arkAssetId, status: finalStatus });

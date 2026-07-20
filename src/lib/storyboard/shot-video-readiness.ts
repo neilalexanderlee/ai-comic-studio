@@ -16,14 +16,38 @@ type ShotForVideoScan = {
 export type VideoReadinessIssue = "missing_anchor_first" | "missing_anchor_last_ai";
 
 /**
+ * 客户端版三态模式判定（与 shot-video-readiness.server.ts 的 resolveSingleVideoMode 对齐，
+ * 差异仅在于这里不能访问 node:fs，用字段是否有值代替磁盘存在性检查）。
+ */
+function resolveSingleVideoModeClient(
+  shot: {
+    anchorLastAi?: string | null;
+    chainSourceShotId?: string | null;
+    anchorFirstContinuityMode?: string | null;
+  }
+): "initialImage" | "keyframe" | "multimodal" {
+  if (shot.anchorLastAi) return "keyframe";
+  if (shot.anchorFirstContinuityMode === "strict_start") return "initialImage";
+  if (shot.anchorFirstContinuityMode == null && shot.chainSourceShotId) return "initialImage";
+  return "multimodal";
+}
+
+/**
  * 客户端预检：路径字段是否已填写（不访问 node:fs）。
- * 三态模式下视频生成只需要 anchorFirst，anchorLastAi 仅 keyframe 模式需要
- * 且 keyframe 的前提是 anchorLastAi 在磁盘存在（服务端检查），客户端不重复检查。
+ * 只有 keyframe（有 AI 尾帧）/ initialImage（严格首帧承接）模式才要求 anchorFirst；
+ * multimodal 模式（默认/多数镜头）下 anchorFirst 只是可选的构图参考，服务端会在缺失时
+ * 优雅降级为纯文字提示词 + 角色定妆图生成，不应该在这里就把按钮锁死。
  */
 export function getShotVideoReadiness(
-  shot: { anchorFirst?: string | null; anchorLastAi?: string | null }
+  shot: {
+    anchorFirst?: string | null;
+    anchorLastAi?: string | null;
+    chainSourceShotId?: string | null;
+    anchorFirstContinuityMode?: string | null;
+  }
 ): { ready: true } | { ready: false; issue: VideoReadinessIssue; message: string } {
-  if (!shot.anchorFirst) {
+  const mode = resolveSingleVideoModeClient(shot);
+  if (mode !== "multimodal" && !shot.anchorFirst) {
     return {
       ready: false,
       issue: "missing_anchor_first",

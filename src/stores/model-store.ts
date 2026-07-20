@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { ulid } from "ulid";
+import { isGeminiModelCompatible } from "@/lib/ai/model-capabilities";
 
 export type Protocol =
   | "openai"
@@ -171,10 +172,16 @@ export const useModelStore = create<ModelStore>()(
 
       getModelConfig: () => {
         const state = get();
-        function resolve(ref: ModelRef | null) {
+        function resolve(ref: ModelRef | null, capability: Capability) {
           if (!ref) return null;
           const provider = state.providers.find((p) => p.id === ref.providerId);
           if (!provider) return null;
+          if (
+            provider.protocol === "gemini" &&
+            !isGeminiModelCompatible(ref.modelId, capability)
+          ) {
+            return null;
+          }
           return {
             providerId: provider.id,
             protocol: provider.protocol,
@@ -185,10 +192,10 @@ export const useModelStore = create<ModelStore>()(
           };
         }
         return {
-          text: resolve(state.defaultTextModel),
-          image: resolve(state.defaultImageModel),
-          video: resolve(state.defaultVideoModel),
-          music: resolve(state.defaultMusicModel),
+          text: resolve(state.defaultTextModel, "text"),
+          image: resolve(state.defaultImageModel, "image"),
+          video: resolve(state.defaultVideoModel, "video"),
+          music: resolve(state.defaultMusicModel, "music"),
         };
       },
     }),
