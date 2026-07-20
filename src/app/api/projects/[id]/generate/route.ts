@@ -2526,9 +2526,6 @@ async function handleSingleVideoGenerate(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
-  if (!shot.anchorFirst || !shotFrameFileOnDisk(shot.anchorFirst)) {
-    return NextResponse.json({ error: "首帧文件不存在，请重新生成首帧" }, { status: 400 });
-  }
 
   const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
 
@@ -2560,6 +2557,12 @@ async function handleSingleVideoGenerate(
   const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters, { contextText: singleVideoCharacterContext });
   // 三态视频生成模式（SingleVideoMode）
   const singleVideoMode = resolveSingleVideoMode(shot);
+  // keyframe（首尾帧强约束）/ initialImage（严格首帧承接）都把 anchorFirst 当必需字段用
+  // （下面会有 shotForVideo.anchorFirst! 非空断言）；multimodal 模式首帧只是可选构图参考，
+  // 缺失时优雅降级为纯文字提示词 + 角色定妆图生成，不应该卡在这里。
+  if (singleVideoMode !== "multimodal" && (!shot.anchorFirst || !shotFrameFileOnDisk(shot.anchorFirst))) {
+    return NextResponse.json({ error: "首帧文件不存在，请重新生成首帧" }, { status: 400 });
+  }
   // 向后兼容：prompt 拼接逻辑仍用此布尔值判断"是否首帧模式"
   const useSingleVideoReferenceMode = singleVideoMode !== "keyframe";
 
