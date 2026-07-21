@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { FrameReferencePicker } from "./frame-reference-picker";
 import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
-import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
+import { getShotVideoReadiness, resolveShotNextStep } from "@/lib/storyboard/shot-video-readiness";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
 import { Scissors } from "lucide-react";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
@@ -307,8 +307,8 @@ export function ShotCard({
     : status === "failed" && !hasVideo ? "error"
     : hasVideo ? "done" : "idle";
 
-  // Which step is "next"
-  const nextStep = !hasFrame ? "frame" : !hasVideoPrompt ? "prompt" : !hasVideo ? "video" : null;
+  // Which step is "next"（红色高亮，纯引导性建议，不驱动 disabled；与 shot-drawer.tsx 共用同一份判断）
+  const nextStep = resolveShotNextStep({ anchorFirst, anchorLastAi, cutPoint, videoPrompt, videoUrl });
 
   async function patchShot(fields: Record<string, unknown>) {
     await apiFetch(`/api/projects/${projectId}/shots/${id}`, {

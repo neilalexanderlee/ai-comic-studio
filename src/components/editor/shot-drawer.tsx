@@ -23,7 +23,7 @@ import {
   History,
 } from "lucide-react";
 import { getModelMaxDuration } from "@/lib/ai/model-limits";
-import { getShotVideoReadiness } from "@/lib/storyboard/shot-video-readiness";
+import { getShotVideoReadiness, resolveShotNextStep } from "@/lib/storyboard/shot-video-readiness";
 import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
 import { FrameReferencePicker, type FrameRefPickerShot } from "./frame-reference-picker";
@@ -207,6 +207,8 @@ export function ShotDrawer({
   const canGenerateVideo = videoReadiness.ready;
   const hasVideoPrompt = !!shot.videoPrompt;
   const hasVideo = !!shot.videoUrl;
+  // 红色高亮的"推荐下一步"，跟主页面 shot-card.tsx 共用同一份判断，避免再次跑偏
+  const nextStep = resolveShotNextStep(shot);
   const localGenerating =
     frameActions.frameActionsBusy || generatingVideo || generatingPrompt;
   const chainSourceHint = formatChainSourceHint(chainSourceSequence, chainSourceType);
@@ -584,9 +586,9 @@ export function ShotDrawer({
             )}
             <Button
               size="xs"
-              variant={hasFrame && !hasVideoPrompt ? "default" : "outline"}
+              variant={nextStep === "prompt" ? "default" : "outline"}
               onClick={handleGenerateVideoPrompt}
-              disabled={generatingPrompt || !hasFrame || anyGenerating}
+              disabled={generatingPrompt || anyGenerating}
             >
               {generatingPrompt ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
               {generatingPrompt
@@ -634,7 +636,7 @@ export function ShotDrawer({
               />
               <Button
                 size="xs"
-                variant={hasVideoPrompt && !hasVideo ? "default" : "outline"}
+                variant={nextStep === "video" ? "default" : "outline"}
                 onClick={handleGenerateVideo}
                 disabled={generatingVideo || !canGenerateVideo || anyGenerating}
                 title={!canGenerateVideo && !videoReadiness.ready ? videoReadiness.message : undefined}

@@ -57,6 +57,34 @@ export function getShotVideoReadiness(
   return { ready: true };
 }
 
+export type ShotNextStep = "frame" | "prompt" | "video" | null;
+
+/**
+ * "推荐下一步"状态机，驱动主页面/drawer 三个按钮里哪个显示为高亮（default 变体，红色）。
+ * 只是引导性建议：即使 multimodal 模式下首帧不是硬性前提，先生成首帧对视频质量仍有帮助，
+ * 所以这里继续把「画面→提示词→视频」当默认推荐顺序，不因为首帧变可选就改变推荐顺序。
+ *
+ * 重要：这个函数只决定按钮"是不是红色"，不决定按钮"能不能点"——能不能点必须看各自
+ * 真实的后端前提（提示词生成不需要首帧；视频生成看 getShotVideoReadiness 的三态判断），
+ * 不要把这里的返回值拿去当 disabled 条件用。主页面与 drawer 必须共用这一份实现，
+ * 不要各自再写一遍，否则会重新出现两边判断条件不同步的问题。
+ */
+export function resolveShotNextStep(
+  shot: {
+    anchorFirst?: string | null;
+    anchorLastAi?: string | null;
+    cutPoint?: string | null;
+    videoPrompt?: string | null;
+    videoUrl?: string | null;
+  }
+): ShotNextStep {
+  const hasFrame = !!(shot.anchorFirst || shot.anchorLastAi || shot.cutPoint);
+  if (!hasFrame) return "frame";
+  if (!shot.videoPrompt) return "prompt";
+  if (!shot.videoUrl) return "video";
+  return null;
+}
+
 /** @deprecated isCrowdShot 已移除，用无参版本 getShotVideoReadiness */
 export function shouldUseFirstFrameVideoMode(
   shot: { anchorLastAi?: string | null }
