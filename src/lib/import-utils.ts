@@ -77,8 +77,8 @@ function normalizeParens(s: string): string {
  * 4. 形态 suffix e.g. (人形态), (龙形态) → KEPT (these are distinct character forms)
  * 5. All other parentheticals (role, title, race, emotion) → stripped so that
  *    "角色戊(敌军将领)" and "角色戊" → same key,
- *    "格朗(矮人斧手)" and "格朗" → same key,
- *    "翠缇娜(精灵公主)" and "翠缇娜" → same key.
+ *    "角色己(矮人斧手)" and "角色己" → same key,
+ *    "角色庚(精灵公主)" and "角色庚" → same key.
  */
 export function canonicalCharacterNameKey(raw: string): string {
   const trimmed = normalizeParens(raw).replace(/\s+/g, " ");

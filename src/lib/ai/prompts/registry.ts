@@ -14,10 +14,6 @@ import {
 import { REF_VIDEO_PROMPT_DEFAULT_SLOTS } from "./ref-video-prompt-defaults";
 import { OUTLINE_EXPAND_SYSTEM_DEFAULT } from "./outline-expand-defaults";
 import {
-  SINGLE_SHOT_REWRITE_DEFAULT_SLOTS,
-  assembleSingleShotRewriteSystem,
-} from "./single-shot-rewrite-defaults";
-import {
   STORYBOARD_REWRITE_SYSTEM,
   PLOT_OPTIMIZE_SYSTEM,
 } from "./storyboard-supervision";
@@ -603,9 +599,9 @@ DERIVATION EXAMPLES (plot action → directorial concept):
   ❌ Generic: 【视觉核心：丹眉离开 | 反差：无 | 排除：无】
   ✅ Director: 【视觉核心：布袋子作为被遗忘的秘密等待揭示 | 反差：人物离开→布袋子留下被镜头注视 | 排除：不跟丹眉出门，不拍门关上，镜头停留在布袋子上】
 
-  Plot: "两人对话，李明告诉灵瑶真相"
+  Plot: "两人对话，李明告诉角色乙真相"
   ❌ Generic: 【视觉核心：对话场景 | 反差：说者vs听者 | 排除：无】
-  ✅ Director: 【视觉核心：灵瑶听到真相时手的反应比脸更诚实 | 反差：李明的台词（声音）vs 灵瑶手指慢慢收紧（身体） | 排除：不拍灵瑶的脸，只拍她的手——脸的表情可以控制，手不会说谎】
+  ✅ Director: 【视觉核心：角色乙听到真相时手的反应比脸更诚实 | 反差：李明的台词（声音）vs 角色乙手指慢慢收紧（身体） | 排除：不拍角色乙的脸，只拍她的手——脸的表情可以控制，手不会说谎】
 
   Plot: "将军走向战场"
   ❌ Generic: 【视觉核心：将军前进 | 反差：无 | 排除：无】
@@ -704,6 +700,10 @@ Do NOT include dialogue text in startFrame or endFrame.
 startFrame = INITIAL STATE before action begins (starting poses, opening expressions, camera at start position)
 endFrame = END STATE after action completes — must be visually stable (not mid-motion), creates natural visual bridge to the next shot
 
+TRIGGER-REACTION RULE: If the shot's action is set off by an off-screen/environmental trigger (a sound, a shout, a light change), startFrame MUST be locked to the character's reaction-onset pose (turning head, pausing mid-step, ears perking) — NOT a pose from mid-way through the action that follows (e.g. NOT "stride already extended" / "both feet off the ground" / "arm already swinging"). The corresponding motionScript's first segment must likewise be a brief, standalone reaction beat before the main action — see the TRIGGER-REACTION RULE in the motionScript section below.
+  ❌ BAD startFrame for "hears an off-screen sound, then sprints toward it": "3/4 side profile, torso leaning forward mid-stride, both feet suspended above the ground" — this is a mid-run pose, not the pose at the moment the sound is first heard.
+  ✅ GOOD startFrame for the same shot: "character standing still, head half-turned toward the sound source, both feet planted together, weight not yet shifted"
+
 ═══════════════════════════════════════════════════
   Scene Transition Rules — FORWARD GENERATION
 ═══════════════════════════════════════════════════
@@ -790,6 +790,10 @@ const SHOT_SPLIT_MOTION_SCRIPT_RULES = `═════════════�
 ═══════════════════════════════════════════════════
 FORMAT: "0-2s: [action]. 2-4s: [action]. 4-6s: [action]. ..."
 STRICT RULE: each segment spans AT MOST 3 seconds. A 10s shot = at least 4 segments.
+
+TRIGGER-REACTION RULE: If the action is set off by an off-screen/environmental trigger (a sound, a shout, a light change) that leads into a full-force action (sprinting, turning to fight, lunging), the FIRST segment must be a short, standalone reaction beat (turning head, pausing mid-step, ears perking — 1-2s is fine) — do NOT compress the trigger and the already-unfolding action into the same segment. This keeps the "hears X, THEN reacts" causality visible on screen instead of starting the clip already mid-action.
+  BAD: "0-4s: An off-screen sound rings out, [character] sprints toward it, cloak whipping through the air, light flickers across his body." (trigger and full sprint compressed into one beat, no reaction buffer)
+  GOOD: "0-1s: An off-screen sound rings out → [character]'s stride catches, he turns his ear toward it. 1-4s: he pivots and sprints toward it, cloak whipping through the air."
 
 CAMERA MOVEMENT FORMULA (per segment): 起幅构图描述 + 运镜动作 + 运镜幅度 + 落幅构图描述
 运镜动词: 推/拉/摇/移/跟/升/降/甩/环绕/旋转/变焦

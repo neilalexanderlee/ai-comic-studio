@@ -1,18 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 2D扁平风（Flat Design）
-metaData: director_skills
----
-
-# 分镜提示词 · 2D扁平风 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**2D扁平风（Flat Design）**风格的分镜提示词生成。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 情绪 → 面容/眼神词映射
 
@@ -30,6 +16,7 @@ metaData: director_skills
 | 紧张 / 不安 | 线条变细，眉头符号 | 眼睛变小，目光不确定 | 手位紧张，扁平化 |
 
 ---
+
 
 ## 色彩氛围词库（扁平风）
 
@@ -57,6 +44,7 @@ metaData: director_skills
 
 ---
 
+
 ## 场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -71,6 +59,7 @@ metaData: director_skills
 | 室内空间 | 简洁隔断，纯色墙面，几何门窗，现代简约 |
 
 ---
+
 
 ## 固定风格锚定词（所有输出必须包含）
 
@@ -117,6 +106,7 @@ no 3D rendering, no photorealism, no shadows, no gradients, no textures, no real
 
 ---
 
+
 ## 美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -132,58 +122,4 @@ no 3D rendering, no photorealism, no shadows, no gradients, no textures, no real
 > 💡 **例外**：故事世界内的道具文字（招牌、路牌、标识、书籍等场景中自然存在的文字）**不属于禁止范围**。当分镜画面描述中包含此类内容时，应如实描写其存在并要求文字清晰。
 
 ---
-
-## 完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 扁平风格两人相遇，橙色与蓝色色块对比，简洁背景 | 城市 | 角色A/B | 5s | 中景 | 静止 | 对视微笑，简洁线条 | 心动 / 温暖 | 暖色对比 + 留白 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-2D扁平风，Flat Design，无阴影无渐变，纯色色块，简洁线条，中景构图，两个扁平角色半身入镜，纯色填充，无纹理无渐变，几何造型，扁平化设计，清晰轮廓线，线条均匀一致，无断线无粗糙边缘，色彩饱和适中，色块对比清晰，无复杂光影层次，扁平风格两人相遇，橙色与蓝色色块对比，简洁背景，对视微笑，线条简洁，眼神明亮，暖色对比，留白较多，简约现代氛围，扁平设计美学，清晰情感表达，现代感视觉，高清画质，线条清晰，色彩纯净，画面无杂色无噪点，无阴影无渐变。
-Based on the reference image of 角色A/B, maintain consistent: face features, hairstyle, costume details. Generate a new scene: two flat characters meeting in city, orange and blue color block contrast, simple background, smiling and looking at each other. Keep character appearance identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a 2D flat design storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 角色A/B — flat design characters, geometric shapes, simple lines, pure colors
-</character_reference>
-<continuity_rules>
-- Same color palette, face features, hairstyle across ALL shots
-- Same environment, background color, geometric style
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
-</continuity_rules>
-<shot>
-Medium shot, two flat characters meeting in city, orange and blue color block contrast, simple background, smiling and looking at each other, geometric shapes, simple lines, pure colors, no shadows, no gradients, clean lines, high-quality 2D flat design, no noise, no artifacts.
-</shot>
-<negative>
-no 3D rendering, no photorealism, no shadows, no gradients, no textures, no realistic lighting, no realistic materials, no complex details, no detailed backgrounds, no realistic faces, no realistic hair, no realistic clothing
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 色彩匹配 |
-|------|-----------|---------|
-| 心动 | 圆润线条，橙色色块 | 暖粉 + 暖橙对比 |
-| 悲伤 | 直线线条，冷色色调 | 冷蓝 + 灰色单色 |
-| 温柔 | 柔和线条，暖色色调 | 暖黄 + 米白柔和 |
-| 浪漫 | 曲线线条，粉色色调 | 暖粉 + 暖橙对比 |
-| 感动 | 上扬线条，暖色色调 | 暖橙 + 暖黄主色 |
-| 孤独 | 冷色线条，简洁表情 | 冷蓝 + 紫色单色 |
-| 快乐 | 圆形线条，明亮表情 | 暖橙 + 黄色对比 |
 

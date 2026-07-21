@@ -99,7 +99,7 @@ export function pruneSceneDescForVideoPrompt(text: string): string | undefined {
   if (!trimmed) return undefined;
 
   // 仅剥离：句首是人物外形标注（括号包裹的外形描述）、句尾无动词的纯外观定格句。
-  // 例：「龙渊（矮小瘦弱黑碎发琥珀眼）」→ 这类句子若没有谓语动词则剥除。
+  // 例：「角色甲（矮小瘦弱黑碎发琥珀眼）」→ 这类句子若没有谓语动词则剥除。
   // 保留：一切含事件动词、环境变化、声音描述的句子。
   const APPEARANCE_ONLY_RE = /^[^\s，。]{1,6}（[^）]{1,40}）\s*$/;
 
@@ -126,10 +126,10 @@ export function pruneSceneDescForVideoPrompt(text: string): string | undefined {
  * - Old format without `[]` passes through unchanged (backward compatibility)
  *
  * opts.prose = true（直出模式）：去除时间码前缀，跨段用「，随后」衔接，输出纯散文。
- *   示例："龙渊回头望向灵瑶、迈步走近，随后灵瑶嘴唇微颤无声"
+ *   示例："角色甲回头望向角色乙、迈步走近，随后角色乙嘴唇微颤无声"
  *
  * opts.prose = false / 默认：保留时间码，供 LLM 精炼时理解分段意图。
- *   示例："0-3s: 龙渊回头望向灵瑶 3-7s: 灵瑶嘴唇微颤无声"
+ *   示例："0-3s: 角色甲回头望向角色乙 3-7s: 角色乙嘴唇微颤无声"
  */
 export function expandMotionScriptBrackets(motionScript: string, opts?: { prose?: boolean }): string {
   const trimmed = motionScript.trim();

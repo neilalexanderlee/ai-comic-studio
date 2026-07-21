@@ -20,7 +20,7 @@ import { expandMotionScriptBrackets } from "@/lib/ai/prompts/ref-video-prompt-ge
 
 describe("旧格式（无 []）透传", () => {
   it("没有 bracket 时原样返回", () => {
-    const input = "0-3s: 龙渊回头望向灵瑶 3-7s: 灵瑶嘴唇微颤无声";
+    const input = "0-3s: 角色甲回头望向角色乙 3-7s: 角色乙嘴唇微颤无声";
     expect(expandMotionScriptBrackets(input)).toBe(input);
   });
 
@@ -56,17 +56,17 @@ describe("单主体 bracket（无角色名冒号）", () => {
 
 describe("具名角色 bracket（角色名:动作→动作）", () => {
   it("展开为「角色名动作、动作」", () => {
-    const input = "0-3s: [龙渊:转身→迈步]";
+    const input = "0-3s: [角色甲:转身→迈步]";
     const result = expandMotionScriptBrackets(input);
-    expect(result).toContain("龙渊转身、迈步");
+    expect(result).toContain("角色甲转身、迈步");
     expect(result).not.toContain("[");
     expect(result).not.toContain("→");
   });
 
   it("短名字（≤8字）认为是角色名", () => {
-    const input = "0-4s: [灵瑶:嘴唇微颤→眼睑下垂]";
+    const input = "0-4s: [角色乙:嘴唇微颤→眼睑下垂]";
     const result = expandMotionScriptBrackets(input);
-    expect(result).toContain("灵瑶嘴唇微颤、眼睑下垂");
+    expect(result).toContain("角色乙嘴唇微颤、眼睑下垂");
   });
 
   it("冒号前含标点 → 不当角色名处理，整体 → 替换为 、", () => {
@@ -82,12 +82,12 @@ describe("具名角色 bracket（角色名:动作→动作）", () => {
 
 describe("同一时间段多个 bracket — 叙事顺序锁定", () => {
   it("多个 bracket 用「；随后」衔接（默认模式）", () => {
-    const input = "0-7s: [龙渊:转身→迈步] [灵瑶:嘴唇微颤→眼睑下垂]";
+    const input = "0-7s: [角色甲:转身→迈步] [角色乙:嘴唇微颤→眼睑下垂]";
     const result = expandMotionScriptBrackets(input);
-    expect(result).toContain("龙渊转身、迈步");
-    expect(result).toContain("灵瑶嘴唇微颤、眼睑下垂");
-    // 龙渊在前（叙事先行）
-    expect(result.indexOf("龙渊")).toBeLessThan(result.indexOf("灵瑶"));
+    expect(result).toContain("角色甲转身、迈步");
+    expect(result).toContain("角色乙嘴唇微颤、眼睑下垂");
+    // 角色甲在前（叙事先行）
+    expect(result.indexOf("角色甲")).toBeLessThan(result.indexOf("角色乙"));
   });
 
   it("三个 bracket 保持顺序", () => {
@@ -105,7 +105,7 @@ describe("同一时间段多个 bracket — 叙事顺序锁定", () => {
 
 describe("默认模式 — 保留时间码", () => {
   it("展开后时间码仍在结果中", () => {
-    const input = "0-3s: [李明:转身] 3-7s: [灵瑶:抬头]";
+    const input = "0-3s: [李明:转身] 3-7s: [角色乙:抬头]";
     const result = expandMotionScriptBrackets(input);
     expect(result).toMatch(/0-3s/);
     expect(result).toMatch(/3-7s/);
@@ -137,10 +137,10 @@ describe("prose 模式（opts.prose = true）", () => {
   });
 
   it("单段 prose — 无「，随后」", () => {
-    const input = "0-5s: [龙渊:握剑→前冲]";
+    const input = "0-5s: [角色甲:握剑→前冲]";
     const result = expandMotionScriptBrackets(input, { prose: true });
     expect(result).not.toContain("，随后");
-    expect(result).toContain("龙渊握剑、前冲");
+    expect(result).toContain("角色甲握剑、前冲");
   });
 
   it("prose 模式：无 bracket 时原样返回（旧格式兼容）", () => {
@@ -153,20 +153,20 @@ describe("prose 模式（opts.prose = true）", () => {
 
 describe("朝向后缀 | 朝向：xxx", () => {
   it("默认模式保留朝向后缀", () => {
-    const input = "0-5s: [龙渊:转身] | 朝向：龙渊正面面朝镜头";
+    const input = "0-5s: [角色甲:转身] | 朝向：角色甲正面面朝镜头";
     const result = expandMotionScriptBrackets(input);
-    expect(result).toContain("朝向：龙渊正面面朝镜头");
+    expect(result).toContain("朝向：角色甲正面面朝镜头");
   });
 
   it("prose 模式朝向后缀以「，朝向」形式追加", () => {
-    const input = "0-5s: [龙渊:转身] | 朝向：龙渊正面面朝镜头";
+    const input = "0-5s: [角色甲:转身] | 朝向：角色甲正面面朝镜头";
     const result = expandMotionScriptBrackets(input, { prose: true });
     expect(result).toContain("朝向");
-    expect(result).toContain("龙渊正面面朝镜头");
+    expect(result).toContain("角色甲正面面朝镜头");
   });
 
   it("朝向后缀不出现在展开正文中", () => {
-    const input = "0-4s: [灵瑶:抬头] | 朝向：灵瑶侧面右朝";
+    const input = "0-4s: [角色乙:抬头] | 朝向：角色乙侧面右朝";
     const result = expandMotionScriptBrackets(input);
     // 朝向应在最末尾，正文里不应在时间段展开里出现
     const bodyEnd = result.indexOf("| 朝向");
@@ -185,11 +185,11 @@ describe("完整句子 — buildDirectVideoPrompt 用法场景", () => {
   });
 
   it("多角色跨段 prose", () => {
-    const input = "0-3s: [龙渊:握剑] [灵瑶:后退] 3-7s: [龙渊:挥剑]";
+    const input = "0-3s: [角色甲:握剑] [角色乙:后退] 3-7s: [角色甲:挥剑]";
     const result = expandMotionScriptBrackets(input, { prose: true });
-    expect(result).toContain("龙渊握剑");
-    expect(result).toContain("灵瑶后退");
+    expect(result).toContain("角色甲握剑");
+    expect(result).toContain("角色乙后退");
     expect(result).toContain("，随后");
-    expect(result).toContain("龙渊挥剑");
+    expect(result).toContain("角色甲挥剑");
   });
 });

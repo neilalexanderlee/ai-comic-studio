@@ -1,18 +1,4 @@
----
-name: liveaction_urban_storyboard
-description: 导演分镜提示词技法 · 真人都市写实
-metaData: director_liveaction_urban_skills
----
-
-# 分镜提示词 · 真人都市写实 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**真人都市写实**风格的分镜提示词生成，适配都市剧情、职场成长、青春治愈、市井生活、都市悬疑等真人实拍影视题材的分镜创作。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 一、情绪 → 面容、眼神词映射
 
@@ -32,6 +18,7 @@ metaData: director_liveaction_urban_skills
 | 决绝 / 坚定 | 面部线条清晰，下颌微抬 | 眼神笔直向前，不回避不躲闪 | 下巴微收或微抬，表情果敢但不凶悍 |
 
 ---
+
 
 ## 二、光影氛围词库
 
@@ -84,6 +71,7 @@ metaData: director_liveaction_urban_skills
 
 ---
 
+
 ## 三、场景质感约束词
 
 | 场景类型 | 摄影必须捕捉的元素 |
@@ -100,6 +88,7 @@ metaData: director_liveaction_urban_skills
 | 校园/教室 | 课桌椅的排列和使用痕迹、黑板上的粉笔字残留、窗户的自然光打进教室、走廊的纵深透视 |
 
 ---
+
 
 ## 四、固定风格锚定词
 
@@ -146,6 +135,7 @@ no 3D render, no CGI, no Unreal Engine, no Blender, no PBR material, no game eng
 
 ---
 
+
 ## 五、美学禁止项
 
 以下词汇/风格不得出现于输出提示词中：
@@ -161,73 +151,6 @@ no 3D render, no CGI, no Unreal Engine, no Blender, no PBR material, no game eng
 
 ---
 
-## 六、完整生成示例
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|---|---|---|---|---|---|---|---|---|---|
-| 1 | 年轻职场女性身着西装站在写字楼落地窗前，手持咖啡杯望向窗外 | 现代写字楼 | 职场女性 | 6s | 中景 | 缓推 | 侧身持杯，目光望向窗外城市天际线 | 干练/沉稳 | 窗光冷白主光，午后斜光 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-真人实拍摄影，真人电影剧照，当代中国都市，电影级摄影，自然光与人造光调度，真实色彩科学，真人写实摄影质感，真实皮肤纹理毛孔可见，不磨皮不硅胶脸，发丝自然质感有碎发，服饰面料纹理可见有穿着褶皱，自然微表情，真实肢体语言，中景构图，年轻职场女性身着西装站在写字楼落地窗前，手持咖啡杯侧身而立，神情利落，眼神笃定直视窗外，午后窗光从侧方斜入（约45°），冷白自然光（5000-5500K）为主光，长阴影穿过地面，玻璃幕墙呈现多层反射和城市天际线倒影，浅景深虚化窗外远景，真人写实摄影，当代中国都市电影质感，电影级摄影画面，非3D非渲染非CG，真人摄影高清画质，电影级画面质感，画面无字幕、无水印、无标题叠字、无UI元素。
-Based on the reference image of 职场女性，maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing in front of the floor-to-ceiling window of a modern office building, holding a coffee cup. Keep visual style identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a live-action urban cinema storyboard photographer.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 职场女性 — 真人写实摄影，职场西装，干练气质，真人都市风格
-</character_reference>
-<continuity_rules>
-- Same outfit, hairstyle, face features across ALL shots
-- Same live-action cinematic photography style, real human skin texture
-- Same contemporary Chinese urban scene lighting
-- Do NOT introduce 3D render, CGI, ancient Chinese style, cyberpunk or non-urban fantasy elements
-</continuity_rules>
-<shot>
-Medium shot, young professional woman in business suit standing in front of the floor-to-ceiling window of a modern office building, holding a coffee cup, side profile looking out the window, sharp and calm expression, determined gaze, afternoon window light entering from side at 45-degree angle, cool white natural daylight 5000-5500K as key light, long soft shadows across the floor, glass curtain wall with multi-layer reflections and city skyline, shallow depth of field blurring the distant city outside, real human skin texture with visible pores, natural hair with flyaway strands, fabric texture with subtle wear wrinkles, live-action cinematic photography, contemporary Chinese urban film look, no subtitles, no captions, no watermark, no title overlay, no UI elements.
-</shot>
-<negative>
-no 3D render, no CGI, no Unreal Engine, no Blender, no PBR material, no game engine, no 2D cartoon, no anime, no illustration, no hand drawn, no painting, no plastic skin, no wax face, no airbrushed, no poreless skin, no silicone face, no ancient Chinese style, no traditional costume, no cyberpunk, no sci-fi, no western fantasy, no medieval, no non-Chinese urban, no plastic mannequin, no symmetrical model pose, no branded new clothes, no showroom, no wrong anatomy, no deformed face, no broken limbs, no distorted body, no subtitles, no captions, no watermark, no title overlay, no UI text
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 光线匹配 |
-|---|---|---|
-| 干练/沉稳 | 神情利落，目光笃定 | 窗光冷白主光 + 轮廓自然反差 |
-| 忧伤/落寞 | 眉眼低垂，目光涣散 | 冷调漫射光 + 低反差，单光源侧打 |
-| 温柔/治愈 | 眉目舒展，眼神温润 | 大面积柔光漫射 + 暖调窗光 |
-| 冷峻/戒备 | 面部微绷，眼神锐利 | 硬光侧打 + 大光比冷暖对冲 |
-| 喜悦/鲜活 | 眼角笑纹，眼神明亮 | 充足自然光 + 高调通透 |
-| 沉思/内省 | 神情淡然，目光放远 | 单点暖光源 + 弱环境光 |
-| 疲惫/倦怠 | 眼窝微陷，目光朦胧 | 柔和漫射光 + 低反差低饱和 |
-| 坚定/决绝 | 下颌微抬，目光笔直 | 侧射硬光 + 清晰轮廓光 |
-
-### 场景 → 光源速查
-
-| 场景 | 默认光源 | 色温 |
-|---|---|---|
-| 写字楼办公室 | 窗光（日间）+ 屏幕冷光补面 | 5000-5500K主 / 6500K屏光 |
-| 咖啡厅 | 暖调顶灯/吊灯 + 窗光 | 2800-3200K主 |
-| 出租屋/公寓 | 窗光（日间）/ 台灯+窗外街灯（夜间） | 4500K日 / 2800K夜 |
-| 城市街道 | 日光（日间）/ 街灯+霓虹+车灯（夜间） | 按时刻变 |
-| 便利店（深夜） | 荧光灯管冷白 + 冰柜冷光 | 4000-5000K |
-| 天台 | 天空光为主，日光/月光/蓝调时刻 | 按时刻变 |
-| 地铁站 | 日光灯冷白 + 广告灯箱 | 4000-5000K |
-| 老城区巷弄 | 街灯暖（夜间）/ 天光+路面反射（日间） | 2000-2800K夜 |
-
----
 
 ## 七、写实进阶技法（声音设计 / 多光源分层 / 摄影机语言）
 

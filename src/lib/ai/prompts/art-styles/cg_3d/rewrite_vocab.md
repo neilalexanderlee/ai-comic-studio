@@ -1,18 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 3D 动画渲染
-metaData: director_skills
----
-
-# 分镜提示词 · 3D 动画渲染 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**3D 动画渲染**风格的分镜提示词生成。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 情绪 → 面容/眼神词映射
 
@@ -30,6 +16,7 @@ metaData: director_skills
 | 紧张 / 不安 | 表情略显僵硬，眉头微皱 | 眼神游离，目光不确定 | 手指捏紧，动作紧张 |
 
 ---
+
 
 ## 光影氛围词库（3D 动画渲染）
 
@@ -57,6 +44,7 @@ metaData: director_skills
 
 ---
 
+
 ## 场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -71,6 +59,7 @@ metaData: director_skills
 | 车内/公共交通 | 座椅布料，车窗反射，仪表盘光，窗外街景虚化 |
 
 ---
+
 
 ## 固定风格锚定词（所有输出必须包含）
 
@@ -122,6 +111,7 @@ no photorealism, no realistic rendering, no CG realism, no dark tones, no heavy 
 
 ---
 
+
 ## 美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -138,45 +128,6 @@ no photorealism, no realistic rendering, no CG realism, no dark tones, no heavy 
 
 ---
 
-## 完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 黄昏街道上，女孩站在路口，晚霞洒在发丝上 | 街道 | 女孩 | 5s | 中景 | 缓推 | 手提购物袋，侧身微笑望向远方 | 期待 / 温暖 | 黄昏霞光 + 暖调侧光 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-3D 动画渲染，赛璐珞质感，电影级打光，高细节材质，中景构图，人物半身入镜，清晰轮廓线，明快卡通渲染，轮廓线均匀一致，无断线无粗糙边缘，高细节材质，写实材质与卡通比例结合，材质纹理清晰，表面质感细腻，黄昏街道上，女孩站在路口，手提购物袋，侧身微笑望向远方，眼神期待又温暖，晚霞洒在发丝上，逆光霞光，暖橙主调，粉色点缀，柔和光影层次，明暗对比清晰，光效柔和自然，愉悦治愈氛围，3D 动画美学，温馨情感表达，现代都市风情，8K 超高清，线条清晰，材质细腻，色彩饱满，画面无杂色无噪点。
-Based on the reference image of 女孩, maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing on a street corner at sunset, holding a shopping bag, smiling gently at the distance. Keep character appearance identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a 3D animation storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 女孩 — long brown hair, gentle eyes, modern casual outfit, slim body shape
-</character_reference>
-<continuity_rules>
-- Same wardrobe, hairstyle, face features across ALL shots
-- Same environment, lighting style, color grade
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
-</continuity_rules>
-<shot>
-Medium shot, character standing on a street corner at sunset, holding a shopping bag with one hand, smiling gently at the distance, eyes filled with expectation and warmth, sunset backlight on hair, warm cel-shading, detailed materials, clear outline lines, cinematic lighting, warm tones, soft shallow depth of field, modern urban aesthetic, healing atmosphere, high-quality 3D animation, 8K ultra HD, clear line art, detailed materials, no digital artifacts, no grain.
-</shot>
-<negative>
-no photorealism, no realistic rendering, no CG realism, no dark tones, no heavy shading, no oversaturated colors, no neon colors, no cyberpunk, no sci-fi elements, no futuristic design, no plastic look, no cartoon flat coloring without depth
-</negative>
-```
 
 ## 摄影机语言词库（3D 动画运镜）
 
@@ -197,6 +148,7 @@ no photorealism, no realistic rendering, no CG realism, no dark tones, no heavy 
 `起幅[景别] → 运动方式+速度 → 落幅[景别]，目的：[揭示/跟随/强调什么]`
 
 ---
+
 
 ## 声音设计词库（3D 动画 · 愉悦治愈题材）
 
@@ -231,17 +183,3 @@ no photorealism, no realistic rendering, no CG realism, no dark tones, no heavy 
 
 ---
 
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 光线匹配 |
-|------|-----------|---------|
-| 心动 | 嘴角微扬，脸颊微红 | 逆光霞光暖调 |
-| 悲伤 | 神情低落，眼眶微红 | 冷调侧光低调 |
-| 温柔 | 神情柔和，眉眼温润 | 均匀漫射暖光 |
-| 浪漫 | 眼神专注，目光深情 | 逆光暖调光晕 |
-| 感动 | 眼角带笑，表情真诚 | 暖调侧光柔和 |
-| 孤独 | 神情安静，目光放空 | 冷调侧光暗部 |
-| 快乐 | 笑容灿烂，眼睛明亮 | 暖调漫射光 |
-| 甜蜜 | 眼神明亮，表情生动 | 逆光轮廓光 |

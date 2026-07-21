@@ -45,11 +45,11 @@ export function normalizeCharacterName(name: string): string {
 /**
  * Normalize keeping age qualifiers (e.g. "10岁") but stripping emotion/state.
  * Used for the first-pass exact match in dialogue-to-character resolution,
- * so "龙渊（10岁）" matches the 10-year-old variant and "龙渊" matches the adult.
+ * so "角色甲（10岁）" matches the 10-year-old variant and "角色甲" matches the adult.
  *
  * Examples:
- *   龙渊（10岁）       → 龙渊(10岁)
- *   龙渊（10岁·愤怒）  → 龙渊(10岁)
+ *   角色甲（10岁）       → 角色甲(10岁)
+ *   角色甲（10岁·愤怒）  → 角色甲(10岁)
  *   魔王(人形态·愤怒)  → 魔王(人形态)
  *   林小白(紧张)       → 林小白
  */

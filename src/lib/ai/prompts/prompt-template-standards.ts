@@ -28,6 +28,9 @@ export const BANNED_PLOT_TERMS_IN_TEMPLATES = [
   "林峰",
   "翠蒂娜",
   "凌瑶",
+  "翠缇娜",
+  "格朗",
+  "姜离",
 ] as const;
 
 /** 全库 deplot 扫描时排除的路径（相对仓库根）。standards 文件含禁止词列表本身。 */
@@ -39,7 +42,6 @@ export const REPO_DEPLOT_EXCLUDE_RELATIVE = [
 export const PROMPT_TEMPLATE_SOURCE_FILES = [
   "registry.ts",
   "ref-video-prompt-defaults.ts",
-  "single-shot-rewrite-defaults.ts",
   "character-extract-defaults.ts",
   "character-extract.ts",
   "import-character-extract-defaults.ts",

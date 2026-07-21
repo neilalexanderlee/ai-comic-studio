@@ -1,4 +1,4 @@
-import { getArtStylePrompt } from "./art-styles/index";
+import { VISUAL_STYLE_PRESETS } from "./visual-style-presets";
 
 // ── 景别词库（通用，移植自 Toonflow storyboard_prompt_techniques.md）──
 const FRAMING_MAP: Record<string, string> = {
@@ -86,7 +86,7 @@ function extractLightingHintFromDesc(desc: string): string {
 
 /**
  * 根据提取到的光影词，返回 Toonflow 风格的氛围限定词。
- * 对齐 storyboard.md 光影表「补充约束」列：光源词单独出现会让模型渲染硬打光光柱，
+ * 对齐 art-styles/<style>/rewrite_vocab.md 光影表「补充约束」列：光源词单独出现会让模型渲染硬打光光柱，
  * 加上氛围词后模型理解为整体光效氛围而非聚光灯。
  */
 function getLightingAtmosphere(lightHint: string): string {
@@ -290,7 +290,7 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
   const styleContent = buildStyleSection(visualStyle, visualStyleTag);
   parts.push(`【风格】${styleContent}，禁止画外字幕、水印、UI 文字。`);
 
-  // ── 9b. 负向词（从 storyboard.md 的模式B负向词模板提取）──
+  // ── 9b. 负向词（从 VISUAL_STYLE_PRESETS[style].negativePrompt 读取，见 visual-style-presets.ts）──
   // 注意：Seedream（模式A）不支持负向提示词，此段放在末尾仅在支持 negativePrompt 的模型中生效
   const negativePrompt = extractNegativePrompt(visualStyle);
   if (negativePrompt) {
@@ -309,29 +309,12 @@ export function buildStoryboardImagePrompt(params: StoryboardImageParams): strin
 }
 
 /**
- * 从 art-styles 文件中提取【风格】段所需的风格锚定词和画质锁定词。
- * 优先读取 storyboard.md 中「固定风格锚定词」和「画质锁定词」段落。
- * 找不到时 fallback 到 visualStyleTag。
+ * 【风格】段内容：visualStyleTag（VISUAL_STYLE_PRESETS[style].tag，全项目统一数据源）
+ * 由调用方（generate/route.ts）保证始终非空传入；auto/未设置风格时用通用兜底词。
  */
 function buildStyleSection(visualStyle: string, fallbackTag: string): string {
-  // visualStyleTag 是最直接、最准确的风格描述，优先使用
   if (fallbackTag) return fallbackTag;
-
-  if (!visualStyle || visualStyle === "auto") {
-    return "高清画质，线条清晰，上色均匀，色彩柔和，画面无杂色无噪点";
-  }
-
-  // fallback: 从 storyboard.md 提取模式A画质锁定词
-  const storyboardContent = getArtStylePrompt(visualStyle, "storyboard");
-  if (storyboardContent) {
-    // 提取"默认（...）：\n超清4K..." 或 "默认：\n高清..." 模式A锁定词
-    const qualityMatch = storyboardContent.match(
-      /默认[^：\n]*：\s*[\r\n]+((?:超清|高清)[^\r\n]+)/
-    );
-    if (qualityMatch) return qualityMatch[1].trim();
-  }
-
-  return "高清画质，线条清晰，色彩柔和，画面无杂色无噪点";
+  return "高清画质，线条清晰，上色均匀，色彩柔和，画面无杂色无噪点";
 }
 
 
@@ -341,27 +324,15 @@ const BASE_NEGATIVE_PROMPT =
   "no motion blur, no noise, no blurry, no out of focus, no AI generated look";
 
 /**
- * 从 art-styles/{style}/storyboard.md 提取模式B负向词模板。
- * 合并通用负向词 + 风格专属负向词，返回完整的 negative prompt 字符串。
- * 未找到风格专属时只返回通用词。
+ * 合并通用负向词 + VISUAL_STYLE_PRESETS[style].negativePrompt（风格专属负向词），返回完整
+ * negative prompt 字符串。未配置风格专属词时只返回通用词。
  */
 export function extractNegativePrompt(visualStyle?: string): string {
-  if (!visualStyle || visualStyle === "auto") return BASE_NEGATIVE_PROMPT;
+  const styleNeg = visualStyle ? VISUAL_STYLE_PRESETS[visualStyle]?.negativePrompt : undefined;
+  if (!styleNeg) return BASE_NEGATIVE_PROMPT;
 
-  const content = getArtStylePrompt(visualStyle, "storyboard");
-  if (!content) return BASE_NEGATIVE_PROMPT;
-
-  // 提取「模式B（英文）：」行之后的 no... 负向词行
-  const match = content.match(/模式B[^：]*：[\r\n]+(no [^\r\n]+)/);
-  if (match) {
-    const styleNeg = match[1].trim();
-    // 合并：风格专属词 + 通用词（去重）
-    const styleTerms = styleNeg.split(",").map((t) => t.trim());
-    const baseTerms = BASE_NEGATIVE_PROMPT.split(",").map((t) => t.trim());
-    const merged = [...new Set([...styleTerms, ...baseTerms])].join(", ");
-    return merged;
-  }
-
-  return BASE_NEGATIVE_PROMPT;
+  const styleTerms = styleNeg.split(",").map((t) => t.trim());
+  const baseTerms = BASE_NEGATIVE_PROMPT.split(",").map((t) => t.trim());
+  return [...new Set([...styleTerms, ...baseTerms])].join(", ");
 }
 

@@ -130,15 +130,15 @@ export async function persistStoryboardVersion(params: {
   // Two-step character lookup maps:
   //
   // Pass 1 — exact match WITH age qualifier preserved:
-  //   "龙渊（10岁）" → key "龙渊(10岁)"  matches 10-year-old variant
-  //   "龙渊"         → key "龙渊"         matches adult variant
-  // This prevents cross-episode contamination when both "龙渊" and "龙渊（10岁）"
+  //   "角色甲（10岁）" → key "角色甲(10岁)"  matches 10-year-old variant
+  //   "角色甲"         → key "角色甲"         matches adult variant
+  // This prevents cross-episode contamination when both "角色甲" and "角色甲（10岁）"
   // exist in the project and the LLM output includes the age qualifier for Ep1
   // but omits it for Ep2.
   //
   // Pass 2 — base-name fallback (strips age/emotion, current behavior):
-  //   Used only when Pass 1 finds no match (e.g. LLM writes "龙渊" but the project
-  //   only has "龙渊（10岁）" — pick the only available variant).
+  //   Used only when Pass 1 finds no match (e.g. LLM writes "角色甲" but the project
+  //   only has "角色甲（10岁）" — pick the only available variant).
   const charByExactName = new Map(
     shotCharacters.map((character) => [
       normalizeCharacterNameWithAge(character.name),

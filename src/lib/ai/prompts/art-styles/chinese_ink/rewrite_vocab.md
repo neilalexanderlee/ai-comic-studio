@@ -1,18 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 国风二次元新国潮
-metaData: director_skills
----
-
-# 分镜提示词 · 国风二次元新国潮 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**国风二次元新国潮**风格的分镜提示词生成。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 情绪 → 面容/眼神词映射
 
@@ -30,6 +16,7 @@ metaData: director_skills
 | 期待 / 盼望 | 眼神发光，表情鲜活 | 眼神期待，目光闪烁 | 嘴角上扬，表情生动 |
 
 ---
+
 
 ## 光影氛围词库（国风二次元新国潮）
 
@@ -55,6 +42,7 @@ metaData: director_skills
 
 ---
 
+
 ## 场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -67,6 +55,7 @@ metaData: director_skills
 | 夜晚街景 | 灯笼/街灯/店铺、暖光点缀、冷色背景、倒影反射、日式渲染 |
 
 ---
+
 
 ## 固定风格锚定词（所有输出必须包含）
 
@@ -113,6 +102,7 @@ no photorealistic, no realistic photography, no 3D render, no low-poly, no rough
 
 ---
 
+
 ## 美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -129,74 +119,4 @@ no photorealistic, no realistic photography, no 3D render, no low-poly, no rough
 > 💡 **例外**：某些现代渲染技术（如体积光、景深虚化）可以合理使用，但应保持国风二次元美学基调。
 
 ---
-
-## 完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 古装少女站在宫殿前，手持花枝，眼神温柔 | 宫殿 | 古装少女 | 6s | 中景 | 缓推 | 侧身持花，眼神温柔 | 温婉 / 典雅 | 暖光照明 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-国风二次元，新国潮美学，日式动画渲染，赛璐璐平涂，细腻笔触，二次元国风造型，线条清晰，赛璐璐上色，服饰细节精致，光影层次丰富，中景构图，古装少女站在宫殿前，手持花枝侧身而立，神情温柔，眼神温柔，朱红宫墙背景，金黄高光点缀，体积光氛围，景深虚化，国风二次元电影质感，东方古韵，新国潮风格，日式动画渲染技法，国风二次元高清渲染，高细节，细腻线条，赛璐璐平涂感，电影质感，画面无字幕、无水印、无标题叠字。
-Based on the reference image of 古装少女，maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing in front of palace at dusk, holding flower branch. Keep visual style identical to reference.
-
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are an anime storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 古装少女 — 国风二次元造型，典雅服饰，新国潮美学
-</character_reference>
-<continuity_rules>
-- Same outfit, hairstyle, face features across ALL shots
-- Same cel shading style, Japanese animation rendering
-- Same scene lighting, Chinese anime aesthetic
-- Do NOT introduce photorealistic or western fantasy elements
-</continuity_rules>
-<shot>
-Medium shot, ancient Chinese girl in elegant traditional attire standing before palace, holding flower branch, gentle expression, soft gaze, cinematic lighting, volumetric fog, depth of field blur, cel shading with fine brushstrokes, Chinese style anime, neo-chic aesthetic, Japanese animation rendering technique, high detail, no subtitles, no captions, no watermark, no title overlay.
-</shot>
-<negative>
-no photorealistic, no realistic photography, no 3D render, no low-poly, no rough modeling, no plastic texture, no harsh lines, no western fantasy, no cyberpunk, no sci-fi, no modern elements, no cartoon style without anime quality, no subtitles, no captions, no watermark, no title overlay, no UI text
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 光线匹配 |
-|------|-----------|---------|
-| 温柔 | 神情温柔，眼神专注 | 柔光漫射 + 暖光 |
-| 坚定 | 神情认真，目光清亮 | 暖光侧射 + 清晰轮廓 |
-| 羞涩 | 脸颊泛红，眼神躲闪 | 暖光侧射 + 腮红 |
-| 凌厉 | 神情冷峻，目光如刀 | 冷调阴影 + 硬光 |
-| 喜悦 | 表情灿烂，眼睛弯月 | 暖光照明 + 高饱和 |
-| 忧伤 | 神情哀婉，眼神黯淡 | 冷调阴影 + 低对比 |
-| 疲惫 | 眼神朦胧，表情柔和 | 柔和光线 + 低对比 |
-| 沉思 | 神情淡淡，目光悠远 | 体积光 + 雾气 |
-| 期待 | 眼神发光，表情鲜活 | 暖光侧射 + 高亮 |
-
-
-
-
-
-
-
-
-
-
-
-
-
 

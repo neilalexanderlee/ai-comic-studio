@@ -5,10 +5,11 @@ export type ArtStyleFileType =
   | "prefix"       // 全局色彩盘 + 必守/严禁规则
   | "character"    // 角色生成约束 + 模板
   | "scene"        // 场景生成约束 + 模板
-  | "storyboard"   // 分镜图提示词技法（图像生成侧：情绪→面容/光影词库）
   | "table"        // 分镜表生成约束（shot_split 侧：运镜禁忌/环境动态/节奏规范）
   | "planning"     // 导演规划（全片色调/光影方案/配乐方向）
-  | "video";       // 视频风格标签（Seedance/首尾帧模式）
+  | "rewrite_vocab"; // 图像/视频生成侧唯一词库（情绪→面容/光影/场景质感/风格锚定/美学禁止/进阶技法），
+                     // 供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。
+                     // 前身是 storyboard.md（已删除，内容已并入本类型对应文件，避免两处维护同一份词库）
 
 const STYLES_DIR = path.join(process.cwd(), "src/lib/ai/prompts/art-styles");
 

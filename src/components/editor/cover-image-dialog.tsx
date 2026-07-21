@@ -71,11 +71,13 @@ async function exportCoverForPlatform(imgSrc: string) {
   URL.revokeObjectURL(url);
 }
 
-const HERO_NAMES = ["龙渊", "灵瑶", "白夜", "萝拉", "翠缇娜", "格朗"];
+// 项目主角名单为空时的占位符：仅作为默认封面文案的示例角色，不绑定具体项目剧情。
+// 用户打开对话框后应根据实际角色名单编辑下方 DEFAULT_COVER_PROMPT 和参考图勾选。
+const HERO_NAMES = ["角色甲", "角色乙", "角色丙", "角色丁", "角色戊", "角色己"];
 
 const DEFAULT_COVER_PROMPT = `日本2D动漫风格，竖版史诗海报，电影级构图，极高画质。
-六位英雄并肩而立，由左至右依次为：格朗（棕红色大胡须、重型头盔、巨斧，魁梧矮人战士）、萝拉（紫色长发、法师长袍、永夜法杖，娇小少女法师）、龙渊（黑色短碎发、琥珀色眼睛、黑色剑士皮甲银色护具、双手持金刃大剑，居中最突出）、灵瑶（黑色马尾、棕色眼眸、暗红色旗袍、黑色拳套，立于龙渊右侧）、白夜（白色长发、白衣、竖瞳、背负太刀，冷峻气质）、翠缇娜（银色长发、翠绿眼眸、精灵弓箭手、纤细长腿，最右侧）。
-背景：上方是烈焰燃烧的天空与巨大黑色魔龙剪影（血红双眸），下方是废墟村庄的余烬橙红火光。整体色调橙红与深蓝对比，英雄们被暖光轮廓勾勒，顶部留有标题区（暗色渐变压字区）。手绘质感线条，高细节，短剧海报封面风格。`;
+多位主角并肩而立，构图居中人物最突出，两侧人物依次向外排开，服装/武器/发色各自区分角色身份。
+背景：呼应剧情基调的环境元素与光影氛围，整体色调对比鲜明，人物被轮廓光勾勒，顶部留有标题区（暗色渐变压字区）。手绘质感线条，高细节，短剧海报封面风格。`;
 
 interface CharacterAsset { id: string; imagePath: string; tag: string; isDefault: number; }
 interface Character { id: string; name: string; visualHint: string | null; assets: CharacterAsset[]; }

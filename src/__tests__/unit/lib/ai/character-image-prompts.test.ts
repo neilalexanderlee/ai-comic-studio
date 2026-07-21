@@ -46,7 +46,7 @@ describe("buildBeautyImagePrompt", () => {
   it("for a realistic style project, overrides role_definition with a photography role and adds the realism anchor", () => {
     const result = buildBeautyImagePrompt(
       { role_definition: "你是一位顶级的2D动画与插画角色设定师。" },
-      "姜离",
+      "角色甲",
       "男性，约二十出头",
       REALISTIC_ANCIENT_STYLE_CONTEXT
     );
@@ -65,7 +65,7 @@ describe("buildBeautyImagePrompt", () => {
         beauty_rules: "纯色背景，无任何杂物、文字或水印。",
         lighting_rendering: "纯白纯色背景，无杂物。在所选画风内达到最高渲染质量",
       },
-      "姜离",
+      "角色甲",
       "男性，约二十出头",
       REALISTIC_ANCIENT_STYLE_CONTEXT
     );
@@ -108,7 +108,7 @@ describe("buildCombatImagePrompt", () => {
   it("for a realistic style project, overrides role_definition with a photography role", () => {
     const result = buildCombatImagePrompt(
       { role_definition: "你是一位顶级的2D动画与动作戏原画师。" },
-      "姜离",
+      "角色甲",
       "武将，持斧",
       REALISTIC_ANCIENT_STYLE_CONTEXT
     );
@@ -126,7 +126,7 @@ describe("buildCombatImagePrompt", () => {
         weapons_equipment: "动漫/卡通风要有干净的风格化线条",
         lighting_rendering: "纯白纯色背景，无杂物。在所选画风内达到最高渲染质量",
       },
-      "姜离",
+      "角色甲",
       "武将，持斧",
       REALISTIC_ANCIENT_STYLE_CONTEXT
     );
@@ -157,7 +157,7 @@ describe("buildCharacterTurnaroundPrompt", () => {
   it("for a realistic style project, replaces the generic design-sheet framing with a photo-shoot framing", () => {
     const result = buildCharacterTurnaroundPrompt(
       { style_matching: "match the described style" },
-      "姜离",
+      "角色甲",
       "男性，约二十出头",
       REALISTIC_ANCIENT_STYLE_CONTEXT
     );

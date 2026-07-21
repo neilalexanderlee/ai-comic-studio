@@ -1,18 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 真人古风写实
-metaData: director_skills
----
-
-# 分镜提示词 · 真人古风写实 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**真人古风写实**风格的分镜提示词生成。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 一、情绪 → 面容/眼神词映射
 
@@ -30,6 +16,7 @@ metaData: director_skills
 | 隐忍 / 克制 | 神情内敛，面容沉静 | 眼神深沉，眼底有情绪压抑 | 唇线收紧，喉结微动 |
 
 ---
+
 
 ## 二、光影氛围词库（真人古风写实）
 
@@ -95,6 +82,7 @@ metaData: director_skills
 
 ---
 
+
 ## 三、场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -108,6 +96,7 @@ metaData: director_skills
 | 集市/街道 | 市井氛围，人群虚化，建筑纵深，幌子布料质感 |
 
 ---
+
 
 ## 四、固定风格锚定词（所有输出必须包含）
 
@@ -154,6 +143,7 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 ---
 
+
 ## 五、美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -172,61 +162,6 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 ---
 
-## 六、完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 沈辞独立城楼之上，远眺苍茫大地 | 城楼 | 沈辞 | 4s | 全景 | 静止 | 负手而立，衣袂随风飘扬 | 坚定 / 决绝 | 黄昏冷调侧逆光 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-真人写实摄影，电影级画质，超现实主义纪实，强对比度，极致细节，纹理超清晰，全景构图，人物全身入镜，皮肤细腻，面容细腻渲染，五官立体，发丝根根分明，发丝细腻渲染，男性主角立于城楼之上，双臂自然垂于身侧，衣袂初被风拂动，微微扬起，衣物布料质感清晰，布料折痕真实，衣物随动态飘逸，神情沉毅，目光即将投向远方，眼神坚定清冽，城楼青砖纹理清晰，风化质感，远景层叠，大气透视，黄昏冷调侧逆光，轮廓光勾勒人物边缘，古风写实美学，东方古典气韵，电影级分镜构图，超清4K画质，自然锐度，写实清晰感，画面无字幕、无水印、无标题叠字。
-Based on the reference image of 沈辞, maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing on the ancient city wall at dusk, overlooking vast land. Keep character appearance identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a cinematographer and storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 沈辞 — black long hair tied up, calm sharp eyes, dark ancient hanfu robe, tall slim body shape
-</character_reference>
-<continuity_rules>
-- Same wardrobe, hairstyle, face features across ALL shots
-- Same environment, lighting style, color grade
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
-</continuity_rules>
-<shot>
-Full shot, character standing atop an ancient city wall, arms resting naturally at his sides, robe hem just beginning to catch the wind with a slight lift, gaze about to turn toward the vast horizon, resolute and composed expression, cold dusk backlight, rim light silhouette, vast landscape below, atmospheric perspective, ancient chinese cinematic realism, ultra-sharp 4K, high detail, crisp textures, photorealistic clarity, no subtitles, no captions, no watermark, no title overlay.
-</shot>
-<negative>
-no plastic skin, no beauty filter, no studio lighting, no centered composition, no oversaturation, no AI generated look, no motion blur, no noise, no blurry, no out of focus, no subtitles, no captions, no watermark, no title overlay, no UI text, no modern clothing, no modern architecture, no cars, no phones
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 环境光（主） | 器材光（辅） |
-|------|-----------|-------------|-------------|
-| 心动 | 面色微红，眼神含情 | 柔和侧逆自然光 | 轮廓光微勾勒 |
-| 悲伤 | 面容沉静，眼眶微红 | 漫射冷光 | 极少补光 |
-| 愤怒 | 眉眼凌厉，目光如刀 | 硬朗自然侧光，高对比 | 可加顶光（须合理光源） |
-| 温柔 | 眉目含情，眼神柔和 | 散射暖调环境光 | 轮廓光微补 |
-| 坚定 | 神情肃然，眼神清冽 | 冷调自然侧光 | 一般无需 |
-| 冷漠 | 面容清冷，眼神空远 | 冷蓝环境光 | 边缘光精准分离 |
-| 隐忍 | 面容沉静，眼底压抑 | 低调冷光环境 | 不补光，保留阴影 |
-
----
 
 ## 七、写实进阶技法（声音设计 / 多光源分层 / 摄影机语言）
 
@@ -301,7 +236,7 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 【关键音效】
 底噪：虫鸣鸟啼+风过花木沙沙+远处水声+偶有风铃（全程持续）
 事件音：绫罗绸缎摩擦"窸窸窣窣"（0-8s持续）；玉佩碰撞"叮当"（约4s时）；折扇放案上轻微闷响（4s）
-空间感：沈辞台词从画面右上方传来（渐近）；灵瑶台词从画面左边传来
+空间感：沈辞台词从画面右上方传来（渐近）；角色乙台词从画面左边传来
 ```
 
 ---

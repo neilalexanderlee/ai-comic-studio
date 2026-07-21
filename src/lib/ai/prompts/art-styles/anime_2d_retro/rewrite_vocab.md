@@ -1,18 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 90年代日式动画质感
-metaData: director_skills
----
-
-# 分镜提示词 · 90年代日式动画 · 风格专属技法
-
----
-
-## 适用范围
-
-本 Skill 专用于**90年代日式动画质感**风格的分镜提示词生成。
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 情绪 → 面容/眼神词映射
 
@@ -30,6 +16,7 @@ metaData: director_skills
 | 紧张 / 不安 | 表情略显僵硬，眉头微皱 | 眼神游离，目光不确定 | 手指轻捏衣角，动作自然 |
 
 ---
+
 
 ## 光影氛围词库（90年代日式动画）
 
@@ -57,6 +44,7 @@ metaData: director_skills
 
 ---
 
+
 ## 场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -71,6 +59,7 @@ metaData: director_skills
 | 神社/寺庙 | 鸟居木柱，石板路，枫叶/樱花，香炉烟雾 |
 
 ---
+
 
 ## 固定风格锚定词（所有输出必须包含）
 
@@ -117,6 +106,7 @@ no modern anime style, no digital 3D rendering, no CG animation, no cel-shading,
 
 ---
 
+
 ## 美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -134,56 +124,3 @@ no modern anime style, no digital 3D rendering, no CG animation, no cel-shading,
 
 ---
 
-## 完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 浅草站台上，夕阳余晖洒在女孩身上 | 车站 | 浅草站 | 5s | 中景 | 缓推 | 手提书包，侧身微笑望向远方 | 期待 / 温暖 | 黄昏逆光暖调 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-90年代日式动画风格，手绘质感，平涂上色，清晰流畅线条，柔和暖色调，中景构图，人物半身入镜，精细流畅线条，轮廓线清晰，线条均匀一致，无断线无粗糙边缘，平涂上色，色彩均匀，无明显渐变，色彩饱和适中，女孩立于浅草站台上，手提书包，侧身微笑望向远方，眼神期待又温暖，黄昏逆光暖调，长影拉伸，怀旧氛围，木质站台纹理清晰，电线杆在背景中，电影感光影层次，明暗对比清晰，光效柔和自然，怀旧治愈氛围，日式动画美学，温馨情感表达，高清画质，线条清晰，上色均匀，色彩柔和，画面无杂色无噪点。
-Based on the reference image of 女孩, maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing on a train station platform at sunset, holding a school bag, smiling at the distance. Keep character appearance identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a 90s anime storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 女孩 — black long hair in twin tails, gentle eyes, school uniform, slim body shape
-</character_reference>
-<continuity_rules>
-- Same wardrobe, hairstyle, face features across ALL shots
-- Same environment, lighting style, color grade
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
-</continuity_rules>
-<shot>
-Medium shot, character standing on a train station platform at sunset, holding a school bag with one hand, smiling gently at the distance, eyes filled with expectation and warmth, warm sunset backlight, long shadows, nostalgic atmosphere, wooden platform texture visible, electric poles in background, cinematic lighting layers, clear contrast between light and dark, soft natural light effects, healing anime aesthetic, high-quality 90s anime style, clear line art, even flat coloring, soft warm tones, no noise, no grain, no digital artifacts.
-</shot>
-<negative>
-no modern anime style, no digital 3D rendering, no CG animation, no cel-shading, no heavy shading, no gradient fills, no plastic look, no oversaturated colors, no neon colors, no cyberpunk, no sci-fi elements, no futuristic design
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 光线匹配 |
-|------|-----------|---------|
-| 心动 | 脸颊微红，眼睛弯月 | 柔和侧光暖调 |
-| 悲伤 | 神情低落，眼眶微红 | 冷调侧光低调 |
-| 温柔 | 神情柔和，眉眼温润 | 均匀漫射暖光 |
-| 怀旧 | 表情平静，目光悠远 | 柔焦暖光雾化 |
-| 感动 | 眼角带笑，表情真诚 | 逆光暖调光晕 |
-| 孤独 | 神情安静，眼神放空 | 冷调侧光暗部 |
-| 快乐 | 笑容灿烂，眼睛明亮 | 均匀漫射暖光 |

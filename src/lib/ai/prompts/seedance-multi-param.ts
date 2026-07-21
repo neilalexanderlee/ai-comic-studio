@@ -9,7 +9,7 @@
  * - 分镜正文用角色名，禁止写 @参考N
  */
 
-import { getArtStylePrompt } from "./art-styles/index";
+import { VISUAL_STYLE_PRESETS } from "./visual-style-presets";
 
 // ── 类型定义 ─────────────────────────────────────────────
 
@@ -173,7 +173,7 @@ const DIALOGUE_FORMAT: Record<SeedanceDialogue["type"], { prefix: string; lipSyn
 export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInput): string {
   const { visualStyle, assets, shots } = input;
 
-  // 1. 风格标签（从 art-styles/video.md 读取 Seedance 中文版风格词）
+  // 1. 风格标签（来自 VISUAL_STYLE_PRESETS，与全项目其他生成路径共用同一数据源）
   const styleTag = resolveStyleTag(visualStyle);
 
   // 2. 分配 @参考N 编号
@@ -192,9 +192,11 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
 
   const lines: string[] = [];
 
-  // 3. 第一行：风格
-  lines.push(`画面风格和类型: ${styleTag}`);
-  lines.push("");
+  // 3. 第一行：风格（auto 风格无强制标签时省略该行，交给 AI 从剧本/参考图推断）
+  if (styleTag) {
+    lines.push(`画面风格和类型: ${styleTag}`);
+    lines.push("");
+  }
 
   // 4. 参考定义段
   const ANGLE_LABEL: Record<string, string> = {
@@ -254,32 +256,9 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
 // ── 辅助：风格标签 ─────────────────────────────────────────
 
 function resolveStyleTag(visualStyle?: string): string {
-  if (!visualStyle || visualStyle === "auto") {
-    return "动画风格, 电影质感";
-  }
-  const videoContent = getArtStylePrompt(visualStyle, "video");
-  if (videoContent) {
-    // 从 video.md 提取 Seedance 2.0 中文版风格标签
-    const match = videoContent.match(/Seedance 2\.0[（(][^）)]*[）)].*[\r\n]+[`|]?([^\r\n`|]+)/);
-    if (match) return match[1].trim();
-    // 备选：直接查找「中文」关键词附近的标签行
-    const lines = videoContent.split("\n");
-    for (const line of lines) {
-      if (line.includes("Seedance") && line.includes("：")) {
-        const after = line.split("：")[1]?.trim();
-        if (after) return after.replace(/[`*]/g, "");
-      }
-    }
-  }
-  // fallback：按风格返回基本标签
-  const fallbacks: Record<string, string> = {
-    anime_2d: "90年代日式动画，手绘赛璐璐，柔和暖调，电影风格，清晰线条，怀旧质感",
-    realistic: "真人写实，电影风格，冷调，现代都市",
-    cg_3d: "3D动画渲染，电影质感，精细建模，体积光",
-    chinese_ink: "国风二次元，赛璐璐平涂，东方古韵，新国潮美学",
-    western_cartoon: "2D扁平设计，简洁线条，鲜艳色彩，卡通风格",
-  };
-  return fallbacks[visualStyle] || "动画风格, 电影质感";
+  // 唯一数据源：VISUAL_STYLE_PRESETS（与 buildStyleInstruction / 帧生成路径共用）。
+  // "auto"（AI自动检测）的 tag 本就是空字符串，代表不强制风格，交给 AI 从剧本推断。
+  return VISUAL_STYLE_PRESETS[visualStyle ?? ""]?.tag ?? "";
 }
 
 // ── 辅助：资产简述 ─────────────────────────────────────────

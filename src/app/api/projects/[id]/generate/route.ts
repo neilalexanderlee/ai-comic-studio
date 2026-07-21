@@ -1645,20 +1645,9 @@ function handleBatchStoryboardRewrite(
           .where(eq(projects.id, projectId));
         const rewriteVisualStyle = rewriteProject?.visualStyle ?? "anime_2d";
 
-        // Extract style-specific vocabulary from storyboard.md:
-        //   Section II  — 光影氛围词库（主光描述锚定）
-        //   Section IV  — 固定风格锚定词
-        //   Section VII — 战斗/动作场景专用技法（打斗镜头词汇）
-        let visualStyleContext: string | undefined;
-        const storyboardMd = getArtStylePrompt(rewriteVisualStyle, "storyboard");
-        if (storyboardMd) {
-          const lightingSection = storyboardMd.match(/##\s*[二2]、[\s\S]*?(?=\n##\s*[三3四4]、)/)?.[0] ?? "";
-          const styleSection = storyboardMd.match(/##\s*[四4]、[\s\S]*?(?=\n##\s*[五5]、)/)?.[0] ?? "";
-          // Section VII (战斗技法) — capture everything from 七、 to end of file
-          const combatSection = storyboardMd.match(/##\s*[七7]、[\s\S]*/)?.[0] ?? "";
-          const combined = [lightingSection, styleSection, combatSection].filter(Boolean).join("\n\n").trim();
-          if (combined.length > 0) visualStyleContext = combined;
-        }
+        // 风格专属词库（光影/风格锚定/进阶技法）：整读 rewrite-vocab.md，不做标题正则切片
+        // ——rewrite_vocab.md 是该风格图像/视频生成侧的唯一权威词库，见 art-styles/index.ts 的类型注释
+        const visualStyleContext = getArtStylePrompt(rewriteVisualStyle, "rewrite_vocab") || undefined;
 
         // Fetch all shots
         const shotRows = await db
@@ -3581,7 +3570,7 @@ async function handleCoverImageGenerate(
 
   // ── @图N 绑定：在 prompt 头部注入参考图说明 ──
   // 只声明"@图N 为X角色"，不替换正文里的角色名。
-  // 原因：正文里的位置描述（由左至右：格朗、翠缇娜...）是用户的空间排列意图，
+  // 原因：正文里的位置描述（由左至右：角色甲、角色乙...）是用户的空间排列意图，
   // 一旦替换成@图N数字编号，模型会按编号大小重排位置，违背用户意图。
   // 保留角色名原文 + 头部声明，模型能自动将声明与正文名字对应。
   if (cappedRefs.length > 0) {

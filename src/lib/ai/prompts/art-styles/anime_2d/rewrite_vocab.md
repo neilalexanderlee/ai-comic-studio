@@ -1,12 +1,4 @@
----
-name: director_storyboard
-description: 导演分镜提示词技法 · 成熟都市言情动画
-metaData: director_skills
----
-
-# 二次元导演分镜提示词技法 · 成熟都市言情动画
-
----
+<!-- 本文件由 storyboard.md 全部图像生成侧词库章节整理而来（storyboard.md 已删除，本文件是唯一权威版本），供 batch_storyboard_rewrite 整段读取注入，不做标题正则切片。修改词库请直接编辑本文件。 -->
 
 ## 一、情绪 → 面容/眼神词映射
 
@@ -24,6 +16,7 @@ metaData: director_skills
 | 隐忍 / 克制 | 神情内敛，面容沉静 | 眼神深沉，眼底有情绪压抑 | 唇线收紧，喉结微动 |
 
 ---
+
 
 ## 二、光影氛围词库（成熟都市言情动画）
 
@@ -49,6 +42,7 @@ metaData: director_skills
 
 ---
 
+
 ## 三、场景质感约束词（按场景类型）
 
 | 场景类型 | 必加约束词 |
@@ -62,6 +56,7 @@ metaData: director_skills
 | 酒店房间 | 床/浴室/电视/床头柜，酒店材质，舒适现代，暖光氛围 |
 
 ---
+
 
 ## 四、固定风格锚定词（所有输出必须包含）
 
@@ -116,6 +111,7 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 ---
 
+
 ## 五、美学禁止项（生成时严格规避）
 
 以下词汇/风格不得出现于输出提示词中：
@@ -131,61 +127,6 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 
 ---
 
-## 六、完整生成示例
-
-> 以下为同一输入分别使用模式A和模式B的对照展示，实际使用时**仅输出其中一种**。
-
-### 输入（分镜表行数据）
-
-| 序号 | 画面描述 | 场景 | 关联资产名称 | 时长 | 景别 | 运镜 | 角色动作 | 情绪 | 光影氛围 |
-|------|---------|------|-------------|------|------|------|---------|------|----------|
-| 1 | 沈辞独立公寓窗前，远眺城市夜景 | 公寓 | 沈辞 | 4s | 全景 | 静止 | 负手而立，目光凝视窗外 | 温柔 / 深情 | 夜间冷调侧逆光 |
-
-### 示例输出A（模式A · Seedream）
-
-[Prompt]
-二次元动画风格，赛璐璐上色，清晰线条，电影级构图，戏剧化低调光影，全景构图，人物全身入镜，面容细腻渲染，皮肤细腻，五官精致，发丝层次分明，发丝细腻渲染，男性主角立于公寓窗前，双臂自然垂于身侧，目光凝视窗外，神情温和，眼神专注柔和，目光深情，现代公寓材质清晰，沙发/电视/床/厨房，现代家具质感清晰，地板反光，窗帘垂感，夜间冷调侧逆光，月光冷蓝，光影幽深，明暗强对比，成熟都市言情动画风格，现代小说改编动画，电影级分镜构图，超清4K画质，自然锐度，写实清晰感，画面无字幕、无水印、无标题叠字。
-Based on the reference image of 沈辞，maintain consistent: face features, hairstyle, costume details. Generate a new scene: standing by the apartment window at night, gazing out at the city view. Keep character appearance identical to reference.
-
-### 示例输出B（模式B · Nanobanana）
-
-```xml
-<role>
-You are a cinematographer and storyboard artist.
-Maintain strict visual continuity across all shots.
-</role>
-<character_reference>
-Image [1]: 沈辞 — black long hair, calm gentle eyes, modern casual clothing, tall slim body shape
-</character_reference>
-<continuity_rules>
-- Same wardrobe, hairstyle, face features across ALL shots
-- Same environment, lighting style, color grade
-- Only framing, angle, action, expression may change
-- Do NOT introduce new characters not in reference images
-</continuity_rules>
-<shot>
-Full shot, character standing by the apartment window at night, gazing out at the city view, gentle and composed expression, focused eyes with deep emotion, cold dusk backlight, moonlight ambiance, dark interior with subtle light from outside, mature urban romance anime style, cel shading, ultra-sharp 4K, high detail, crisp textures, photorealistic clarity, no subtitles, no captions, no watermark, no title overlay.
-</shot>
-<negative>
-no plastic skin, no beauty filter, no studio lighting, no centered composition, no oversaturation, no AI generated look, no motion blur, no noise, no blurry, no out of focus, no subtitles, no captions, no watermark, no title overlay, no UI text
-</negative>
-```
-
-## 快速参考卡
-
-### 情绪 → 画面词速查
-
-| 情绪 | 面容关键词 | 光线匹配 |
-|------|-----------|----------|
-| 心动 | 面色微红，眼神含情 | 柔和侧逆光 |
-| 悲伤 | 面容沉静，眼眶微红 | 漫射冷光 |
-| 愤怒 | 眉眼凌厉，目光如刀 | 硬侧光高对比 |
-| 温柔 | 眉目含情，眼神柔和 | 散射暖光局部 |
-| 坚定 | 神情肃然，眼神清冽 | 冷调侧光 |
-| 冷漠 | 面容清冷，眼神空远 | 冷蓝侧光 |
-| 隐忍 | 面容沉静，眼底压抑 | 低调冷光，阴影留存 |
-
----
 
 ## 七、战斗/动作场景专用技法（日本2D动漫打斗分镜）
 
@@ -310,4 +251,3 @@ no plastic skin, no beauty filter, no studio lighting, no centered composition, 
 | 冲击波扩散/反应 | 中景固定 | 1-2s |
 | 落势/下一回合蓄势 | 全景重新建立 | 2-3s |
 
-**景别跳切规则**：特写→大全景 可直切（对比最大化）；中景→中景 必须插入不同角度镜头。
