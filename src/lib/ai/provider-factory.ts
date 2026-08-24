@@ -7,6 +7,7 @@ import { KlingImageProvider } from "./providers/kling-image";
 import { KlingVideoProvider } from "./providers/kling-video";
 import { JimengImageProvider } from "./providers/jimeng-image";
 import { JimengVideoProvider } from "./providers/jimeng-video";
+import { MiniMaxVideoProvider } from "./providers/minimax-video";
 import { getAIProvider, getVideoProvider } from "./index";
 import type { AIProvider, VideoProvider } from "./types";
 
@@ -109,6 +110,15 @@ export function createVideoProvider(config: ProviderConfig, uploadDir?: string):
       return new JimengVideoProvider({
         apiKey: config.apiKey,
         secretKey: config.secretKey,
+        baseUrl: config.baseUrl,
+        model: config.modelId,
+        ...(uploadDir && { uploadDir }),
+      });
+    case "minimax-video":
+      // MiniMax H3 视频生成（v2 异步任务 API，Bearer Token 认证）
+      // 参考：https://platform.minimax.io/docs/api-reference/video-generation-v2-create
+      return new MiniMaxVideoProvider({
+        apiKey: config.apiKey,
         baseUrl: config.baseUrl,
         model: config.modelId,
         ...(uploadDir && { uploadDir }),

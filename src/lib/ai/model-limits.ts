@@ -20,6 +20,8 @@ export const MODEL_MAX_DURATIONS: Record<string, number> = {
   // 即梦 Jimeng 3.0: 仅支持 5s 或 10s
   "jimeng_i2v_v30": 10,
   "jimeng_i2v_v30_1080": 10,
+  // MiniMax H3: 官方文档确认 4~15s
+  "minimax-h3": 15,
 };
 
 /** Family-level fallback: if modelId contains this substring, use this duration */
@@ -33,6 +35,7 @@ const FAMILY_MAX_DURATIONS: [string, number][] = [
   ["seedance-1-5", 12],       // 1.5 Pro 上限 12s（官方文档：4~12s）
   ["seedance", 12],           // 兜底：未知 Seedance 版本按 12s
   ["jimeng", 10],             // 即梦系列默认最高 10s
+  ["minimax-h3", 15],         // MiniMax H3 官方确认 4~15s
 ];
 
 export const DEFAULT_MAX_DURATION = 12;

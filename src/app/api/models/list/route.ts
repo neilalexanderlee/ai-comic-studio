@@ -171,6 +171,15 @@ export async function POST(request: Request) {
       });
     }
 
+    // ── MiniMax H3 视频生成（v2 异步任务 API）──────────────────────────
+    // 官方无模型列表端点，模型固定为 MiniMax-H3。
+    // 文档：https://platform.minimax.io/docs/api-reference/video-generation-v2-create
+    if (body.protocol === "minimax-video") {
+      return NextResponse.json({
+        models: [{ id: "MiniMax-H3", name: "MiniMax H3" }],
+      });
+    }
+
     // ── 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容）─────────────
     // 参考文档：https://www.volcengine.com/docs/82379/1541523
     if (body.protocol === "doubao") {

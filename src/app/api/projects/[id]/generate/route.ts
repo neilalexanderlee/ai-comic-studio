@@ -8,7 +8,7 @@ import { projects, episodes, characters, shots, storyboardVersions, episodeChara
 import { eq, asc, and, lt, gt, desc, inArray, isNull, sql } from "drizzle-orm";
 import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
-import { superviseShots } from "@/lib/storyboard/shot-supervision";
+import { superviseShots, checkBeatDensity } from "@/lib/storyboard/shot-supervision";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import fs from "node:fs";
 import path from "path";
@@ -1699,6 +1699,8 @@ function handleBatchStoryboardRewrite(
 
         const totalCount = shotRows.length;
         let updatedCount = 0;
+        let lowDensityCount = 0;
+        const shotDurationById = new Map(shotRows.map((s) => [s.id, s.duration]));
         const writtenShotIds = new Set<string>();
         // 本次 session 中工具写入的最新 startFrameDesc，供后续 chunk compact 模式展示可信内容。
         // 内存中的 shotsWithDialogues[].startFrameDesc 是 session 开始时从 DB 读入的旧值，
@@ -1751,6 +1753,15 @@ function handleBatchStoryboardRewrite(
               writtenShotIds.add(shotId);
               writtenShotFrames.set(shotId, startFrameDesc);
               updatedCount++;
+
+              const density = checkBeatDensity(motionScript, shotDurationById.get(shotId));
+              if (!density.ok) {
+                lowDensityCount++;
+                console.warn(
+                  `[BatchStoryboardRewrite] shot ${shotId} low beat density: ${density.beatCount}/${density.minRequired}`
+                );
+              }
+
               send({ type: "progress", updatedCount, totalCount });
               console.log(`[BatchStoryboardRewrite] wrote shot ${shotId} (${updatedCount}/${totalCount})`);
               return `ok: ${shotId}`;
@@ -1835,8 +1846,8 @@ function handleBatchStoryboardRewrite(
           }
         }
 
-        send({ type: "done", updatedCount, totalCount });
-        console.log(`[BatchStoryboardRewrite] Done: ${updatedCount}/${totalCount}`);
+        send({ type: "done", updatedCount, totalCount, lowDensityCount });
+        console.log(`[BatchStoryboardRewrite] Done: ${updatedCount}/${totalCount}, lowDensity=${lowDensityCount}`);
       } catch (err) {
         console.error("[BatchStoryboardRewrite] Fatal error:", err);
         send({ type: "error", error: extractErrorMessage(err) });

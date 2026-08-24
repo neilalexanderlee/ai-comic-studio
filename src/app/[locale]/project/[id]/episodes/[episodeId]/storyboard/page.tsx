@@ -448,6 +448,7 @@ export default function EpisodeStoryboardPage() {
       let buffer = "";
       let finalUpdated = 0;
       let finalTotal = 0;
+      let finalLowDensity = 0;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -463,6 +464,7 @@ export default function EpisodeStoryboardPage() {
               type: string;
               updatedCount?: number;
               totalCount?: number;
+              lowDensityCount?: number;
               error?: string;
               chunkStart?: number;
               chunkEnd?: number;
@@ -484,6 +486,7 @@ export default function EpisodeStoryboardPage() {
             } else if (event.type === "done") {
               finalUpdated = event.updatedCount ?? 0;
               finalTotal = event.totalCount ?? 0;
+              finalLowDensity = event.lowDensityCount ?? 0;
             }
           } catch (parseErr) {
             if (parseErr instanceof SyntaxError) continue;
@@ -493,6 +496,9 @@ export default function EpisodeStoryboardPage() {
       }
 
       toast.success(`已优化 ${finalUpdated}/${finalTotal} 个分镜文本`);
+      if (finalLowDensity > 0) {
+        toast.warning(`其中 ${finalLowDensity} 个镜头动作密度偏低，建议人工检查是否显得像慢动作`);
+      }
       fetchProject(project.id, episodeId!);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "批量优化文本失败");

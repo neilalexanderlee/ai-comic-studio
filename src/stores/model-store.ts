@@ -15,7 +15,9 @@ export type Protocol =
   /** 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容） */
   | "doubao"
   /** MiniMax 音乐生成（music-2.6，is_instrumental BGM） */
-  | "minimax";
+  | "minimax"
+  /** MiniMax H3 视频生成（v2 异步任务 API） */
+  | "minimax-video";
 export type Capability = "text" | "image" | "video" | "music";
 
 export interface Model {

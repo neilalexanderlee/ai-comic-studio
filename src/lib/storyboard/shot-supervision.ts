@@ -231,6 +231,39 @@ function buildSummary(
   return parts.join("，");
 }
 
+// ── 节拍密度校验（独立小函数，不进入 RED_LINES，供 batch_storyboard_rewrite 写入后调用）──
+
+export type BeatDensityCheck = {
+  ok: boolean;
+  beatCount: number;
+  minRequired: number;
+};
+
+/**
+ * 时长→最少拍数下限表，与 STORYBOARD_REWRITE_SYSTEM 的"节拍密度下限"规则口径一致
+ * （见 storyboard-supervision.ts 顶部的 STORYBOARD_REWRITE_SYSTEM 定义）。
+ */
+const BEAT_DENSITY_THRESHOLDS: Array<[maxDuration: number, minBeats: number]> = [
+  [3, 1],
+  [6, 2],
+  [9, 3],
+  [Infinity, 4],
+];
+
+/**
+ * 校验 motionScript 的节拍密度（[] 段落数）是否满足时长下限。
+ * 非阻塞：仅用于生成 batch_storyboard_rewrite 完成后的可见性提示，不影响写入。
+ */
+export function checkBeatDensity(
+  motionScript: string | null | undefined,
+  duration: number | null | undefined
+): BeatDensityCheck {
+  const beatCount = ((motionScript || "").match(/\[[^\]]*\]/g) || []).length;
+  const dur = duration ?? 0;
+  const minRequired = BEAT_DENSITY_THRESHOLDS.find(([max]) => dur <= max)?.[1] ?? 1;
+  return { ok: beatCount >= minRequired, beatCount, minRequired };
+}
+
 // ── LLM 监督层 ────────────────────────────────────────────────
 
 export const SUPERVISION_LLM_SYSTEM = `你是专业分镜质量审核 Agent，负责对 AI 生成的分镜进行语义层面的深度审核。
