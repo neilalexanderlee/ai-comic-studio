@@ -32,7 +32,6 @@ import {
 } from "@/lib/ai/prompts/frame-generate";
 import { resolveImageProvider, resolveVideoProvider, resolveAIProvider } from "@/lib/ai/provider-factory";
 import { buildVideoPrompt, buildReferenceVideoPrompt } from "@/lib/ai/prompts/video-generate";
-import { buildRefVideoPromptRequest } from "@/lib/ai/prompts/ref-video-prompt-generate";
 import { buildCharacterTurnaroundPrompt, buildBeautyImagePrompt, buildCombatImagePrompt } from "@/lib/ai/prompts/character-image";
 import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { registerCharacterPortraitToArk } from "@/lib/ai/ark-asset-library";

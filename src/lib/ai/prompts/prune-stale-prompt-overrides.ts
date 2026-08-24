@@ -10,13 +10,15 @@ export const REMOVED_PROMPT_KEYS = new Set([
   "shot_complete",
   // 2026-06 移除 LLM 状态路由，改为 isDefault 选图
   "character_state_router",
+  // Vision-LLM 视频提示词精炼路径已被直出架构替代（buildDirectVideoPrompt），
+  // 整个 key 已从 registry 移除（非"换了新 slot 布局"），归入 REMOVED 而非 RESET_WIRED。
+  "ref_video_prompt",
 ]);
 
 /**
  * Rewired to resolvePrompt + new slot layout — one-time reset clears stale Chinese/legacy slots.
  */
 export const RESET_WIRED_PROMPT_KEYS = new Set([
-  "ref_video_prompt",
   "character_extract",
   "import_character_extract",
   "outline_expand",

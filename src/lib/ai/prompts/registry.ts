@@ -11,7 +11,6 @@ import {
   IMPORT_CHARACTER_EXTRACT_DEFAULT_SLOTS,
   assembleImportCharacterExtractPrompt,
 } from "./import-character-extract-defaults";
-import { REF_VIDEO_PROMPT_DEFAULT_SLOTS } from "./ref-video-prompt-defaults";
 import { OUTLINE_EXPAND_SYSTEM_DEFAULT } from "./outline-expand-defaults";
 import {
   STORYBOARD_REWRITE_SYSTEM,

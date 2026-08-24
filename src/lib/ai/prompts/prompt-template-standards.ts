@@ -41,7 +41,6 @@ export const REPO_DEPLOT_EXCLUDE_RELATIVE = [
 /** 默认模板源文件 glob（相对 src/lib/ai/prompts） */
 export const PROMPT_TEMPLATE_SOURCE_FILES = [
   "registry.ts",
-  "ref-video-prompt-defaults.ts",
   "character-extract-defaults.ts",
   "character-extract.ts",
   "import-character-extract-defaults.ts",
