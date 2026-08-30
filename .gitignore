@@ -55,3 +55,6 @@ next-env.d.ts
 .superpowers
 
 run_kling.sh
+
+# docs — 本地保留，不进 git（架构笔记 + 外部客户项目资料）
+docs/
