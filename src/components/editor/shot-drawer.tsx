@@ -22,7 +22,7 @@ import {
   Scissors,
   History,
 } from "lucide-react";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { getModelMaxDuration } from "@/lib/ai/video-capabilities";
 import { getShotVideoReadiness, resolveShotNextStep } from "@/lib/storyboard/shot-video-readiness";
 import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
@@ -89,7 +89,7 @@ interface ShotDrawerProps {
   videoRatio: string;
   selectedVersionId: string | null;
   anyGenerating: boolean;
-  videoGenerationResolution?: "480p" | "720p";
+  videoGenerationResolution?: string;
   showAdoptPrevEpisode?: boolean;
   prevCutPoint?: string | null;
   prevAnchorLastAi?: string | null;
@@ -291,8 +291,11 @@ export function ShotDrawer({
           modelConfig: getModelConfig(),
         }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as { error?: string; capabilityNotes?: string[] };
       if (!res.ok) throw new Error(data.error || t("common.generationFailed"));
+      // 模型能力降级说明（如"该模型不支持多模态参考，本次未用定妆图锁外貌"）。
+      // 降级不能静默：否则用户切换品牌后只会觉得"效果莫名变差"，无从判断原因。
+      data.capabilityNotes?.forEach((note) => toast.warning(note));
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));

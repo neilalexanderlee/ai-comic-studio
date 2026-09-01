@@ -1,6 +1,7 @@
 import "server-only";
 import { shotFrameFileOnDisk } from "@/lib/storyboard/frame-reference.server";
 import type { EpisodeVideoBlockedShot, VideoReadinessIssue } from "@/lib/storyboard/shot-video-readiness";
+import type { VideoMode } from "@/lib/ai/video-capabilities";
 
 /**
  * 单镜视频生成模式（三态）：
@@ -17,8 +18,12 @@ import type { EpisodeVideoBlockedShot, VideoReadinessIssue } from "@/lib/storybo
  * 注意：群演镜头（无命名角色）不再单独路由到 initialImage。
  *   multimodal 模式下无角色时 multimodalRefs 仅含 anchorFirst，Seedance 降级处理，无副作用。
  *   原先的 isCrowdShot 判断基于字符串匹配，不稳定且失败代价高（误判时角色跑偏 bug 复现）。
+ *
+ * ⚠️ 本函数返回的是**理想模式**——只看分镜数据，不考虑当前 provider 支不支持。
+ *   调用方必须再过一道 `downgradeVideoMode(ideal, capability)`（`@/lib/ai/video-capabilities`），
+ *   否则把 multimodal 送进 Kling / Veo / 即梦会直接崩（它们只实现了首帧和首尾帧两种 body）。
  */
-export type SingleVideoMode = "initialImage" | "keyframe" | "multimodal";
+export type SingleVideoMode = VideoMode;
 
 export function resolveSingleVideoMode(
   shot: {

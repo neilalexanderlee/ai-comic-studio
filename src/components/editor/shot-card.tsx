@@ -31,7 +31,7 @@ import {
 import { FrameReferencePicker } from "./frame-reference-picker";
 import { formatChainSourceHint, type FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import { getShotVideoReadiness, resolveShotNextStep } from "@/lib/storyboard/shot-video-readiness";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { getModelMaxDuration } from "@/lib/ai/video-capabilities";
 import { Scissors } from "lucide-react";
 import { useShotFrameActions } from "@/hooks/use-shot-frame-actions";
 import { ShotFrameToolbar } from "./shot-frame-toolbar";
@@ -82,7 +82,7 @@ interface ShotCardProps {
   warnings?: string | null;
   videoResolution?: string | null;
   /** 生成视频时使用的分辨率，传递给后端 */
-  videoGenerationResolution?: "480p" | "720p";
+  videoGenerationResolution?: string;
   /** 上一镜视频切点 cut_point（参考用） */
   prevCutPoint?: string | null;
   /** 上一镜 AI 尾帧 anchor_last_ai（参考用） */
@@ -377,10 +377,13 @@ export function ShotCard({
           modelConfig: getModelConfig(),
         }),
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as { error?: string; capabilityNotes?: string[] };
       if (!res.ok) {
         throw new Error(data.error || t("common.generationFailed"));
       }
+      // 模型能力降级说明（如"该模型不支持多模态参考，本次未用定妆图锁外貌"）。
+      // 降级不能静默：否则用户切换品牌后只会觉得"效果莫名变差"，无从判断原因。
+      data.capabilityNotes?.forEach((note) => toast.warning(note));
       onUpdate();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.generationFailed"));

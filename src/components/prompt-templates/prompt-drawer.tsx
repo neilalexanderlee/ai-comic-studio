@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Save, RotateCcw, Wand2, Lock, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useModelStore } from "@/stores/model-store";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { getModelMaxDuration } from "@/lib/ai/video-capabilities";
 
 // ── Types ────────────────────────────────────────────────
 

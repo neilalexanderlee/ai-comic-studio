@@ -25,7 +25,13 @@ import { getArtStylePrompt } from "@/lib/ai/prompts/art-styles/index";
 import { buildShotSplitPrompt } from "@/lib/ai/prompts/shot-split";
 import { resolvePrompt, resolveSlotContents } from "@/lib/ai/prompts/resolver";
 import { getPromptDefinition, SPLIT_SHOT_SINGLE_SYSTEM } from "@/lib/ai/prompts/registry";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import {
+  getModelMaxDuration,
+  resolveVideoCapability,
+  downgradeVideoMode,
+  describeCapabilityLoss,
+  resolveRatioForMode,
+} from "@/lib/ai/video-capabilities";
 import {
   buildFirstFramePrompt,
   buildLastFramePrompt,
@@ -37,7 +43,7 @@ import { resolveCharacterImages } from "@/lib/ai/character-router";
 import { registerCharacterPortraitToArk } from "@/lib/ai/ark-asset-library";
 import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library-credentials";
 import { uploadUrl } from "@/lib/utils/upload-url";
-import { shouldResolveSeedanceMultimodalCharacterRefs } from "@/lib/ai/seedance-multimodal-refs";
+import { shouldResolveMultimodalCharacterRefs } from "@/lib/ai/multimodal-refs";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -2554,8 +2560,20 @@ async function handleSingleVideoGenerate(
   // Detect crowd shot: no named characters in this shot's text → use reference mode
   const singleVideoShotText = buildShotCharacterText(shot);
   const singleVideoShotChars = filterShotCharacters(singleVideoShotText, shotCharacters, { contextText: singleVideoCharacterContext });
-  // 三态视频生成模式（SingleVideoMode）
-  const singleVideoMode = resolveSingleVideoMode(shot);
+  // ── 能力解析 + 模式降级 ────────────────────────────────────────────────────
+  // resolveSingleVideoMode 只看分镜数据算出「理想模式」；能否真的用取决于 provider。
+  // Kling / Veo / 即梦都只实现了首帧和首尾帧两种 body，把 multimodal（绝大多数镜头的默认模式）
+  // 直接送进去会崩，所以必须过一道 downgradeVideoMode。
+  const videoProtocol = modelConfig?.video?.protocol ?? "";
+  const videoCapability = resolveVideoCapability(modelConfig?.video?.modelId, videoProtocol);
+  const videoModeDecision = downgradeVideoMode(resolveSingleVideoMode(shot), videoCapability);
+  const singleVideoMode = videoModeDecision.mode;
+  if (videoModeDecision.downgraded) {
+    console.log(
+      `[SingleVideoGenerate] Shot ${shot.sequence}: mode downgraded ` +
+        `${videoModeDecision.requested} → ${singleVideoMode}（${videoCapability.label} 不支持前者）`
+    );
+  }
   // keyframe（首尾帧强约束）/ initialImage（严格首帧承接）都把 anchorFirst 当必需字段用
   // （下面会有 shotForVideo.anchorFirst! 非空断言）；multimodal 模式首帧只是可选构图参考，
   // 缺失时优雅降级为纯文字提示词 + 角色定妆图生成，不应该卡在这里。
@@ -2582,9 +2600,8 @@ async function handleSingleVideoGenerate(
     return VISUAL_STYLE_PRESETS[style]?.tag || undefined;
   })();
 
-  // 检测是否为 Seedance 协议（走新版多参提示词）
-  const videoProtocol = modelConfig?.video?.protocol ?? "";
-  const isSeedanceProtocol = videoProtocol === "seedance" || videoProtocol === "doubao";
+  // 提示词方言由能力描述符决定（原先是 `protocol === "seedance" || "doubao"` 的硬编码判断）
+  const usesSeedanceDialect = videoCapability.promptDialect === "seedance-multi-param";
 
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
@@ -2602,7 +2619,12 @@ async function handleSingleVideoGenerate(
       }
     }
 
-    const ratio = (payload?.ratio as string) || "16:9";
+    // 部分模型在特定模式下把比例锁死（例：MiniMax H3 的图生视频恒为 adaptive），
+    // 由能力表统一表达，不再在各 provider 内部各写各的。
+    const ratio =
+      resolveRatioForMode(videoCapability, singleVideoMode) ??
+      (payload?.ratio as string) ??
+      "16:9";
 
     const { videoPrompt: syncedVideoPrompt, refreshed: videoPromptRefreshed } =
       await syncVideoPromptIfStale({
@@ -2620,9 +2642,23 @@ async function handleSingleVideoGenerate(
       ? { ...shot, videoPrompt: syncedVideoPrompt }
       : shot;
 
-    const videoModelId = modelConfig?.video?.modelId;
-    const videoMaxDuration = getModelMaxDuration(videoModelId);
+    const videoMaxDuration = videoCapability.duration.max;
     const effectiveDuration = Math.min(shot.duration ?? 10, videoMaxDuration);
+
+    // 生成前把「本次会丢什么」算出来并记录 —— 降级必须可见，不能静默处理。
+    // 返回给客户端后由分镜卡展示（见 capabilityNotes）。
+    const capabilityNotes = describeCapabilityLoss(videoCapability, {
+      decision: videoModeDecision,
+      characterImageCount: singleVideoShotChars.length,
+      // 有台词才谈得上音色克隆的损失
+      audioRefCount: shotDialoguesParsed.length > 0 ? singleVideoShotChars.length : 0,
+      requestedDuration: shot.duration ?? undefined,
+    });
+    if (capabilityNotes.length > 0) {
+      console.log(
+        `[SingleVideoGenerate] Shot ${shot.sequence}: capability notes — ${capabilityNotes.join("；")}`
+      );
+    }
 
     const { motionText: videoMotionRaw } = resolveVideoMotionAndScene(shotForVideo);
     const resolvedMotionText = stripBgmContent(
@@ -2663,9 +2699,9 @@ async function handleSingleVideoGenerate(
     // ── multimodal 模式预解析：在 prompt 构建前 resolve 角色图，确保 @参考N 编号与 refs 数组同步 ──
     // 只要是 Seedance multimodal，就必须解析角色图；已有 videoPrompt 也不能跳过，
     // 否则会只传 anchorFirst，丢失角色主图、角度变体和音频参考。
-    const needPreResolveCharImages = shouldResolveSeedanceMultimodalCharacterRefs({
+    const needPreResolveCharImages = shouldResolveMultimodalCharacterRefs({
       singleVideoMode,
-      isSeedanceProtocol,
+      capability: videoCapability,
       namedCharacterCount: singleVideoShotChars.length,
     });
 
@@ -2681,7 +2717,7 @@ async function handleSingleVideoGenerate(
 
     // ── Seedance 新格式：@参考N + 音色 + 台词类型 ──────────────────────────────
     let videoPromptBase: string;
-    if (isSeedanceProtocol && (!shotForVideo.videoPrompt || singleVideoMode === "multimodal")) {
+    if (usesSeedanceDialect && (!shotForVideo.videoPrompt || singleVideoMode === "multimodal")) {
       // 构建角色资产列表：
       //   multimodal 模式：只包含有磁盘图片的角色（与 multimodalRefs 第一轮完全对应）
       //   其余模式：包含所有命名角色（@参考N 空悬无妨，API 不传 refs）
@@ -2823,8 +2859,10 @@ async function handleSingleVideoGenerate(
       // API 上限（Seedance 2.0 官方文档硬限制）：
       //   图片：1~9 张（type:"image"）
       //   音频：最多 3 个（type:"audio"，独立类型，不占图片名额）
-      const MAX_MULTIMODAL_REFS = 9; // Seedance 2.0：多模态参考图片上限 9 张
-      const MAX_AUDIO_REFS = 3;      // Seedance 2.0：多模态参考音频上限 3 个
+      // 上限来自能力表（`video-capabilities.ts`），不再在这里写死 Seedance 2.0 的数字。
+      // 换模型/换品牌时这两个值自动跟着变，不需要改本路由。
+      const MAX_MULTIMODAL_REFS = videoCapability.refs.image;
+      const MAX_AUDIO_REFS = videoCapability.refs.audio;
       // 主图可用条件：本地文件存在，或已锁定进私域素材库（asset:// 引用，无需本地文件）
       const charMainUsable = (ci: (typeof charImagesForVideo)[number]) =>
         ci.arkAssetStatus === "active" && ci.arkAssetId
@@ -2957,7 +2995,13 @@ async function handleSingleVideoGenerate(
       .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...singleLastFrameUpdate })
       .where(eq(shots.id, shotId));
 
-    return NextResponse.json({ shotId, videoUrl: result.filePath, status: "ok" });
+    return NextResponse.json({
+      shotId,
+      videoUrl: result.filePath,
+      status: "ok",
+      // 本次因模型能力差异而丢弃/降级的东西，供 UI 告知用户（空数组表示无损失）
+      ...(capabilityNotes.length > 0 && { capabilityNotes }),
+    });
   } catch (err) {
     console.error(`[SingleVideoGenerate] Error for shot ${shotId}:`, err);
     await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));

@@ -1,3 +1,5 @@
+import type { VideoMode } from "@/lib/ai/video-capabilities";
+
 export type EpisodeVideoBlockedShot = {
   shotId: string;
   sequence: number;
@@ -25,7 +27,7 @@ function resolveSingleVideoModeClient(
     chainSourceShotId?: string | null;
     anchorFirstContinuityMode?: string | null;
   }
-): "initialImage" | "keyframe" | "multimodal" {
+): VideoMode {
   if (shot.anchorLastAi) return "keyframe";
   if (shot.anchorFirstContinuityMode === "strict_start") return "initialImage";
   if (shot.anchorFirstContinuityMode == null && shot.chainSourceShotId) return "initialImage";

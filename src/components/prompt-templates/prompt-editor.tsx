@@ -13,7 +13,7 @@ import { Save, RotateCcw, Layers } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { PresetDialog } from "./preset-dialog";
 import { useModelStore } from "@/stores/model-store";
-import { getModelMaxDuration } from "@/lib/ai/model-limits";
+import { getModelMaxDuration } from "@/lib/ai/video-capabilities";
 
 const CATEGORIES = ["all", "script", "character", "storyboard"] as const;
 
