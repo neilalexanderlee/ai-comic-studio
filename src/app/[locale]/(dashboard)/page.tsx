@@ -1,7 +1,6 @@
 import { db } from "@/lib/db";
 import { projects } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import { getTranslations } from "next-intl/server";
 import { cookies } from "next/headers";
 import { parseCookieValue, AUTH_COOKIE } from "@/lib/auth";
@@ -20,13 +19,6 @@ export default async function DashboardPage() {
   const anonUserId = cookieStore.get("ai_comic_uid")?.value ?? "";
   const userId = authUserId ?? anonUserId;
   const isAuthenticated = Boolean(authUserId);
-
-  // Reclaim is for anonymous users only — when logged in, migrate-data handles
-  // data migration at login time. Running reclaim for an auth user who just
-  // deleted their last project would incorrectly steal their provider_secrets.
-  if (userId && !isAuthenticated) {
-    await reclaimLocalProjectsForUser(userId);
-  }
 
   const allProjects = userId
     ? await db

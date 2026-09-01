@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { trackVideos } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { requireProjectOwner } from "@/lib/api-guard";
 
 /**
  * GET /api/projects/:id/episodes/:episodeId/track-videos
  * 查询指定剧集下所有已生成的 Track 合并视频。
  */
 export async function GET(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; episodeId: string }> }
 ) {
   const { id: projectId, episodeId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
 
   const records = await db
     .select()

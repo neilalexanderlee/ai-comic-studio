@@ -1,6 +1,6 @@
 /**
- * 媒体加载工具（基于 Toonflow-web mediaLoader.ts，移除 vue-clip-track 依赖）
- * 使用原生 Web API（HTMLVideoElement / OffscreenCanvas / AudioContext）
+ * 媒体加载工具：视频缩略图抽帧、音频波形采样等。
+ * 全部使用原生 Web API（HTMLVideoElement / OffscreenCanvas / AudioContext），无第三方依赖。
  */
 
 /** 从视频 URL 提取缩略图（均匀采样 count 帧，返回 dataURL 数组） */

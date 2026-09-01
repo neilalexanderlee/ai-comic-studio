@@ -4,7 +4,6 @@ import { projects, episodes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -190,8 +189,6 @@ export async function POST(
   const { id: projectId, episodeId } = await params;
   const userId = getUserIdFromRequest(request);
   const isAuth = getAuthUserIdFromRequest(request) !== null;
-
-  if (!isAuth) await reclaimLocalProjectsForUser(userId);
 
   // 鉴权：确认项目归属
   const [project] = await db

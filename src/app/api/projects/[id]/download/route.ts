@@ -4,12 +4,15 @@ import { eq, asc } from "drizzle-orm";
 import archiver from "archiver";
 import path from "node:path";
 import fs from "node:fs";
+import { requireProjectOwner } from "@/lib/api-guard";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
 
   const [project] = await db
     .select()

@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -15,7 +16,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
-  const { shotId } = await params;
+  const { id: projectId, shotId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireShotInProject(shotId, projectId);
+  if (!scope.ok) return scope.response;
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
   const field = formData.get("field") as string | null;

@@ -19,7 +19,7 @@ AI漫剧工坊（英文 **AI Comic Studio**，仓库名 `ai-comic-studio`）是�
 3. 为每个分镜生成首帧/尾帧（三段式 Toonflow 提示词 + @图N 角色绑定）
 4. Seedance 多参模式批量生成连贯视频（@参考N 编号 + 音色克隆 + Track 分组）
 5. 浏览器端视频编辑器（时间线 + 字幕 + BGM + 转场）+ 服务端 ffmpeg 导出 MP4
-6. AI 生成 BGM（MiniMax Music 2.6，纯器乐，基于分镜 bgmNote 字段）
+6. AI 生成 BGM（豆包音乐 / 火山「生成纯音乐」，纯器乐，基于分镜 bgmNote 字段）
 7. 将视频合并为完整剧集（ffmpeg 拼接）
 
 ---
@@ -161,10 +161,12 @@ ai-comic-studio/   # 本地目录建议名；历史亦可能为 AIComicBuilder
 | `jimeng` | 即梦 AI | 图片 |
 | `jimeng-video` | 即梦 AI | 视频 |
 | `kling` | 可灵 | 图片 + 视频 |
-| `seedance` | Seedance（火山方舟 ARK API） | 视频 |
-| `minimax` | MiniMax Music 2.x | 音乐（BGM） |
+| `seedance` | Seedance 2.5 / 2.0 / 1.5（火山方舟 ARK API） | 视频 |
+| `volc-music` | 豆包音乐 / 火山「AI 生成音乐大模型 · 生成纯音乐」 | 音乐（BGM） |
 
-**规则**：`provider-factory.ts` 的 switch-case 是增加新 provider 的唯一入口。`prompt-enhancer.ts` 必须为新 protocol 同步添加对应的 system prompt。音乐 protocol（`minimax` 等）**不经过** `provider-factory.ts`，由 `POST /api/bgm/generate` 内部的 `callMusicProvider` switch 路由；添加新音乐 provider 只需扩展该 switch 即可。
+**规则**：`provider-factory.ts` 的 switch-case 是增加新 provider 的唯一入口；视频 provider 还必须在
+`video-capabilities.ts` 的 `VIDEO_CAPABILITIES` 里加一条能力描述（见约定 7a，一致性测试会强制校验）。
+音乐 protocol（`volc-music` 等）**不经过** `provider-factory.ts`，由 `POST /api/bgm/generate` 内部的 `callMusicProvider` switch 路由；添加新音乐 provider 只需扩展该 switch 即可。
 
 ### 三种 Provider
 
@@ -195,7 +197,7 @@ VideoProvider    // generateVideo
 
 | 表 | 说明 |
 |---|---|
-| `projects` | 顶层实体，含 `visualStyle`、`enhancePrompts`、`linkShotsViaCutPoint`、`useProjectPrompts` |
+| `projects` | 顶层实体，含 `visualStyle`、`videoRatio`、`useProjectPrompts`、`finalVideoUrl`（`enhancePrompts` / `linkShotsViaCutPoint` 两列已由 migration 0047 删除）|
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除） |
@@ -245,12 +247,18 @@ const visualStyleTag = VISUAL_STYLE_PRESETS[project.visualStyle]?.tag ?? "";
 
 新增生成路径必须检查：`buildFirstFramePrompt`、`buildLastFramePrompt`、`buildVideoPrompt`、`buildReferenceVideoPrompt` 都有 `visualStyleTag` 参数，必须传入。
 
-### 4. enhancePrompts — 存 DB，不存 localStorage
+### 4. ~~enhancePrompts~~ — 已移除（保留编号，勿复用）
 
-`projects.enhance_prompts` 字段（integer，默认 1）对应 UI 上的「AI 增强」开关，控制一件事：
-1. 生成图片/视频前调用 `enhanceImagePrompt` / `enhanceVideoPrompt` 进行 prompt 改写
+**「AI 增强」开关已整体移除，不要按旧文档去实现或调用它。**
 
-通过 `PATCH /api/projects/:id` 持久化，不使用 localStorage。
+- `projects.enhance_prompts` 列已由 migration `0047_drop_enhance_prompts_link_shots` 删除
+  （原因：该开关实际是 no-op）
+- UI 上的「AI 增强」开关已删除
+- `enhanceImagePrompt` / `enhanceVideoPrompt`（`src/lib/ai/prompt-enhancer.ts`）**在生产代码里零调用方**，
+  目前只被 eval suite（`src/lib/evals/cases/prompt-enhancement.ts`）和单测引用
+
+视频提示词现在走**直出架构**（`buildDirectVideoPrompt`，见约定 12），不经过任何 LLM 改写。
+本节编号保留是为了不打乱后续约定的交叉引用。
 
 ### 5. SSE 流式生成 — loopCtx 模式
 
@@ -286,9 +294,57 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 - `anchorLastAi` 几乎不存在（用户极少主动生成尾帧）
 - 视频生成默认路径：普通首帧/参考图重绘首帧 → `multimodal` 模式；直拷承接帧（`anchorFirstContinuityMode="strict_start"`）→ `initialImage` 模式
 
+### 7a. 视频能力注册表 — `video-capabilities.ts`（视频侧唯一事实来源）
+
+**`src/lib/ai/video-capabilities.ts` 的 `VIDEO_CAPABILITIES` 是「一个视频模型能做什么」的唯一事实来源。**
+新增品牌/版本 = 加一条 capability + 在 `provider-factory.ts` 加一个 case，**不改通用路由**。
+
+一条 capability 描述：支持的生成模式（`modes`）、时长区间、比例（含 `ratioLockedModes` 这种
+「某模式下比例被 API 锁死」的约束）、分辨率、各类参考素材上限与传输方式（`refs` / `refTransport`）、
+特性开关（`generateAudio` / `voiceClone` / `returnLastFrame` / `realFaceBlocked`）、
+提示词方言（`promptDialect`）、`@参考N` 编号规则。
+
+**禁止再在业务代码里写协议判断**。以下写法一律改为读能力表：
+
+| ❌ 旧写法 | ✅ 改为 |
+|---|---|
+| `protocol === "seedance" \|\| protocol === "doubao"` | `cap.promptDialect === "seedance-multi-param"` |
+| 局部常量 `MAX_MULTIMODAL_REFS = 9` / `MAX_AUDIO_REFS = 3` | `cap.refs.image` / `cap.refs.audio` |
+| `getModelMaxDuration(modelId)`（原 `model-limits.ts`，已删除并入本表） | 仍可用，内部读 `cap.duration.max` |
+
+**关键 API**：
+- `resolveVideoCapability(modelId, protocol?)` — 精确 id → 家族子串（长的优先）→ 协议兜底 → `UNKNOWN_VIDEO_CAPABILITY`（不抛异常）
+- `downgradeVideoMode(ideal, cap)` — **必须调用**，见 7b
+- `describeCapabilityLoss(cap, ctx)` — 生成「本次会丢什么」的中文说明，经响应体 `capabilityNotes` 回传前端 toast
+
+**Seedance 2.0 与 2.5 的差异全部由本表表达**（`refNumbering` / `ratioLockedModes` / `refs` / `duration` /
+`resolutions` / `outputFormats`），业务代码不需要判断版本。唯一的例外是 `providers/seedance.ts` 内部的
+`isSeedance25()` —— 它决定请求体形状（`omni_reference_task_type`、`role: "first_frame"`、`reference_video`），
+那是火山自家两个 API 版本之间的差异，属于该 provider 的内部知识，不放进跨品牌可比的能力表。
+
+**约束**：本文件被客户端组件引用（shot-card / shot-drawer / prompt-editor），
+必须保持纯数据 + 纯函数，不得引入 `server-only`、node 内置模块或有副作用的 import。
+
+**一致性守卫**：`src/__tests__/unit/lib/ai/video-capability-consistency.test.ts` 断言
+注册表 ↔ `createVideoProvider` switch ↔ `model-store.ts` 的 `Protocol` 联合类型 ↔
+`models/list` fallback 模型 id 四者一一对应，并校验每条 capability 自洽
+（`refs` 与 `refTransport` 同时有/同时无、声明 multimodal 就必须有 `refs.image`、
+`voiceClone` 与 `refs.audio > 0` 一致、锁定比例必须在 `ratios` 里）。漏配任意一项直接失败。
+
 ### 7b. 视频生成三路分流 — SingleVideoMode
 
-`SingleVideoMode = "initialImage" | "keyframe" | "multimodal"`，由 `resolveSingleVideoMode(shot)` 决定，定义于 `src/lib/storyboard/shot-video-readiness.server.ts`。
+`SingleVideoMode = "initialImage" | "keyframe" | "multimodal"`（即 `video-capabilities.ts` 的 `VideoMode`），
+由 `resolveSingleVideoMode(shot)` 决定，定义于 `src/lib/storyboard/shot-video-readiness.server.ts`。
+
+⚠️ **`resolveSingleVideoMode` 返回的是「理想模式」，只看分镜数据，不知道 provider 支不支持。
+调用方必须再过一道 `downgradeVideoMode(ideal, capability)`。**
+Kling / Veo / 即梦三家都只实现了首帧和首尾帧两种 body —— 把 `multimodal`（绝大多数镜头的默认模式）
+直接送进去，Kling 会对 undefined 的 `initialImage` 取 base64 而崩溃，Veo 会抛
+`Veo requires an image input`，即梦会提交一个空图列表。
+
+降级链：`multimodal → initialImage → keyframe`（multimodal 与 initialImage 都只需一张首帧图；
+keyframe 需要额外的 AI 尾帧，无法凭空造出来，只作最后兜底）。降级结果通过 `capabilityNotes`
+回传前端并 toast 告知用户 —— **降级不能静默**，否则用户切换品牌后只会觉得「效果莫名变差」。
 
 **决策顺序（不可调整）：**
 
@@ -339,15 +395,54 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 
 **批量视频生成无需单独迁移**：批量视频是客户端循环调用 `single_video_generate`，每次调用走同一套三态逻辑，自动享受 multimodal 路径。
 
-### 8. linkShotsViaCutPoint — 镜头衔接（视频尾帧）
+### 8. 镜头衔接 — 自动链接已移除，现在只有手动承接
 
-`projects.link_shots_via_cut_point`（integer，默认 0）对应分镜页「镜头衔接（视频尾帧）」。
+**`linkShotsViaCutPoint` 自动衔接已整体移除，不要按旧文档去实现或调用它。**
 
-- 开启：单镜/批量视频成功后调用 `maybeAutoLinkNextShotAfterVideo` → `linkNextShotAnchorFromCutPoint`（`src/lib/storyboard/shot-frame-link.ts`）
-- 机制：**路径直拷** `cut_point[i]` → `anchor_first[i+1]`（同集、同 `versionId`、同 `episodeId`）
-- 跳过：`isCrowdToCharacterCut`（上一镜群演、下一镜有命名角色）
-- 与手动衔接并存：「承接上一镜尾帧」「承接上一集尾帧」、参考图 AI 重绘
-- Reference 双轨已废弃（generate 相关 action **410**）；勿恢复生成画面前自动链式参考
+- `projects.link_shots_via_cut_point` 列已由 migration `0047_drop_enhance_prompts_link_shots` 删除
+  （原因：手动按钮已覆盖该场景）
+- `maybeAutoLinkNextShotAfterVideo` / `linkNextShotAnchorFromCutPoint` / `isCrowdToCharacterCut`
+  这三个函数**都已不存在**；`src/lib/storyboard/shot-frame-link.ts` 现在只剩
+  `resolvePreviousEpisodeTailFrame`（供「承接上一集尾帧」使用）
+
+**现存的衔接方式全部是用户手动触发的**：
+- 「承接上一镜尾帧」「承接上一集尾帧」——路径直拷，写 `anchorFirstContinuityMode="strict_start"`，
+  视频生成走 `initialImage` 模式（见约定 7b）
+- 参考图 AI 重绘首帧——写 `anchorFirstContinuityMode="reference_redraw"`，仍走 `multimodal`
+
+`shots.cutPoint`（视频真实尾帧）仍在写入，由 `buildVideoCutPointUpdate` 在单镜视频成功后落库，
+供上述手动承接按钮取用。注意 `cutPoint` 依赖 provider 返回尾帧——能力表的
+`features.returnLastFrame` 记录了各家是否支持（Kling / Veo / 即梦均不支持）。
+
+Reference 双轨已废弃；勿恢复生成画面前的自动链式参考。
+
+### 8b. API 路由鉴权 — 每条路由都必须做用户识别
+
+**新增 API 路由时，要么接鉴权助手，要么在测试白名单里登记理由。** 没有第三种选择 ——
+`src/__tests__/unit/api/route-auth-guard.test.ts` 会扫描全部 `src/app/api/**/route.ts` 并强制这一点。
+
+助手在 `src/lib/api-guard.ts`，用法固定两行（刻意保持可 grep）：
+
+```ts
+const guard = await requireProjectOwner(request, projectId);
+if (!guard.ok) return guard.response;
+```
+
+| 助手 | 用途 |
+|---|---|
+| `requireProjectOwner(request, projectId)` | 带 projectId 的路由（绝大多数） |
+| `requireTaskOwner(request, taskId)` | task → projectId → 归属 |
+| `requireUser(request)` | 无资源归属、但不该匿名调用（写盘、SSRF 面、算力消耗） |
+| `requireCharacterInProject` / `requireShotInProject` / `requireCharacterAssetInProject` | **子资源二级校验**，见下 |
+
+**两级校验缺一不可**：`requireProjectOwner` 只证明「你拥有这个项目」。
+路由随后若直接 `where(eq(characters.id, characterId))`，用自己的 projectId 配别人的
+characterId 依然打得穿。凡是路径里带子资源 id 的，都要再过一次 `requireXxxInProject`。
+
+**一律返回 404，不返回 403**：403 等于告诉对方「这个 id 存在但不属于你」，可以用来枚举。
+
+**注意 `getUserIdFromRequest` 包含匿名指纹用户**（`src/proxy.ts` 下发的 `ai_comic_uid`），
+所以本地匿名使用不受影响，被挡住的只有跨租户访问。
 
 ### 9. Drizzle null 比较
 
@@ -549,14 +644,20 @@ sceneDescription 写法：
 
 ---
 
-## AI Prompt 增强系统
+## AI Prompt 增强系统（⚠️ 生产链路已停用）
 
 `src/lib/ai/prompt-enhancer.ts` 提供按 protocol 定制的 prompt 改写：
 
 - `enhanceVideoPrompt(rawPrompt, protocol, textProvider)` — 视频 prompt
 - `enhanceImagePrompt(rawPrompt, protocol, textProvider)` — 图片帧 prompt
 
-每个 protocol 对应专属的 system prompt（如 Seedance 五段式、Kling 四要素、DALL-E 英文格式等）。新增 provider 时必须在对应的 `VIDEO_ENHANCE_SYSTEM_PROMPTS` 或 `IMAGE_ENHANCE_SYSTEM_PROMPTS` map 里添加条目。增强失败时静默回退到原始 prompt，不阻塞生成。
+**这两个函数目前在生产代码里零调用方**，仅被 eval suite（`src/lib/evals/cases/prompt-enhancement.ts`）
+和单测引用。控制它的「AI 增强」开关与 `projects.enhance_prompts` 列已于 migration 0047 移除（见约定 4）；
+视频提示词改走直出架构（约定 12），不再经过 LLM 改写。
+
+因此**新增 provider 时不需要**往 `VIDEO_ENHANCE_SYSTEM_PROMPTS` / `IMAGE_ENHANCE_SYSTEM_PROMPTS`
+里加条目 —— 加了也不会在生产中生效。文件与 eval 保留，是为了将来若要恢复该能力时不用从零重写；
+真要恢复，需要先决定在哪个环节调用、以及如何与直出架构共存。
 
 ---
 
@@ -735,11 +836,11 @@ src/lib/evals/
 | DB 有帧路径文件已删 | 误走首尾帧模式 / ENOENT | UI 红框「文件缺失」（D6-B），不自动清 DB |
 | 版本 DELETE 返回 404 | `eq(episodeId, null)` 匹配不到孤儿版本 | version DELETE route：移除 episodeId 过滤 |
 | 群演场景注入全部角色图 | `filterShotCharacters` 无匹配时 fallback 到全量 | `generate/route.ts` + `filterShotCharacters`：移除 fallback |
-| `enhance_prompts` column 缺失 | schema 先于 migration 被 Drizzle 读取 | migration 0027 + Python 直接 ALTER |
+| `enhance_prompts` column 缺失 | schema 先于 migration 被 Drizzle 读取 | migration 0027 + Python 直接 ALTER（历史记录：该列后已由 migration 0047 删除，见约定 4） |
 | 视频生成跳过 visualStyleTag | 生成路径未传参数 | 各 handler 全面审计 |
 | 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
-| PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧 |
+| PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧（历史记录：该函数已随自动衔接功能一并移除，现在衔接全靠用户手动触发，见约定 8） |
 | 生成首帧出现火光/动态元素 | `lightingAtm` 含视频级动态描述被注入静帧 `【光影】` 段 | migration 0042/0043：从数据库完全移除 `emotion`/`framing`/`lightingAtm`；光影信息统一写入 `startFrameDesc` |
 | Seedance 多参音色错位 | audioPath 有值但 hasAudio 未传入 | `handleBatchVideoGenerate` 查询 `character_assets.audioPath` |
 | Track 分组后视频混乱 | 分镜不连续（有跳号 sequence）| 重新「自动分配 Track」重计算分组 |
@@ -755,7 +856,18 @@ src/lib/evals/
 | cameraDirection 无叙事目的，运镜显得随意 | 只写运镜动作不写为什么这样运镜 | cameraDirection 强制格式：`起幅→运动方式+速度→落幅，目的：[揭示/跟随/强调什么]`；`registry.ts` 和 `storyboard-supervision.ts` 均已更新 |
 | AI 分镜从剧情动作出发，画面感弱、缺乏视觉张力 | shot_split 和 batch_storyboard_rewrite 直接把剧情翻译成技术字段，跳过了导演决策层 | 新增导演前思考步骤（Q1单一视觉概念 / Q2核心反差对 / Q3主动排除）；约定 15；`SHOT_SPLIT_DIRECTOR_CONCEPT_RULES` + `STORYBOARD_REWRITE_SYSTEM` |
 | 次要角色「凭空出现/消失」在镜头中间 | shot_split 无入画/出画规则，角色可以从画面中央直接现身 | 入画铁律：次要角色必须从取景框边缘进入；出画铁律：必须从边缘离开；`SHOT_SPLIT_ENTRY_EXIT_RULES`（`registry.ts`） |
-| MiniMax BGM 生成返回 hex 但写入文件报错 | `Buffer.from(hex, "hex")` 拿到的 Buffer 要用 `fs.writeFileSync`，不能用 `res.arrayBuffer()` | `bgm/generate/route.ts` |
+| 任意访客打开首页就继承了别人的项目和 API Key | `reclaim-local-user.ts` 会把「库里项目最多的孤儿匿名用户」的全部数据（含 `provider_secrets`）过继给下一个空手到访的访客。这是为本地单用户设计的便利功能，默认开启，公网部署下等于数据泄露开关 | 整套删除（不是加环境变量开关）；`route-auth-guard.test.ts` 里有一条断言禁止它复活 |
+| 知道一个 project ULID 就能读写别人的分镜/角色/上传文件 | 只有 `projects` 表有 `user_id`，其余 17 张表全靠 `project_id` 级联；26 / 65 个路由既不识别用户也不回溯归属 | 新增 `src/lib/api-guard.ts`：`requireProjectOwner` / `requireUser` / `requireTaskOwner`，两行接入且可 grep。**找不到和不属于都返回 404**（返回 403 会泄漏「这个 id 存在」，可用来枚举）|
+| 过了项目校验后仍能改别人的数据（二级 IDOR） | 路由拿到 `characterId` / `shotId` / `assetId` 后直接 `where(eq(x.id, childId))`，没约束子资源属于该项目 —— 用自己的 projectId 配别人的 childId 依然打得穿 | 补 `requireCharacterInProject` / `requireShotInProject` / `requireCharacterAssetInProject`（后者需 join 回 characters，因为 `character_assets` 表没有 project_id）|
+| provider API Key 明文存 SQLite | `provider_secrets.api_key` / `secret_key` 和 `ark_asset_library_credentials` 的 AK/SK 都是明文；一次库文件泄漏 = 所有上游 Key 全泄 | 新增 `secret-crypto.ts`（AES-256-GCM，密文带 `enc:v1:` 前缀）。**兼容存量明文所以不需要数据迁移**，下次保存自动升级为密文；未设 `AI_COMIC_SECRETS_VAULT_KEY` 时降级明文并告警 |
+| auth cookie 永久有效，改密码也踢不掉 | v1 cookie = `{userId}.{hmac(userId)}`，只签了 userId，不含过期时间也不含版本号，唯一撤销手段是改 `AUTH_SECRET`（踢掉所有人） | v2 = `v2.{userId}.{issuedAt}.{tokenVersion}.{hmac}`，服务端校验过期（30 天，原 1 年）；`users.token_version`（migration 0055）自增即可批量失效；生产环境补 `Secure`。⚠️ 版本号校验要读库，同步的 `getAuthUserIdFromRequest` 做不到，需强撤销语义时用异步的 `getFreshAuthUserId()` |
+| Seedance 2.5 的首帧/首尾帧任务用 16:9 必然异步报错 | 2.5 规定首帧/首尾帧生视频的 `ratio` **必须**为 `adaptive`（模型自动保持输出宽高比与首帧图一致），而 `seedance.ts` 的 `buildKeyframeBody`/`buildReferenceBody` 写的是 `params.ratio \|\| "16:9"`；违反时任务创建成功、启动后才报 `InvalidParameter.TaskTypeConstraint` | 能力表新增 `ratioLockedModes: { keyframe: "adaptive", initialImage: "adaptive" }`，route 用 `resolveRatioForMode(cap, mode)` 覆盖用户选的比例。这是通用机制，以后任何模型有同类约束只需填表 |
+| Seedance 2.5 参考生视频可能被模型误判成「视频编辑/延长」 | 不传或传 `omni_reference_task_type: "auto"` 时，模型按提示词意图自行判定子任务类型；判成 edit/extend 后会因 `ratio`/`duration` 不符合那两类任务的特殊限制而**异步**报错 | `buildMultimodalBody` 在 2.5 下显式传 `omni_reference_task_type: "reference"`，把校验前置到提交时同步返回 |
+| Seedance 2.5 参考视频传本地路径会静默失败 | 2.5 的参考视频**只接受公网 URL 或 `asset://` 素材 ID，不支持 base64**（图片和音频可以），沿用图片的 `toDataUrl` 思路必然出错 | 新增 `toVideoUrl()`，遇到本地路径**直接抛错**而非降级成 data URI —— 静默降级会让错误推迟到任务启动后才暴露。这也是白模预演必须排在对象存储之后的原因 |
+| 切到 Kling / Veo / 即梦生成视频必崩 | `resolveSingleVideoMode` 只看分镜数据算模式，不知道 provider 支不支持；`multimodal` 是绝大多数镜头的默认模式，而这三家 provider 只实现了首帧/首尾帧两种 body（Kling 对 undefined 的 `initialImage` 取 base64 崩溃、Veo 抛 `Veo requires an image input`、即梦提交空图列表） | 新增 `video-capabilities.ts` 能力注册表；`downgradeVideoMode(ideal, cap)` 在生成前把模式降级到 provider 真正支持的那个，并通过响应体 `capabilityNotes` 回传前端 toast 告知用户本次丢了什么 |
+| 参考素材上限写死 Seedance 2.0 的 9/3，换模型不跟着变 | `MAX_MULTIMODAL_REFS=9` / `MAX_AUDIO_REFS=3` 是 `handleSingleVideoGenerate` 里的**函数内局部常量**，未导出、未共享 | 改读 `cap.refs.image` / `cap.refs.audio`；`model-limits.ts` 整体并入 `video-capabilities.ts` 后删除 |
+| CLAUDE.md 把两个已删除的功能当现存功能写，照着写代码会直接 tsc 报错 | migration `0047_drop_enhance_prompts_link_shots` 删了 `projects.enhance_prompts` 和 `link_shots_via_cut_point` 两列（前者是 no-op、后者被手动按钮取代），但约定 4、约定 8、关键表 `projects` 行、Provider 规则、开发检查清单五处都没同步。连带发现 `prompt-enhancer.ts` 的 `enhanceImagePrompt`/`enhanceVideoPrompt` 在生产代码里**零调用方**（只剩 eval + 单测），而文档还写着「新增 provider 时必须同步添加 system prompt」 | 约定 4 / 约定 8 改写为「已移除」记录并保留编号（避免打乱交叉引用），列出已不存在的函数名（`maybeAutoLinkNextShotAfterVideo` / `linkNextShotAnchorFromCutPoint` / `isCrowdToCharacterCut`）；「AI Prompt 增强系统」一节加停用标注；开发检查清单那条换成 `VIDEO_CAPABILITIES`。**教训：删列的 migration 必须同步扫一遍 CLAUDE.md 里的列名** |
+| MiniMax 音乐接口停用，BGM 生成整条链路失效 | MiniMax Music 接口已不可用；替代品「豆包音乐」实为火山「AI 生成音乐大模型 · 生成纯音乐」，与 MiniMax 有四处结构性差异：AK/SK 签名（非 Bearer）、submit+轮询（非同步返回）、返回 CDN wav URL（非 hex 串）、`Duration` 是真参数且强制 30–120 整数秒（非塞进 prompt 文字） | protocol `minimax` → `volc-music`；`bgm/generate/route.ts` 重写为 `generateWithVolcMusic`（`@volcengine/openapi` 签名，`serviceName=imagination`，`GenBGMForTime`/`QuerySong`，`Version=2024-08-12`）；`provider-form.tsx` 的 `needsSecretKey` 必须加 `volc-music`，否则 UI 不显示 SK 输入框 |
 | BGM API key 从客户端传来不安全 | 前端把 apiKey 放 body 传给 route | 改为 route 从 DB 读 `getProviderSecret(userId, providerId)`；客户端只传 `providerId + protocol + baseUrl` |
 | shot-drawer「重写文本」按钮静默失败 | `single_shot_rewrite` route handler 已按 CLAUDE.md 要求移除，但 shot-drawer 还在调用 | 从 shot-drawer.tsx 移除该按钮及 state；用分镜页「批量优化文本」替代 |
 | registry.ts 用 `require()` 加载 storyboard-supervision | Next.js App Router 是纯 ESM，`require()` 运行时报 `ReferenceError` | 改为顶部 `import { STORYBOARD_REWRITE_SYSTEM, PLOT_OPTIMIZE_SYSTEM } from "./storyboard-supervision"`（无循环依赖） |
@@ -812,11 +924,14 @@ src/lib/evals/
 - `clips`：每条轨上的 clip，含 startTime / endTime / url / metadata
 - `initFromShots(shots)`：进入编辑器时用分镜数据初始化视频 clip + 字幕 clip（从 `dialogues` 自动生成）
 
-**BGM 生成入口**（`MediaLibrary.tsx` → 音频 Tab）：
-- 协议路由架构：`POST /api/bgm/generate` 接收 `{prompt, providerId, protocol, baseUrl, modelId?}`
+**BGM 生成入口**（`Timeline.tsx` → `BgmGeneratePanel`，在时间线上多选分镜片段后由顶部工具栏唤起；
+`MediaLibrary.tsx` 音频 Tab 只负责上传本地 BGM 文件，不含生成）：
+- 协议路由架构：`POST /api/bgm/generate` 接收 `{prompt, providerId, protocol, baseUrl, modelId?, targetDuration}`
 - 添加新音乐 provider：在 `callMusicProvider` 的 switch-case 中新增 case，实现 `generateWithXxx()` 函数
+- 密钥一律服务端从 `getProviderSecret(userId, providerId)` 读，客户端只传 `providerId + protocol + baseUrl`
+- 豆包音乐（`volc-music`）单段仅支持 **30–120 整数秒**：服务端 clamp，客户端 `BGM_MIN/MAX_DURATION` 生成前提示；
+  clip 时长取 `min(选区时长, 实际生成时长)`，避免选区超 120s 时尾部无声
 - bgmNote 建议：分镜页的 `shots.bgmNote` 字段（从剧本 `【背景音】` 标签提取）在编辑器页去重后作为 chip 建议展示
-- 生成结果在 session 内以 `generatedBgms` 数组缓存，支持多次加入时间线
 
 **服务端渲染**：`POST /api/projects/[id]/episodes/[episodeId]/render`（ffmpeg concat，支持字幕 + BGM 混流），结果写入 `episodes.final_video_url`；编辑器顶部导航显示「上次导出」下载按钮（`project.finalVideoUrl`）。
 
@@ -848,7 +963,7 @@ pnpm dev
 ## 新功能开发检查清单
 
 - [ ] schema 改动有对应 migration 文件
-- [ ] 新 AI provider 有对应 prompt enhancer 条目
+- [ ] 新视频 provider 在 `VIDEO_CAPABILITIES` 里有对应能力条目（约定 7a）
 - [ ] 新生成路径传入了 `visualStyleTag`
 - [ ] 新生成路径正确使用 `filterShotCharacters`（无 fallback）
 - [ ] 客户端 episodeId 来自 `urlEpisodeId`，非 store

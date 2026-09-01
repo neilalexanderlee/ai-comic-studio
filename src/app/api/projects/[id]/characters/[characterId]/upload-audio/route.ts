@@ -5,6 +5,7 @@ import { and, eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { requireProjectOwner, requireCharacterInProject } from "@/lib/api-guard";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -69,7 +70,11 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string }> }
 ) {
-  const { characterId } = await params;
+  const { id: projectId, characterId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireCharacterInProject(characterId, projectId);
+  if (!scope.ok) return scope.response;
   const { searchParams } = new URL(request.url);
   const assetId = searchParams.get("assetId");
 
@@ -125,7 +130,11 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string }> }
 ) {
-  const { characterId } = await params;
+  const { id: projectId, characterId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireCharacterInProject(characterId, projectId);
+  if (!scope.ok) return scope.response;
   const { searchParams } = new URL(request.url);
   const assetId = searchParams.get("assetId");
 

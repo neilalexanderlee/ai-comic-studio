@@ -3,7 +3,7 @@
 /**
  * VideoPreview — AVCanvas 架构
  *
- * 新增（移植自 Toonflow-web videoPreview.vue）：
+ * 能力：
  *  - trimStart / trimEnd：通过 MP4Clip.split() 裁剪素材内部范围
  *  - 转场渲染：tickInterceptor 实现帧级混合（fade / dissolve / slide / wipe / zoom / rotate…）
  *  - 帧缓存：转场的 "beforeClip" 帧缓存供 "afterClip" 混合使用
@@ -495,7 +495,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         await mp4Clip.ready;
         if (signal.aborted) { mp4Clip.destroy?.(); return null; }
 
-        // ── trimStart / trimEnd（移植自 Toonflow videoPreview.vue）──────────
+        // ── trimStart / trimEnd：用 MP4Clip.split() 切出素材内部范围 ──────────
         const originalDuration = mp4Clip.meta.duration / 1e6; // → 秒
         const trimStart = clip.trimStart ?? 0;
         const trimEnd = clip.trimEnd ?? originalDuration;

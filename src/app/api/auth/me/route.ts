@@ -6,10 +6,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
-import { getAuthUserIdFromRequest } from "@/lib/auth";
+import { getFreshAuthUserId } from "@/lib/auth";
 
 export async function GET(req: NextRequest) {
-  const userId = getAuthUserIdFromRequest(req);
+  // 用异步强校验：除签名和过期外，还比对 DB 里的 token_version。
+  // 前端靠这个接口判断登录态，被撤销的会话应当在这里就掉线。
+  const userId = await getFreshAuthUserId(req);
   if (!userId) {
     return NextResponse.json({ loggedIn: false });
   }

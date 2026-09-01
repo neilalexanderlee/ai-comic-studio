@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and, asc, desc } from "drizzle-orm";
 import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
+import { requireProjectOwner } from "@/lib/api-guard";
 
 /**
  * GET /api/projects/:id/episodes/:episodeId/srt?versionId=xxx
@@ -11,11 +12,13 @@ import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialo
  * 时间计算：前序镜头时长累加 = 当前镜头起始时间；同镜多条台词按字数加权分配时长。
  */
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; episodeId: string }> }
 ) {
   const { id: projectId, episodeId } = await params;
-  const url = new URL(_request.url);
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const url = new URL(request.url);
   let versionId = url.searchParams.get("versionId") ?? undefined;
 
   // 若未指定 versionId，取最新版本

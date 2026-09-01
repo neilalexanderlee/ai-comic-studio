@@ -1,5 +1,5 @@
 /**
- * 转场工具函数（基于 Toonflow-web transitionHelper.ts，使用本地 Clip/Track 类型）
+ * 转场工具函数：定位时间点两侧相邻的视频 clip，以及 UI 可选的转场类型清单。
  */
 import type { Clip, Track, TransitionType } from "./clipMeta";
 

@@ -5,19 +5,12 @@ import { desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import { addImportLog } from "@/lib/import-utils";
 import { validateWholeDramaSourceLength } from "@/lib/whole-drama/limits";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
 
 export async function GET(request: Request) {
   const userId = getUserIdFromRequest(request);
-  // Only reclaim for anonymous (unauthenticated) users.
-  // For logged-in users, migrate-data handles this at login time.
-  // Running reclaim for auth users with 0 projects would steal their other data.
-  if (!getAuthUserIdFromRequest(request)) {
-    await reclaimLocalProjectsForUser(userId);
-  }
   const allProjects = await db
     .select()
     .from(projects)

@@ -6,7 +6,6 @@ import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
@@ -18,9 +17,6 @@ function tryDeleteFile(filePath: string | null | undefined) {
 }
 
 async function resolveProject(id: string, userId: string, isAuthenticated: boolean) {
-  if (!isAuthenticated) {
-    await reclaimLocalProjectsForUser(userId);
-  }
   const [project] = await db
     .select()
     .from(projects)

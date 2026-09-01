@@ -1,4 +1,4 @@
-/** Clip / Track 元数据（框架无关，基于 Toonflow-web clipMeta.ts 重写） */
+/** Clip / Track 元数据类型与时间线通用小工具（框架无关，供编辑器各组件共用） */
 
 export type TrackType = "video" | "audio" | "subtitle" | "bgm";
 

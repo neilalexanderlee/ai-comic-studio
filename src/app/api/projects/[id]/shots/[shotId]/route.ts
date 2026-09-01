@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { shots } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
-  const { shotId } = await params;
+  const { id: projectId, shotId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireShotInProject(shotId, projectId);
+  if (!scope.ok) return scope.response;
   const body = (await request.json()) as Partial<{
     prompt: string;
     duration: number;
@@ -46,10 +51,14 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
-  const { shotId } = await params;
+  const { id: projectId, shotId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireShotInProject(shotId, projectId);
+  if (!scope.ok) return scope.response;
   await db.delete(shots).where(eq(shots.id, shotId));
   return new NextResponse(null, { status: 204 });
 }

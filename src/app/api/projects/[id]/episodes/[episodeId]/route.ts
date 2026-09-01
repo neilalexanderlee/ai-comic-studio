@@ -13,7 +13,6 @@ import { eq, asc, and, or, isNull, desc, inArray } from "drizzle-orm";
 import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 
 async function resolveProjectAndEpisode(
   projectId: string,
@@ -21,7 +20,6 @@ async function resolveProjectAndEpisode(
   userId: string,
   isAuthenticated: boolean
 ) {
-  if (!isAuthenticated) await reclaimLocalProjectsForUser(userId);
   const [project] = await db
     .select()
     .from(projects)

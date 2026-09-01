@@ -4,6 +4,7 @@ import { scheduleDatabaseHotBackup } from "@/lib/db-file-backup";
 import { db } from "@/lib/db";
 import { arkAssetLibraryCredentials } from "@/lib/db/schema";
 import type { ArkAssetLibraryCredentials } from "@/lib/ai/ark-asset-library";
+import { encryptSecret, decryptSecret } from "@/lib/secret-crypto";
 
 /**
  * 私域素材库 AK/SK 凭证的 DB 读写。
@@ -43,9 +44,10 @@ export async function resolveArkAssetLibraryClientCredentials(
 ): Promise<ArkAssetLibraryCredentials | null> {
   const row = await getArkAssetLibraryCredentials(userId);
   if (!row?.accessKeyId || !row?.secretAccessKey) return null;
+  // 存量明文会被 decryptSecret 原样返回（见 secret-crypto.ts）
   return {
-    accessKeyId: row.accessKeyId,
-    secretAccessKey: row.secretAccessKey,
+    accessKeyId: decryptSecret(row.accessKeyId) ?? "",
+    secretAccessKey: decryptSecret(row.secretAccessKey) ?? "",
     projectName: row.projectName,
     region: row.region,
   };
@@ -68,8 +70,8 @@ export async function upsertArkAssetLibraryCredentials(args: {
     await db
       .update(arkAssetLibraryCredentials)
       .set({
-        accessKeyId: args.accessKeyId,
-        secretAccessKey: args.secretAccessKey,
+        accessKeyId: encryptSecret(args.accessKeyId) ?? "",
+        secretAccessKey: encryptSecret(args.secretAccessKey) ?? "",
         projectName: args.projectName || "default",
         region: args.region || "cn-beijing",
         updatedAt: new Date(),
@@ -79,8 +81,8 @@ export async function upsertArkAssetLibraryCredentials(args: {
     await db.insert(arkAssetLibraryCredentials).values({
       id: ulid(),
       userId: args.userId,
-      accessKeyId: args.accessKeyId,
-      secretAccessKey: args.secretAccessKey,
+      accessKeyId: encryptSecret(args.accessKeyId) ?? "",
+      secretAccessKey: encryptSecret(args.secretAccessKey) ?? "",
       projectName: args.projectName || "default",
       region: args.region || "cn-beijing",
       updatedAt: new Date(),

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { requireUser } from "@/lib/api-guard";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -24,6 +25,10 @@ const ALLOWED_AUDIO_TYPES: Record<string, string> = {
  * Body: multipart/form-data, field name "file"
  */
 export async function POST(request: NextRequest) {
+  // 无鉴权的写盘接口 = 任何人都能往服务器塞文件
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
 

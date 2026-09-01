@@ -62,8 +62,10 @@ function idbSet(value: string): void {
  * On recovery: the found ID is written back to all 3 layers + cookie, then page refresh
  * ensures the server sees the restored user ID via x-user-id header.
  *
- * On first visit / total clear: middleware assigns a new UUID, reclaim-local-user.ts
- * automatically reassigns all DB data from previous orphan IDs to the new one.
+ * On first visit / total clear: the proxy assigns a new UUID and the user starts empty.
+ * (There used to be a `reclaim-local-user.ts` that reassigned any orphan user's data —
+ * including their provider_secrets — to whichever visitor showed up next. That is a data
+ * leak on a public deployment, so it was removed; sign in to recover an existing workspace.)
  */
 export function FingerprintProvider({
   children,

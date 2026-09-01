@@ -3,12 +3,17 @@ import { db } from "@/lib/db";
 import { characterAssets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
+import { requireProjectOwner, requireCharacterInProject } from "@/lib/api-guard";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string }> }
 ) {
-  const { characterId } = await params;
+  const { id: projectId, characterId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireCharacterInProject(characterId, projectId);
+  if (!scope.ok) return scope.response;
   const body = (await request.json()) as {
     imagePath?: string | null;
     tag?: string;

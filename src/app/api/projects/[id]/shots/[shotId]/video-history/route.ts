@@ -12,12 +12,17 @@ import { db } from "@/lib/db";
 import { shots, shotVideoHistory } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { saveVideoToHistory, getVideoHistory } from "@/lib/video/video-history";
+import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
 
 export async function GET(
-  _req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
   const { id: projectId, shotId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireShotInProject(shotId, projectId);
+  if (!scope.ok) return scope.response;
 
   const [shot] = await db.select({ projectId: shots.projectId })
     .from(shots)
@@ -32,11 +37,15 @@ export async function GET(
 }
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
   const { id: projectId, shotId } = await params;
-  const body = await req.json().catch(() => ({}));
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireShotInProject(shotId, projectId);
+  if (!scope.ok) return scope.response;
+  const body = await request.json().catch(() => ({}));
   const { historyId } = body as { historyId?: string };
 
   if (!historyId) {

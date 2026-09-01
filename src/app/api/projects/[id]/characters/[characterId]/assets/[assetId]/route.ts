@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { characterAssets } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import fs from "node:fs";
+import { requireProjectOwner, requireCharacterAssetInProject } from "@/lib/api-guard";
 
 /** Delete a file from disk, silently ignoring missing-file errors. */
 function tryDeleteFile(filePath: string | null | undefined) {
@@ -18,7 +19,11 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string; assetId: string }> }
 ) {
-  const { characterId, assetId } = await params;
+  const { id: projectId, characterId, assetId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireCharacterAssetInProject(assetId, projectId);
+  if (!scope.ok) return scope.response;
   const body = (await request.json()) as {
     tag?: string;
     isDefault?: boolean;
@@ -63,10 +68,14 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string; characterId: string; assetId: string }> }
 ) {
-  const { assetId } = await params;
+  const { id: projectId, assetId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const scope = await requireCharacterAssetInProject(assetId, projectId);
+  if (!scope.ok) return scope.response;
 
   // Fetch the record first so we can clean up the file on disk
   const [asset] = await db

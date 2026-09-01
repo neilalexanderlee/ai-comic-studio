@@ -386,6 +386,13 @@
       "when": 1779000030000,
       "tag": "0054_shot_anchor_first_continuity_mode",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1779000031000,
+      "tag": "0055_user_token_version",
+      "breakpoints": true
     }
   ]
 }

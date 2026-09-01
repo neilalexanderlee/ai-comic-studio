@@ -3,6 +3,7 @@ import {
   isGeminiModelCompatible,
   type ModelCapability,
 } from "@/lib/ai/model-capabilities";
+import { requireUser } from "@/lib/api-guard";
 
 interface ListRequest {
   protocol: string;
@@ -112,6 +113,11 @@ async function fetchGeminiModels(
 }
 
 export async function POST(request: Request) {
+  // 未知 protocol 时本路由会用客户端提供的 baseUrl 去发起服务端 fetch（见下方 fetchModels），
+  // 不加身份校验等于对外提供一个开放的 SSRF 代理。
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+
   try {
     const body = (await request.json()) as ListRequest;
 

@@ -1,5 +1,5 @@
 /**
- * 滤镜与特效工具（基于 Toonflow-web filterEffect.ts，使用本地类型）
+ * 滤镜与画面特效工具：CSS filter 类型定义 + clip 特效的变换参数计算。
  */
 
 export type FilterType =

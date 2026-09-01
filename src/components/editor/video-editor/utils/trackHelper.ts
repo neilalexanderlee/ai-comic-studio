@@ -1,5 +1,6 @@
 /**
- * 轨道空间工具函数（基于 Toonflow-web trackHelper.ts，使用本地类型）
+ * 轨道空间工具函数：区间占用判断、末尾追加点、边界吸附、总时长计算。
+ * 全部基于本项目的 Clip / Track 类型（见 clipMeta.ts）。
  */
 import type { Track, Clip } from "./clipMeta";
 

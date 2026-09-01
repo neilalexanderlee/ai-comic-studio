@@ -341,6 +341,11 @@ export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull().unique(),
   passwordHash: text("password_hash").notNull(),
+  /**
+   * 会话版本号。改密码或「登出所有设备」时自增，使此前签发的所有 cookie 立即失效。
+   * cookie 里带着签发时的版本号（见 lib/auth.ts），异步校验路径会比对这个字段。
+   */
+  tokenVersion: integer("token_version").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

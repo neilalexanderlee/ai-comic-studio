@@ -4,7 +4,6 @@ import { projects, episodes, shots } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
-import { reclaimLocalProjectsForUser } from "@/lib/reclaim-local-user";
 import { resolvePreviousEpisodeTailFrame } from "@/lib/storyboard/shot-frame-link";
 
 /**
@@ -17,8 +16,6 @@ export async function POST(
   const { id: projectId, episodeId, shotId } = await params;
   const userId = getUserIdFromRequest(request);
   const isAuthenticated = getAuthUserIdFromRequest(request) !== null;
-  if (!isAuthenticated) await reclaimLocalProjectsForUser(userId);
-
   const [project] = await db
     .select({ id: projects.id })
     .from(projects)

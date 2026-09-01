@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { characters, characterAssets, episodeCharacters } from "@/lib/db/schema";
 import { eq, inArray } from "drizzle-orm";
+import { requireProjectOwner } from "@/lib/api-guard";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
   const projectChars = await db
     .select()
     .from(characters)
