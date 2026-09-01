@@ -408,3 +408,71 @@ export const trackVideos = sqliteTable("track_videos", {
     .notNull()
     .$defaultFn(() => new Date()),
 });
+
+// ─── 计费 / 积分 ──────────────────────────────────────────────────────────────
+//
+// 设计要点（见 CLAUDE.md 约定 13）：
+//   1. 余额与冻结额分离。视频生成是 5–10 分钟的异步长任务，必须「预扣 → 结算/退还」
+//      两段式，不能先生成后扣费（失败时无法追回），也不能直接扣余额（失败退款会丢账）。
+//   2. credit_ledger 是**只追加**的流水，balanceAfter 冗余记录当时余额，用于对账。
+//      任何余额变动都必须写一条流水；不允许只改 credit_accounts 不写流水。
+//   3. usage_records 记录每次调用的上游真实用量，用于事后核对报价是否偏离成本。
+
+/** 用户积分账户。balance = 可用余额，frozen = 已预扣但未结算的部分 */
+export const creditAccounts = sqliteTable("credit_accounts", {
+  userId: text("user_id").primaryKey(),
+  /** 可用余额（积分，1 积分 = ¥0.01 面值） */
+  balance: integer("balance").notNull().default(0),
+  /** 冻结中（已预扣、等待结算或退还） */
+  frozen: integer("frozen").notNull().default(0),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 积分流水（只追加，不修改不删除） */
+export const creditLedger = sqliteTable("credit_ledger", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  /** grant=赠送 purchase=充值 reserve=预扣 settle=结算 refund=退还 expire=过期 */
+  type: text("type", {
+    enum: ["grant", "purchase", "reserve", "settle", "refund", "expire"],
+  }).notNull(),
+  /** 变动量：正数入账，负数出账 */
+  amount: integer("amount").notNull(),
+  /** 变动后的可用余额，用于对账 */
+  balanceAfter: integer("balance_after").notNull(),
+  /** 关联对象类型：generation / order / subscription / admin */
+  refType: text("ref_type"),
+  /** 关联对象 id（如 reservationId、orderId） */
+  refId: text("ref_id"),
+  note: text("note"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 单次生成的用量与计费记录 */
+export const usageRecords = sqliteTable("usage_records", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  projectId: text("project_id"),
+  shotId: text("shot_id"),
+  /** image / video / music / text */
+  kind: text("kind").notNull(),
+  protocol: text("protocol"),
+  modelId: text("model_id"),
+  /** 计价输入参数快照（JSON：分辨率、时长、模式等） */
+  params: text("params"),
+  /** 预扣积分 */
+  creditsReserved: integer("credits_reserved").notNull().default(0),
+  /** 最终结算积分（成功后按真实用量对账；失败为 0） */
+  creditsCharged: integer("credits_charged").notNull().default(0),
+  /** 上游返回的真实用量（如 Seedance 的 completion_tokens） */
+  upstreamUsage: integer("upstream_usage"),
+  /** reserved / settled / refunded */
+  status: text("status").notNull().default("reserved"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});

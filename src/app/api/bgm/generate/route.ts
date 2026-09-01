@@ -6,6 +6,7 @@ import { Service } from "@volcengine/openapi";
 import { bootstrap } from "@/lib/bootstrap";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getProviderSecret } from "@/lib/provider-secrets";
+import { openBillingGate } from "@/lib/billing/gate";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -231,6 +232,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 计费闸门（BILLING_ENABLED=1 时生效，否则空操作）。必须在调用上游前预扣。
+  const billing = await openBillingGate(userId, {
+    kind: "music",
+    modelId: modelId || "",
+    durationSeconds: typeof targetDuration === "number" ? targetDuration : undefined,
+  }, { protocol });
+  if (!billing.ok) return billing.response;
+
   let result: MusicGenerateResult;
   try {
     result = await callMusicProvider(protocol, {
@@ -242,6 +251,7 @@ export async function POST(request: NextRequest) {
       targetDuration: typeof targetDuration === "number" ? targetDuration : undefined,
     });
   } catch (err) {
+    await billing.refund(err instanceof Error ? err.message : String(err));
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 502 }
@@ -256,15 +266,21 @@ export async function POST(request: NextRequest) {
   try {
     await downloadAudioWithRetry(result.audioUrl, path.join(bgmDir, filename));
   } catch (err) {
+    // 上游已生成（钱已花），但我们没拿到文件。仍然退还用户积分——
+    // 这笔损失由平台承担，不该让用户为拿不到的产物付费。
+    await billing.refund(err instanceof Error ? err.message : String(err));
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
       { status: 502 }
     );
   }
 
+  await billing.settle();
+
   return NextResponse.json({
     filePath: `./uploads/bgm/${filename}`,
     duration: result.durationSec,
     name: `BGM - ${prompt.trim().slice(0, 20)}`,
+    ...(billing.credits > 0 && { creditsCharged: billing.credits }),
   });
 }

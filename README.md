@@ -403,9 +403,17 @@ git push -u origin main
 
 ## License
 
-本项目采用 [Apache License 2.0](./LICENSE)。
+本项目采用 [Apache License 2.0](./LICENSE)，并附一份**补充协议**（见 LICENSE 末尾）。
 
-- 版权与衍生说明：[NOTICE](./NOTICE)
+**一句话版本**：自己部署随便用，改随便改，**用它做片子赚钱也随便赚**——
+唯一的限制是「把本软件本身包装成与官方服务竞争的托管服务卖出去」需要先谈授权。
+
+- 版权与上游衍生说明：[NOTICE](./NOTICE)
+- 补充协议适用范围：仅约束本项目的原创贡献；来自
+  [AIComicBuilder](https://github.com/twwch/AIComicBuilder) 的部分继续单纯按 Apache-2.0 授权
+- 补充协议**不追溯**：在其加入之前发布的版本继续按纯 Apache-2.0 可用
+
+> ⚠️ 补充协议目前为**草案，尚未经律师复核**，措辞可能调整。
 
 
 

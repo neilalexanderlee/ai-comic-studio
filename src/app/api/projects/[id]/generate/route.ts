@@ -44,6 +44,7 @@ import { registerCharacterPortraitToArk } from "@/lib/ai/ark-asset-library";
 import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library-credentials";
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { shouldResolveMultimodalCharacterRefs } from "@/lib/ai/multimodal-refs";
+import { openBillingGate } from "@/lib/billing/gate";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -2603,6 +2604,21 @@ async function handleSingleVideoGenerate(
   // 提示词方言由能力描述符决定（原先是 `protocol === "seedance" || "doubao"` 的硬编码判断）
   const usesSeedanceDialect = videoCapability.promptDialect === "seedance-multi-param";
 
+  // ── 计费闸门（BILLING_ENABLED=1 时生效，否则完全空操作）──────────────────
+  // 必须在调用上游之前预扣：视频生成是数分钟的长任务，生成完再扣费时，
+  // 余额不足的钱已经花在上游了，追不回来。
+  const billing = await openBillingGate(
+    userId,
+    {
+      kind: "video",
+      modelId: modelConfig?.video?.modelId,
+      durationSeconds: Math.min(shot.duration ?? 10, videoCapability.duration.max),
+      resolution: (payload?.resolution as string) ?? "480p",
+    },
+    { projectId, shotId, protocol: videoProtocol }
+  );
+  if (!billing.ok) return billing.response;
+
   try {
     await db.update(shots).set({ status: "generating" }).where(eq(shots.id, shotId));
 
@@ -2997,15 +3013,21 @@ async function handleSingleVideoGenerate(
       .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...singleLastFrameUpdate })
       .where(eq(shots.id, shotId));
 
+    await billing.settle();
+
     return NextResponse.json({
       shotId,
       videoUrl: result.filePath,
       status: "ok",
       // 本次因模型能力差异而丢弃/降级的东西，供 UI 告知用户（空数组表示无损失）
       ...(capabilityNotes.length > 0 && { capabilityNotes }),
+      ...(billing.credits > 0 && { creditsCharged: billing.credits }),
     });
   } catch (err) {
     console.error(`[SingleVideoGenerate] Error for shot ${shotId}:`, err);
+    // 生成失败全额退回预扣积分。放在 status 更新之前，确保即使后续 DB 操作出错，
+    // 用户的钱也已经退了。
+    await billing.refund(extractErrorMessage(err));
     await db.update(shots).set({ status: "failed" }).where(eq(shots.id, shotId));
     return NextResponse.json({ shotId, status: "error", error: extractErrorMessage(err) }, { status: 500 });
   }

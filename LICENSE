@@ -199,3 +199,70 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
+---
+
+## 补充协议 | Supplementary Agreement
+
+> ⚠️ **草案，尚未经律师复核。** 生效前需由执业律师审阅措辞与可执行性。
+> Draft — pending review by qualified legal counsel before it takes effect.
+
+### 适用范围 | Scope
+
+本补充协议**仅约束 AI Comic Studio 项目自身的原创贡献**。本项目包含来自
+[AIComicBuilder](https://github.com/twwch/AIComicBuilder) 等上游项目、以
+Apache License 2.0 授权的代码（见 [NOTICE](./NOTICE)），**那些部分继续完全按
+Apache-2.0 授权，不受本补充协议约束**。
+
+This Supplementary Agreement applies **only to original contributions of the
+AI Comic Studio project itself**. Code originating from upstream projects such as
+AIComicBuilder, licensed under Apache License 2.0 (see NOTICE), **remains solely
+under Apache-2.0 and is not subject to this Supplementary Agreement**.
+
+### 限制 | Restriction
+
+若您将本软件或其衍生版本**作为托管服务或受管服务（hosted / managed service）
+提供给第三方**，且该服务与本项目的官方服务构成竞争，须事先取得著作权人的
+**书面商业授权**。
+
+If you provide this software or a derivative thereof **as a hosted or managed
+service to third parties** in a manner that competes with the project's official
+service, you must obtain **written commercial authorization** from the copyright
+holder in advance.
+
+### 永久免费场景 | Always Free — No Authorization Required
+
+以下使用**永久免费**，无需任何授权：
+
+- ✅ **自行部署供自己或本组织内部使用**（不对外提供服务）
+- ✅ 二次开发、修改、用于自有业务的内部工具
+- ✅ 用本软件生产内容并以该内容盈利（成片、剧集、素材等产出物完全归您）
+- ✅ 个人学习、研究、教学与非商业用途
+- ✅ 向本项目提交贡献
+
+Self-hosting for yourself or within your own organization, secondary development,
+**monetizing the content you produce with it**, personal study and research, and
+contributing back — all free, no authorization needed.
+
+**说明**：本限制针对的是「把本软件本身作为竞争性服务卖出去」，
+**不针对**「用本软件做东西然后卖那些东西」。用它做片子赚钱，随便赚。
+
+### 不追溯 | Non-Retroactivity
+
+本补充协议**自加入之日起对其后发布的版本生效**。在此之前以 Apache-2.0
+单独授权发布的所有版本，其既有授权不受影响，可继续按 Apache-2.0 使用。
+
+This Supplementary Agreement applies **only to versions released after it was
+introduced**. All versions previously released under Apache-2.0 alone remain
+available under those terms.
+
+### 署名 | Attribution
+
+您不得删除或修改本软件界面与源码中的版权声明、NOTICE 内容及上游署名。
+
+You may not remove or alter copyright notices, NOTICE contents, or upstream
+attributions in this software's interface or source code.
+
+### 商业授权咨询 | Commercial Licensing
+
+联系方式见项目 README。

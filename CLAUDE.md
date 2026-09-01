@@ -444,6 +444,32 @@ characterId 依然打得穿。凡是路径里带子资源 id 的，都要再过�
 **注意 `getUserIdFromRequest` 包含匿名指纹用户**（`src/proxy.ts` 下发的 `ai_comic_uid`），
 所以本地匿名使用不受影响，被挡住的只有跨租户访问。
 
+### 8c. 计费闸门 — 默认关闭，三段式扣费
+
+**`BILLING_ENABLED` 未设为 `"1"` 时，`src/lib/billing/gate.ts` 全部退化为空操作**，
+生成链路行为与接入计费前完全一致。
+
+这是刻意的：本项目同时是**可自部署的开源软件**（用户自带 API Key，不需要积分）
+和**托管 SaaS**（平台统一 Key，按积分计费）。闸门若默认开启，自部署用户装上就会
+因余额为 0 而完全不能用。`gate.test.ts` 锁死了这个语义（只认字面量 `"1"`）。
+
+**必须是预扣 → 结算/退还三段式**，不能先生成后扣费：视频生成是 5–10 分钟的
+异步长任务，生成完再扣时余额不足的钱已经花在上游了，追不回来。也不能直接扣余额——
+失败退款若不留流水账就对不上，并发下「查余额→扣减」两步之间还有竞态。
+
+```
+reserve  余额 → 冻结（带条件的原子 UPDATE：WHERE balance >= amount）
+settle   冻结 → 扣除（可按真实用量少扣，差额自动退回余额）
+refund   冻结 → 余额（失败/超时全额退回）
+```
+
+**任何余额变动都必须写 `credit_ledger` 流水**，不允许只改 `credit_accounts`。
+
+接入点只有三处（`generateVideo()` 全项目仅一个 handler 调用）：
+`generate/route.ts` 的单镜视频与图片生成、`bgm/generate/route.ts`。
+定价在 `src/lib/billing/pricing.ts`（纯函数，前后端共用），时长按能力表 clamp，
+**报价永不为 0**——为 0 意味着可以无限白嫖。
+
 ### 9. Drizzle null 比较
 
 ```typescript
