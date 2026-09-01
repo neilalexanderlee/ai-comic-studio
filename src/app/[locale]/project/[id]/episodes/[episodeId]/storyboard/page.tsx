@@ -3,6 +3,7 @@
 import { useProjectStore } from "@/stores/project-store";
 import { useEpisodeStore } from "@/stores/episode-store";
 import { useModelStore } from "@/stores/model-store";
+import { resolveVideoCapability } from "@/lib/ai/video-capabilities";
 import { ShotCard } from "@/components/editor/shot-card";
 import { Button } from "@/components/ui/button";
 import { useTranslations, useLocale } from "next-intl";
@@ -84,6 +85,8 @@ export default function EpisodeStoryboardPage() {
   const locale = useLocale();
   const { project, fetchProject } = useProjectStore();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
+  // 当前所选视频模型的能力：驱动分辨率/比例选项与时长上限，换模型自动跟着变
+  const videoCapability = resolveVideoCapability(getModelConfig().video?.modelId);
   const [generating, setGenerating] = useState(false);
   const [generatingVideoPrompts, setGeneratingVideoPrompts] = useState(false);
   // 画面比例：项目级持久化设置（DB projects.video_ratio），而非页面临时状态，
@@ -104,7 +107,7 @@ export default function EpisodeStoryboardPage() {
       toast.error("画面比例保存失败");
     }
   }
-  const [videoGenerationResolution, setVideoGenerationResolution] = useState<"480p" | "720p">("480p");
+  const [videoGenerationResolution, setVideoGenerationResolution] = useState<string>("480p");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [versions, setVersions] = useState<StoryboardVersion[]>([]);
   const [openDrawerShotId, setOpenDrawerShotId] = useState<string | null>(null);
@@ -894,9 +897,13 @@ export default function EpisodeStoryboardPage() {
             <InlineModelPicker capability="text" />
             <InlineModelPicker capability="image" />
             <InlineModelPicker capability="video" />
-            <VideoRatioPicker value={videoRatio} onChange={handleVideoRatioChange} />
+            <VideoRatioPicker
+              value={videoRatio}
+              onChange={handleVideoRatioChange}
+              allowedRatios={videoCapability.ratios}
+            />
             <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
-              {(["480p", "720p"] as const).map((res) => (
+              {videoCapability.resolutions.map((res) => (
                 <button
                   key={res}
                   type="button"

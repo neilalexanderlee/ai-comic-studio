@@ -189,3 +189,79 @@ describe("非角色资产（scene/prop）不标注'正面（外貌主参考）'"
     expect(refs[0]).toBe("@参考1: 书房，场景");
   });
 });
+
+// ── Seedance 2.5：按类型编号（@图片N / @音频N）────────────────────────────────
+
+describe("refNumbering: per-type（Seedance 2.5）", () => {
+  function refLines(prompt: string): string[] {
+    const start = prompt.indexOf("参考定义:");
+    const block = prompt.slice(start).split("\n").slice(1);
+    return block.filter((l) => l.startsWith("@"));
+  }
+
+  const twoRoles = [
+    { id: "a1", name: "角色甲", type: "role" as const, hasAudio: false },
+    { id: "a2", name: "角色乙", type: "role" as const, hasAudio: false },
+  ];
+  const shot = {
+    hasStoryboardImage: false,
+    duration: 5,
+    sceneDescription: "白天，走廊",
+    sceneName: "走廊",
+  };
+
+  it("图片按 @图片N 独立编号", () => {
+    const refs = refLines(
+      buildSeedanceMultiParamVideoPrompt({
+        assets: twoRoles,
+        shots: [shot],
+        refNumbering: "per-type",
+      })
+    );
+    expect(refs[0]).toMatch(/^@图片1: 角色甲/);
+    expect(refs[1]).toMatch(/^@图片2: 角色乙/);
+  });
+
+  it("音频独立从 1 起编，不与图片共用计数器", () => {
+    const prompt = buildSeedanceMultiParamVideoPrompt({
+      assets: [
+        { id: "a1", name: "角色甲", type: "role", hasAudio: true },
+        { id: "a2", name: "角色乙", type: "role", hasAudio: true },
+      ],
+      shots: [shot],
+      refNumbering: "per-type",
+    });
+    const refs = refLines(prompt);
+    // 两张图 → @图片1/@图片2；两段音频 → @音频1/@音频2（而不是 @参考3/@参考4）
+    expect(refs[0]).toMatch(/^@图片1: 角色甲.*参考音频为：@音频1/);
+    expect(refs[1]).toMatch(/^@图片2: 角色乙.*参考音频为：@音频2/);
+    expect(prompt).not.toContain("@参考");
+  });
+
+  it("角度变体与分镜首帧一并计入图片计数器", () => {
+    const refs = refLines(
+      buildSeedanceMultiParamVideoPrompt({
+        assets: [
+          {
+            id: "a1",
+            name: "角色甲",
+            type: "role",
+            hasAudio: false,
+            angleImages: [{ angle: "3q", path: "/x/3q.png" }],
+          },
+        ],
+        shots: [{ ...shot, hasStoryboardImage: true }],
+        refNumbering: "per-type",
+      })
+    );
+    expect(refs[0]).toMatch(/^@图片1: 角色甲/);
+    expect(refs[1]).toMatch(/^@图片2: 角色甲四分之三侧面视图（与@图片1同一角色/);
+    expect(refs[2]).toMatch(/^@图片3: 分镜1/);
+  });
+
+  it("默认（不传 refNumbering）仍是 2.0 的全局 @参考N，行为不变", () => {
+    const prompt = buildSeedanceMultiParamVideoPrompt({ assets: twoRoles, shots: [shot] });
+    expect(prompt).toContain("@参考1: 角色甲");
+    expect(prompt).not.toContain("@图片");
+  });
+});

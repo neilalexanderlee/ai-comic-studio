@@ -63,15 +63,35 @@ export type SeedanceMultiParamInput = {
   assets: SeedanceAsset[];
   /** 分镜列表（一个 track 组内的所有分镜） */
   shots: SeedanceShot[];
+  /**
+   * 素材指代编号方式，来自能力表 `VIDEO_CAPABILITIES[].refNumbering`：
+   *   - "global"（默认，Seedance 2.0 系列）：全局连续 @参考1 / @参考2 / ...
+   *   - "per-type"（Seedance 2.5）：按类型分别编号 @图片1 / @音频1 / @视频1
+   *
+   * 2.5 提示词指南明确要求按类型编号。这其实更不容易出错：API content 数组本来就按
+   * 「先全部图片、再全部音频」分组，per-type 编号与该分组天然对齐，
+   * 消除了 CLAUDE.md 里记过两次的「@参考N 与 refs 数组系统性偏移」陷阱。
+   */
+  refNumbering?: "global" | "per-type";
 };
 
 // ── 编号系统 ──────────────────────────────────────────────
 
+/** `label` 是渲染进提示词的完整指代串（"@参考1" 或 "@图片1"），由编号方式决定。 */
 type RefEntry =
-  | { kind: "asset_image"; refNum: number; asset: SeedanceAsset }
-  | { kind: "asset_angle_image"; refNum: number; asset: SeedanceAsset; angle: string }
-  | { kind: "asset_audio"; refNum: number; asset: SeedanceAsset }
-  | { kind: "storyboard_image"; refNum: number; shotIndex: number };
+  | { kind: "asset_image"; refNum: number; label: string; asset: SeedanceAsset }
+  | { kind: "asset_angle_image"; refNum: number; label: string; asset: SeedanceAsset; angle: string }
+  | { kind: "asset_audio"; refNum: number; label: string; asset: SeedanceAsset }
+  | { kind: "storyboard_image"; refNum: number; label: string; shotIndex: number };
+
+function refLabel(
+  numbering: "global" | "per-type",
+  kind: "image" | "audio" | "video",
+  n: number
+): string {
+  if (numbering === "global") return `@参考${n}`;
+  return kind === "image" ? `@图片${n}` : kind === "audio" ? `@音频${n}` : `@视频${n}`;
+}
 
 /**
  * 按 Toonflow API adapter 规范分配 @参考N 编号：
@@ -84,29 +104,58 @@ type RefEntry =
  *   2. 所有分镜首帧图（按分镜序号，跳过无首帧的分镜）
  *   3. 所有资产音频（仅 hasAudio=true 的角色，保持与图片相同的角色顺序）
  */
-function buildRefEntries(assets: SeedanceAsset[], shots: SeedanceShot[]): RefEntry[] {
+function buildRefEntries(
+  assets: SeedanceAsset[],
+  shots: SeedanceShot[],
+  numbering: "global" | "per-type" = "global"
+): RefEntry[] {
   const entries: RefEntry[] = [];
-  let counter = 1;
+  // global 模式下图片和音频共用一个计数器（沿用 @参考N 的全局连续语义）；
+  // per-type 模式下音频从 1 独立起编。
+  let imageCounter = 1;
+  let audioCounter = 1;
+  const nextImage = () => imageCounter++;
+  const nextAudio = () => (numbering === "global" ? imageCounter++ : audioCounter++);
 
   // 第一轮：所有资产图片（主图 + 紧跟其角度变体：3q → profile → back）
   for (const asset of assets) {
-    entries.push({ kind: "asset_image", refNum: counter++, asset });
+    const n = nextImage();
+    entries.push({ kind: "asset_image", refNum: n, label: refLabel(numbering, "image", n), asset });
     for (const ai of asset.angleImages ?? []) {
-      entries.push({ kind: "asset_angle_image", refNum: counter++, asset, angle: ai.angle });
+      const an = nextImage();
+      entries.push({
+        kind: "asset_angle_image",
+        refNum: an,
+        label: refLabel(numbering, "image", an),
+        asset,
+        angle: ai.angle,
+      });
     }
   }
 
   // 第二轮：所有分镜首帧图
   for (let i = 0; i < shots.length; i++) {
     if (shots[i].hasStoryboardImage) {
-      entries.push({ kind: "storyboard_image", refNum: counter++, shotIndex: i });
+      const n = nextImage();
+      entries.push({
+        kind: "storyboard_image",
+        refNum: n,
+        label: refLabel(numbering, "image", n),
+        shotIndex: i,
+      });
     }
   }
 
   // 第三轮：所有资产音频（顺序与图片轮相同，以保持音色绑定的角色对应关系）
   for (const asset of assets) {
     if (asset.hasAudio) {
-      entries.push({ kind: "asset_audio", refNum: counter++, asset });
+      const n = nextAudio();
+      entries.push({
+        kind: "asset_audio",
+        refNum: n,
+        label: refLabel(numbering, "audio", n),
+        asset,
+      });
     }
   }
 
@@ -124,15 +173,15 @@ function buildRefEntries(assets: SeedanceAsset[], shots: SeedanceShot[]): RefEnt
  */
 function resolveVoiceDescription(
   asset: SeedanceAsset,
-  audioRefNum: number | undefined,
+  audioRefLabel: string | undefined,
 ): string | null {
   // 情况1：有文字音色描述，直接照搬
   if (asset.voiceHint?.trim()) {
     return asset.voiceHint.trim();
   }
   // 情况2：有参考音频，用 @参考N 绑定
-  if (asset.hasAudio && audioRefNum !== undefined) {
-    return `@参考${audioRefNum}`;
+  if (asset.hasAudio && audioRefLabel !== undefined) {
+    return audioRefLabel;
   }
   // 情况3：无音色无音频 → 省略，Seedance 从定妆图推断
   return null;
@@ -176,18 +225,18 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
   // 1. 风格标签（来自 VISUAL_STYLE_PRESETS，与全项目其他生成路径共用同一数据源）
   const styleTag = resolveStyleTag(visualStyle);
 
-  // 2. 分配 @参考N 编号
-  const refEntries = buildRefEntries(assets, shots);
+  // 2. 分配素材指代编号（@参考N 或 @图片N/@音频N，取决于 refNumbering）
+  const refEntries = buildRefEntries(assets, shots, input.refNumbering ?? "global");
 
-  // 建立查找 map
-  const assetImageRefMap = new Map<string, number>(); // asset.id → refNum（主图）
-  const assetAudioRefMap = new Map<string, number>(); // asset.id → refNum
-  const shotRefMap = new Map<number, number>();        // shotIndex → refNum
+  // 建立查找 map（存完整指代串，避免各处再拼一次前缀）
+  const assetImageRefMap = new Map<string, string>(); // asset.id → label（主图）
+  const assetAudioRefMap = new Map<string, string>(); // asset.id → label
+  const shotRefMap = new Map<number, string>();       // shotIndex → label
 
   for (const entry of refEntries) {
-    if (entry.kind === "asset_image") assetImageRefMap.set(entry.asset.id, entry.refNum);
-    if (entry.kind === "asset_audio") assetAudioRefMap.set(entry.asset.id, entry.refNum);
-    if (entry.kind === "storyboard_image") shotRefMap.set(entry.shotIndex, entry.refNum);
+    if (entry.kind === "asset_image") assetImageRefMap.set(entry.asset.id, entry.label);
+    if (entry.kind === "asset_audio") assetAudioRefMap.set(entry.asset.id, entry.label);
+    if (entry.kind === "storyboard_image") shotRefMap.set(entry.shotIndex, entry.label);
   }
 
   const lines: string[] = [];
@@ -214,18 +263,18 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
       const hasAngles = asset.type === "role" && (asset.angleImages ?? []).length > 0;
       const mainLabel = hasAngles ? `${desc}正面（外貌主参考）` : desc;
       if (audioRef !== undefined) {
-        lines.push(`@参考${entry.refNum}: ${asset.name}，${mainLabel}，参考音频为：@参考${audioRef}`);
+        lines.push(`${entry.label}: ${asset.name}，${mainLabel}，参考音频为：${audioRef}`);
       } else {
-        lines.push(`@参考${entry.refNum}: ${asset.name}，${mainLabel}`);
+        lines.push(`${entry.label}: ${asset.name}，${mainLabel}`);
       }
     } else if (entry.kind === "asset_angle_image") {
       const asset = entry.asset;
       const mainRef = assetImageRefMap.get(asset.id);
       const label = ANGLE_LABEL[entry.angle] ?? entry.angle;
-      lines.push(`@参考${entry.refNum}: ${asset.name}${label}视图（与@参考${mainRef}同一角色，${label}外貌补充）`);
+      lines.push(`${entry.label}: ${asset.name}${label}视图（与${mainRef}同一角色，${label}外貌补充）`);
     } else if (entry.kind === "storyboard_image") {
       const shot = shots[entry.shotIndex];
-      lines.push(`@参考${entry.refNum}: 分镜${entry.shotIndex + 1}，${shot.sceneName || shot.sceneDescription.slice(0, 20)}`);
+      lines.push(`${entry.label}: 分镜${entry.shotIndex + 1}，${shot.sceneName || shot.sceneDescription.slice(0, 20)}`);
     }
     // asset_audio 不另起行（已追加在资产行尾）
   }
@@ -278,7 +327,7 @@ function buildShotLine(
   shotNum: number,
   shot: SeedanceShot,
   assets: SeedanceAsset[],
-  assetAudioRefMap: Map<string, number>
+  assetAudioRefMap: Map<string, string>
 ): string {
   const parts: string[] = [];
 

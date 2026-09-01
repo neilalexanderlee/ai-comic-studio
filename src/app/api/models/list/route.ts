@@ -222,6 +222,7 @@ export async function POST(request: Request) {
     if (body.protocol === "seedance") {
       // 兜底列表（官方文档确认，万一 API 拉取失败时使用）
       const SEEDANCE_FALLBACK: ModelItem[] = [
+        { id: "doubao-seedance-2-5-260628",      name: "Doubao Seedance 2.5 (30s, up to 1080p, 30图+10视频+10音频)" },
         { id: "doubao-seedance-2-0-260128",      name: "Doubao Seedance 2.0 (15s, up to 1080p)" },
         { id: "doubao-seedance-2-0-fast-260128", name: "Doubao Seedance 2.0 Fast (15s, up to 720p)" },
         { id: "doubao-seedance-1-5-pro-251215",  name: "Doubao Seedance 1.5 Pro (12s, up to 1080p)" },

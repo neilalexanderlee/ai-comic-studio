@@ -79,8 +79,13 @@ type ReferenceVideoParams = {
  * 此模式无严格首帧约束，视频内容由 prompt 中的 @参考N 引用驱动。
  */
 export type MultimodalRefItem = {
-  type: "image" | "audio";
-  path: string; // 本地文件路径
+  type: "image" | "audio" | "video";
+  /**
+   * image / audio：本地文件路径（会转 data URI）；image 也接受 `asset://<id>` 私域素材引用。
+   * video：**必须**是公网 URL 或 `asset://<id>` —— Seedance 2.5 的参考视频不支持 base64，
+   *        传本地路径会在 toVideoUrl 处直接抛错（见 providers/seedance.ts）。
+   */
+  path: string;
 };
 
 type MultimodalVideoParams = {
@@ -110,8 +115,11 @@ export type VideoGenerateParams = (KeyframeVideoParams | ReferenceVideoParams | 
   /**
    * 是否生成同步音频（仅 Seedance 2.0 / 1.5 Pro 支持）。
    * - true：自动生成与画面匹配的人声、音效及背景音乐
-   * - false（默认）：输出无声视频，适合后期制作工作流
-   * 官方文档：generate_audio 参数，默认 true；我们默认 false 以避免未经控制的 BGM。
+   * - false：输出无声视频，适合后期制作工作流
+   *
+   * 实现现状：SeedanceProvider 默认 **true**（`params.generateAudio ?? true`），
+   * 以保留对白和场景音效；BGM 不通过此开关关闭（它是全开/全关），而是在 prompt 末尾
+   * 追加「禁止背景音乐」由模型抑制（见 suppressBgmInPrompt）。
    */
   generateAudio?: boolean;
   /** Called as soon as a provider has a reusable remote result URL, before local download. */

@@ -2772,6 +2772,8 @@ async function handleSingleVideoGenerate(
           visualStyle: singleVideoVisualStyle,
           assets: seedanceSingleAssets,
           shots: [seedanceSingleShot],
+          // 2.0 用全局连续的 @参考N，2.5 用按类型的 @图片N/@音频N（能力表说了算）
+          refNumbering: videoCapability.refNumbering === "per-type" ? "per-type" : "global",
         }),
         shotForVideo.bgmNote
       );

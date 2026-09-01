@@ -80,6 +80,9 @@ export function createVideoProvider(config: ProviderConfig, uploadDir?: string):
     case "seedance":
       // 火山方舟 Seedance 视频生成（Bearer Token 认证）
       // 参考：https://www.volcengine.com/docs/82379/1520757
+      // 注：视频侧只认 "seedance" 协议。"doubao" 是图片（Seedream）协议，
+      //     若误配成视频 provider 会落到下面的 default 抛错 —— 这是有意的，
+      //     而不是遗漏了一个 case（两者的模型 id 与请求体完全不同）。
       return new SeedanceProvider({
         apiKey: config.apiKey,
         baseUrl: ensureArkApiV3BaseUrl(
