@@ -14,8 +14,8 @@ export type Protocol =
   | "jimeng-video"
   /** 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容） */
   | "doubao"
-  /** MiniMax 音乐生成（music-2.6，is_instrumental BGM） */
-  | "minimax"
+  /** 豆包音乐 / 火山「AI 生成音乐大模型 · 生成纯音乐」（AK/SK 认证，纯器乐 BGM） */
+  | "volc-music"
   /** MiniMax H3 视频生成（v2 异步任务 API） */
   | "minimax-video";
 export type Capability = "text" | "image" | "video" | "music";
@@ -203,7 +203,7 @@ export const useModelStore = create<ModelStore>()(
     }),
     {
       name: "model-store",
-      version: 4,
+      version: 5,
       // 仅持久化非敏感配置；密钥走服务端数据库。
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
@@ -228,9 +228,18 @@ export const useModelStore = create<ModelStore>()(
           providers: providers.map((p) => {
             const caps = (p.capabilities as string[]) ?? [];
             const capability = typeof p.capability === "string" ? p.capability : caps[0] ?? "text";
+            // v5：MiniMax 音乐接口停用，音乐 protocol 迁移到豆包音乐（火山生成纯音乐）。
+            // 只改精确等于 "minimax" 的，绝不能碰 "minimax-video"（H3 视频，仍在用）。
+            // 鉴权方式从 Bearer 变成 AK/SK，旧密钥无法复用，用户需重新填 AK/SK。
+            const isLegacyMinimaxMusic = p.protocol === "minimax";
             return {
               ...p,
               capability,
+              ...(isLegacyMinimaxMusic && {
+                protocol: "volc-music",
+                baseUrl: "https://open.volcengineapi.com",
+                models: [],
+              }),
             };
           }),
         };

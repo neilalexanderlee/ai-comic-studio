@@ -412,6 +412,12 @@ function TrackRow({
 
 // ── BgmGeneratePanel（inline popover）────────────────────────────────────────
 
+// 豆包音乐（火山生成纯音乐）单段时长硬限制。服务端在 /api/bgm/generate 里做真正的 clamp，
+// 这里只用于生成前提示用户；两处数值必须一致（见 VOLC_MUSIC_MIN/MAX_DURATION）。
+// 不直接 import 服务端常量：那个模块引了 node:fs，会被打进客户端 bundle。
+const BGM_MIN_DURATION = 30;
+const BGM_MAX_DURATION = 120;
+
 function BgmGeneratePanel({
   rangeStart,
   rangeEnd,
@@ -461,15 +467,17 @@ function BgmGeneratePanel({
       // 找或创建 BGM 轨
       const bgmTrack = tracks.find((t) => t.type === "bgm") ?? addTrack("bgm", "背景音乐");
 
-      // clip 时长 = 选区时长（不是音频文件时长）
-      // MiniMax 会生成完整歌曲（通常 60-180s），clip 只截取选区那段
-      // 用户可在时间线上拖拽 clip 右边缘来延长覆盖范围
+      // clip 时长 = min(选区时长, 实际生成时长)
+      // 火山音乐单段上限 120s：选区更长时只会生成 120s，clip 也只铺到 120s，避免尾部无声。
+      // 选区不足 30s 时按 30s 生成，clip 只截取选区那段。
+      // 用户可在时间线上拖拽 clip 右边缘调整覆盖范围。
+      const clipDuration = Math.min(duration, data.duration ?? duration);
       addClip(bgmTrack.id, {
         type: "bgm",
         name: data.name ?? prompt.slice(0, 20),
         audioUrl: data.filePath,
         startTime: rangeStart,
-        duration,
+        duration: clipDuration,
         volume: 0.3,
       });
 
@@ -509,6 +517,19 @@ function BgmGeneratePanel({
         <span className="font-mono">{formatTime(rangeEnd)}</span>
         <span className="ml-auto font-semibold">{duration}s</span>
       </div>
+
+      {/* 时长约束提示（豆包音乐单段仅支持 30–120 秒） */}
+      {duration > BGM_MAX_DURATION && (
+        <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[9px] text-amber-700">
+          豆包音乐单段上限 {BGM_MAX_DURATION} 秒，本次只会生成前 {BGM_MAX_DURATION} 秒。
+          更长的段落请分多次生成后在时间线上拼接。
+        </p>
+      )}
+      {duration < BGM_MIN_DURATION && (
+        <p className="rounded-lg bg-purple-50 border border-purple-100 px-2.5 py-1.5 text-[9px] text-purple-600">
+          豆包音乐最短生成 {BGM_MIN_DURATION} 秒，将按 {BGM_MIN_DURATION} 秒生成并截取选区这 {duration} 秒。
+        </p>
+      )}
 
       {/* bgmNote chips（来自选中分镜的背景音标注） */}
       {bgmNoteChips.length > 0 && (

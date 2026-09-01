@@ -93,8 +93,8 @@ export default function SettingsPage() {
             capability="music"
             label="音乐生成模型"
             icon={<Music className="h-3.5 w-3.5" />}
-            defaultProtocol="minimax"
-            defaultBaseUrl="https://api.minimaxi.com"
+            defaultProtocol="volc-music"
+            defaultBaseUrl="https://open.volcengineapi.com"
           />
 
           {/* AI 多媒体套件（AI MediaKit）分类标题 */}

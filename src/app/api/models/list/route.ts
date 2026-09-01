@@ -156,17 +156,14 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── MiniMax 音乐生成 ────────────────────────────────────────────────
-    // 有效 model 值来自官方文档，不支持动态拉取（无 /v1/models 端点）。
-    // music-2.6 / music-cover 仅限 Token Plan 及付费用户；-free 后缀版对所有用户开放。
-    // 文档：https://platform.minimaxi.com/docs/api-reference/music-generation
-    if (body.protocol === "minimax") {
+    // ── 豆包音乐（火山「AI 生成音乐大模型 · 生成纯音乐」）────────────────
+    // 该服务没有「模型」概念，只有算法版本号（作为 GenBGMForTime 的 Version 字段传入）。
+    // 无模型列表端点，固定返回当前可用版本。
+    // 控制台：https://console.volcengine.com/ai-music
+    if (body.protocol === "volc-music") {
       return NextResponse.json({
         models: [
-          { id: "music-2.6-free",   name: "Music 2.6 Free（所有用户可用）" },
-          { id: "music-2.6",        name: "Music 2.6（付费/Token Plan）" },
-          { id: "music-cover-free", name: "Music Cover Free（翻唱，所有用户）" },
-          { id: "music-cover",      name: "Music Cover（翻唱，付费）" },
+          { id: "v5.0", name: "生成纯音乐 v5.0（纯器乐，30–120 秒）" },
         ],
       });
     }

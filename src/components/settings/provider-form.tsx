@@ -23,7 +23,7 @@ const DEFAULT_BASE_URLS: Record<Protocol, string> = {
   jimeng: "https://visual.volcengineapi.com",
   "jimeng-video": "https://visual.volcengineapi.com",
   doubao: "https://ark.cn-beijing.volces.com/api/v3",
-  minimax: "https://api.minimaxi.com",
+  "volc-music": "https://open.volcengineapi.com",
   "minimax-video": "https://api.minimaxi.com",
 };
 
@@ -45,7 +45,7 @@ function getProtocolOptions(capability: Capability): { value: Protocol; label: s
   }
   if (capability === "music") {
     return [
-      { value: "minimax", label: "MiniMax Music" },
+      { value: "volc-music", label: "豆包音乐（火山生成纯音乐）" },
     ];
   }
   // video
@@ -81,7 +81,8 @@ export function ProviderForm({ provider }: ProviderFormProps) {
   const needsSecretKey =
     provider.protocol === "kling" ||
     provider.protocol === "jimeng" ||
-    provider.protocol === "jimeng-video";
+    provider.protocol === "jimeng-video" ||
+    provider.protocol === "volc-music";
   const isKling = provider.protocol === "kling";
 
   useEffect(() => {
@@ -227,7 +228,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               onChange={(e) =>
                 updateProvider(provider.id, { baseUrl: e.target.value })
               }
-              placeholder="https://api.klingai.com"
+              placeholder={DEFAULT_BASE_URLS[provider.protocol]}
             />
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
