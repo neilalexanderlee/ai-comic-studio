@@ -4,12 +4,13 @@ import { characterAssets } from "@/lib/db/schema";
 import { eq, and, ne } from "drizzle-orm";
 import fs from "node:fs";
 import { requireProjectOwner, requireCharacterAssetInProject } from "@/lib/api-guard";
+import { deleteArtifact } from "@/lib/storage/artifact-store";
 
 /** Delete a file from disk, silently ignoring missing-file errors. */
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
   try {
-    fs.unlinkSync(filePath);
+    void deleteArtifact(filePath);
   } catch {
     // File may already be gone — that's fine
   }

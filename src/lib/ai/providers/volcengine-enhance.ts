@@ -24,6 +24,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 /** AI MediaKit API 基础 URL */
 const API_BASE = "https://mediakit.cn-beijing.volces.com";
@@ -114,10 +115,7 @@ export class VolcengineEnhanceProvider {
     }
     const buffer = Buffer.from(await videoRes.arrayBuffer());
     const filename = `${ulid()}_enhanced.mp4`;
-    const dir = path.join(this.uploadDir, "videos");
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    fs.writeFileSync(filepath, buffer);
+    const filepath = await saveArtifactAt(path.join(this.uploadDir, "videos"), filename, buffer);
 
     console.log(`[VolcengineEnhance] Saved enhanced video to: ${filepath}`);
     return filepath;

@@ -1,6 +1,7 @@
 import "server-only";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 /**
  * 生成产物的存储抽象。
@@ -150,6 +151,64 @@ export async function deleteArtifact(ref: string | null | undefined): Promise<vo
   } catch {
     /* 已经没了，无所谓 */
   }
+}
+
+/**
+ * 把产物「物化」成一个**真实的本地文件路径**。
+ *
+ * 为什么需要：ffmpeg / ffprobe 只能吃本地文件路径，`oss://` 引用喂不进去。
+ * 视频合成、字幕烧录、时长探测这些链路都必须先拿到实体文件。
+ *
+ * - 本地引用 → **原样返回，不复制**（绝大多数情况，零开销）
+ * - OSS 引用 → 下载到系统临时目录，`cleanup()` 负责删除
+ *
+ * 调用方必须在 `finally` 里调 `cleanup()`，否则临时文件会堆积
+ * （一集几十个视频片段，很快就是几个 GB）。
+ */
+export async function materializeArtifact(
+  ref: string
+): Promise<{ path: string; cleanup: () => void }> {
+  if (!isOssRef(ref)) {
+    return { path: ref, cleanup: () => {} };
+  }
+
+  const key = ossKeyOf(ref);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acs-artifact-"));
+  const dest = path.join(dir, path.basename(key) || "artifact");
+  const buf = await readArtifact(ref);
+  fs.writeFileSync(dest, buf);
+
+  return {
+    path: dest,
+    cleanup: () => {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {
+        /* 临时目录清理失败不该影响主流程 */
+      }
+    },
+  };
+}
+
+/** 批量物化，返回统一的 cleanup（任意一个失败都会先清理已下载的部分）。 */
+export async function materializeArtifacts(
+  refs: string[]
+): Promise<{ paths: string[]; cleanup: () => void }> {
+  const handles: { path: string; cleanup: () => void }[] = [];
+  try {
+    for (const ref of refs) {
+      handles.push(await materializeArtifact(ref));
+    }
+  } catch (err) {
+    for (const h of handles) h.cleanup();
+    throw err;
+  }
+  return {
+    paths: handles.map((h) => h.path),
+    cleanup: () => {
+      for (const h of handles) h.cleanup();
+    },
+  };
 }
 
 /**

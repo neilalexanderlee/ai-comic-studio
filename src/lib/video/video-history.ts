@@ -11,13 +11,14 @@ import { db } from "@/lib/db";
 import { shotVideoHistory } from "@/lib/db/schema";
 import { eq, asc } from "drizzle-orm";
 import { ulid } from "ulid";
+import { deleteArtifact } from "@/lib/storage/artifact-store";
 
 const MAX_HISTORY = 5;
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
   try {
-    fs.unlinkSync(filePath);
+    void deleteArtifact(filePath);
   } catch {
     // ignore — file may already be gone
   }

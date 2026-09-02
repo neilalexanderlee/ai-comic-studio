@@ -10,11 +10,12 @@ import { normalizeCharacterName, normalizeCharacterNameWithAge } from "./normali
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import fs from "fs";
+import { deleteArtifact } from "@/lib/storage/artifact-store";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
   try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    void deleteArtifact(filePath);
   } catch {
     console.warn(`[PersistStoryboard] Failed to delete file: ${filePath}`);
   }

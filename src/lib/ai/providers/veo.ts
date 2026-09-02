@@ -3,7 +3,9 @@ import { GoogleGenAI } from "@google/genai";
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult } from "../types";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { ulid } from "ulid";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 const VALID_DURATIONS = [4, 6, 8] as const;
 
@@ -158,14 +160,23 @@ export class VeoProvider implements VideoProvider {
       throw new Error("No video URI returned from Veo");
     }
 
-    const dir = path.join(this.uploadDir, "videos");
-    fs.mkdirSync(dir, { recursive: true });
-    const downloadPath = path.join(dir, `${ulid()}.mp4`);
-
-    await this.client.files.download({ file: videoFile, downloadPath });
-
-    console.log(`[Veo] Video saved to ${downloadPath}`);
-    return { filePath: downloadPath };
+    // Veo SDK 只能把文件写到本地路径（不返回 Buffer），所以先落临时目录再交给存储层。
+    // 配置了 OSS 时这一步是必要的中转；未配置时多一次本地拷贝，代价可忽略。
+    const filename = `${ulid()}.mp4`;
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "acs-veo-"));
+    const downloadPath = path.join(tmpDir, filename);
+    try {
+      await this.client.files.download({ file: videoFile, downloadPath });
+      const filePath = await saveArtifactAt(
+        path.join(this.uploadDir, "videos"),
+        filename,
+        fs.readFileSync(downloadPath)
+      );
+      console.log(`[Veo] Video saved to ${filePath}`);
+      return { filePath };
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    }
   }
 
   private async pollForResult(

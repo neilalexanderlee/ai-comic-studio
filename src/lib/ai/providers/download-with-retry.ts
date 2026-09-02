@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 export async function downloadVideoWithRetry(
   videoUrl: string,
@@ -25,11 +26,7 @@ export async function downloadVideoWithRetry(
       }
 
       const filename = `${ulid()}.mp4`;
-      const dir = path.join(uploadDir, "videos");
-      fs.mkdirSync(dir, { recursive: true });
-      const filepath = path.join(dir, filename);
-      fs.writeFileSync(filepath, buffer);
-      return filepath;
+      return await saveArtifactAt(path.join(uploadDir, "videos"), filename, buffer);
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);

@@ -2,6 +2,7 @@ import ffmpeg from "fluent-ffmpeg";
 import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
+import { materializeArtifacts } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -161,7 +162,24 @@ async function preprocessClipAudio(
   return outPath;
 }
 
+/**
+ * 视频合成入口。
+ *
+ * ffmpeg / ffprobe 只能吃真实本地文件，`oss://` 引用喂不进去，所以先把所有片段物化。
+ * 本地引用是零拷贝原样返回，只有 OSS 引用才会真的下载到临时目录。
+ * 拆成薄包装 + 内部实现，是为了让 finally 清理不必给整个函数体加一层缩进。
+ */
 export async function assembleVideo(params: AssembleParams): Promise<string> {
+  const materialized = await materializeArtifacts(params.videoPaths);
+  try {
+    return await assembleVideoFromLocalFiles({ ...params, videoPaths: materialized.paths });
+  } finally {
+    // 必须清理：一集几十个片段，OSS 模式下临时文件很快就是几个 GB
+    materialized.cleanup();
+  }
+}
+
+async function assembleVideoFromLocalFiles(params: AssembleParams): Promise<string> {
   const { videoPaths, subtitles, projectId, shotDurations } = params;
   const outputDir = path.resolve(uploadDir, "videos");
   fs.mkdirSync(outputDir, { recursive: true });

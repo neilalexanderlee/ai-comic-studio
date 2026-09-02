@@ -6,11 +6,12 @@ import { eq, asc, and, desc, inArray } from "drizzle-orm";
 import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialogues-from-motion-script";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
+import { deleteArtifact } from "@/lib/storage/artifact-store";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
   try {
-    fs.unlinkSync(filePath);
+    void deleteArtifact(filePath);
   } catch {
     // ignore — file may already be gone
   }

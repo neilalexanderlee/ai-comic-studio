@@ -4,11 +4,12 @@ import { projects, episodes, shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import fs from "fs";
+import { deleteArtifact } from "@/lib/storage/artifact-store";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
   try {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    void deleteArtifact(filePath);
   } catch {
     // Non-fatal: log and continue
     console.warn(`[VersionDelete] Failed to delete file: ${filePath}`);

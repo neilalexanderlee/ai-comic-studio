@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { requireUser } from "@/lib/api-guard";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -47,18 +48,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 保存到 uploads/bgm/
-  const bgmDir = path.join(uploadDir, "bgm");
-  fs.mkdirSync(bgmDir, { recursive: true });
-
   const filename = `${randomUUID()}${ext}`;
-  const filePath = path.join(bgmDir, filename);
-
   const buffer = Buffer.from(await file.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
-
-  // 返回可供 /api/uploads 服务的相对路径
-  const relativePath = `./uploads/bgm/${filename}`;
+  // 配置了 OSS 就落 OSS，否则落本地；返回的引用两种形态 uploadUrl 都能解析
+  const relativePath = await saveArtifactAt(path.join(uploadDir, "bgm"), filename, buffer);
 
   return NextResponse.json({ filePath: relativePath });
 }

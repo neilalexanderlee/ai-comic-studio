@@ -6,12 +6,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
 import { requireProjectOwner } from "@/lib/api-guard";
+import { saveArtifactAt, deleteArtifact } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
-  try { fs.unlinkSync(filePath); } catch { /* already gone */ }
+  void deleteArtifact(filePath);
 }
 
 export async function POST(
@@ -44,10 +45,7 @@ export async function POST(
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = file.name.split(".").pop() || "png";
   const filename = `${ulid()}.${ext}`;
-  const dir = path.join(uploadDir, "characters");
-  fs.mkdirSync(dir, { recursive: true });
-  const filepath = path.join(dir, filename);
-  fs.writeFileSync(filepath, buffer);
+  const filepath = await saveArtifactAt(path.join(uploadDir, "characters"), filename, buffer);
 
   const [updated] = await db
     .update(characterAssets)

@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
 import { requireProjectOwner, requireCharacterInProject } from "@/lib/api-guard";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -35,10 +36,7 @@ export async function POST(
   const buffer = Buffer.from(await file.arrayBuffer());
   const ext = file.name.split(".").pop() || "png";
   const filename = `${ulid()}.${ext}`;
-  const dir = path.join(uploadDir, "characters");
-  fs.mkdirSync(dir, { recursive: true });
-  const filepath = path.join(dir, filename);
-  fs.writeFileSync(filepath, buffer);
+  const filepath = await saveArtifactAt(path.join(uploadDir, "characters"), filename, buffer);
 
   const [updated] = await db
     .update(characters)

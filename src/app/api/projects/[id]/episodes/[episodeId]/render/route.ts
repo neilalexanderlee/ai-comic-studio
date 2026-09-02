@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { materializeArtifacts } from "@/lib/storage/artifact-store";
 
 const execFileAsync = promisify(execFile);
 
@@ -77,8 +78,21 @@ interface TimelinePayload {
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
-/** 本地文件路径：./uploads/xxx 或 /api/uploads/xxx → 绝对路径 */
-function resolveLocalPath(filePath: string): string {
+/**
+ * 存储引用 → ffmpeg 能用的绝对本地路径。
+ *
+ * `materialized` 是**本次请求内**的 oss:// → 临时文件映射。
+ * 刻意不做成模块级变量：并发渲染会互相污染 —— 请求 A 结束后清掉临时目录，
+ * 请求 B 却还持有指向已删文件的映射。
+ */
+function resolveLocalPath(filePath: string, materialized?: Map<string, string>): string {
+  // OSS 引用必须走物化后的临时文件；查不到说明上游漏了物化，
+  // 与其拼出一个不存在的路径让 ffmpeg 报晦涩错误，不如直接说清楚
+  if (filePath.startsWith("oss://")) {
+    const local = materialized?.get(filePath);
+    if (!local) throw new Error(`[render] OSS 素材未物化：${filePath}`);
+    return local;
+  }
   const normalized = filePath.replace(/\\/g, "/");
   const stripped = normalized.replace(/^.*uploads\//, "");
   return path.resolve(uploadDir, stripped);
@@ -239,6 +253,19 @@ export async function POST(
       )
     );
 
+  // ── 物化 OSS 素材 ────────────────────────────────────────────────────────
+  // ffmpeg / ffprobe 只能吃真实本地文件，oss:// 引用喂不进去。
+  // 这里一次性把时间线上所有素材物化，建立 ref → 本地路径 映射，
+  // 供下方的 resolveLocalPath 查表。本地引用是零拷贝，不产生额外开销。
+  const ossRefs = [
+    ...videoClips.map((c) => c.url),
+    ...bgmClips.map((c) => c.audioUrl ?? c.url ?? ""),
+  ].filter((r): r is string => !!r && r.startsWith("oss://"));
+
+  const materialized = await materializeArtifacts(ossRefs);
+  const materializedRefs = new Map<string, string>();
+  ossRefs.forEach((ref, i) => materializedRefs.set(ref, materialized.paths[i]));
+
   // 准备输出路径
   const rendersDir = path.join(uploadDir, "renders");
   fs.mkdirSync(rendersDir, { recursive: true });
@@ -262,7 +289,7 @@ export async function POST(
         const concatListPath = path.join(tmpDir, "concat.txt");
         const concatLines = videoClips
           .map((c) => {
-            const absPath = resolveLocalPath(c.url);
+            const absPath = resolveLocalPath(c.url, materializedRefs);
             const escaped = absPath.replace(/'/g, "'\\''");
             const lines = [`file '${escaped}'`];
             if ((c.trimStart ?? 0) > 0) lines.push(`inpoint ${c.trimStart}`);
@@ -349,7 +376,7 @@ export async function POST(
 
           const inputArgs: string[] = ["-y", "-i", videoWithSubsPath];
           for (const clip of bgmClips) {
-            inputArgs.push("-i", resolveLocalPath(clip.audioUrl ?? clip.url ?? ""));
+            inputArgs.push("-i", resolveLocalPath(clip.audioUrl ?? clip.url ?? "", materializedRefs));
           }
 
           const filterParts: string[] = [];
@@ -434,6 +461,9 @@ export async function POST(
         const message = err instanceof Error ? err.message : String(err);
         send({ type: "error", message });
       } finally {
+        // 清理物化下来的 OSS 素材临时文件。成功与失败都要清 ——
+        // 一集几十个片段，漏清理很快就是几个 GB 的临时占用。
+        materialized.cleanup();
         controller.close();
       }
     },
