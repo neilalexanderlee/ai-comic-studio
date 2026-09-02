@@ -492,6 +492,15 @@ Docker 里 `UPLOAD_DIR=/app/uploads`，硬编码会让引用指向不存在的�
 **OSS bucket 必须私有**：`resolveArtifactUrl` 对 OSS 引用签发 1 小时有效的签名 URL；
 匿名裸 URL 返回 403（已实测验证）。
 
+⚠️ **OSS bucket 必须配 CORS**，否则视频编辑器会报 `TypeError: Failed to fetch`：
+`/api/uploads/_oss/<key>` 是 **302 跳转**到 OSS 签名 URL，跳转后即跨域。
+`<img src>` / `<video src>` / 下载都不需要 CORS（所以缩略图看着一切正常），
+但 `fetch()` 需要 —— `VideoPreview.tsx` 用 fetch 把视频流喂给 `MP4Clip`，
+缺 CORS 时报错且**完全看不出是跨域问题**。
+用 `pnpm oss:cors --apply` 配置；**部署到生产必须带上线上域名重跑一次**
+（`--origin https://你的域名`），否则线上编辑器会复现同样的报错。
+放开 CORS 不等于放开访问：bucket 仍是私有的，请求照样要带有效签名。
+
 **读路径必须和写路径同时改**，否则就是「写进去了但界面显示缺失」：
 `uploadUrl()` 是纯客户端函数（46 个调用点），拿不到 OSS 密钥签不了名，
 所以它把 `oss://frames/x.png` 映射成 `/api/uploads/_oss/frames/x.png`，
@@ -929,6 +938,7 @@ src/lib/evals/
 | Seedance 2.5 参考视频传本地路径会静默失败 | 2.5 的参考视频**只接受公网 URL 或 `asset://` 素材 ID，不支持 base64**（图片和音频可以），沿用图片的 `toDataUrl` 思路必然出错 | 新增 `toVideoUrl()`，遇到本地路径**直接抛错**而非降级成 data URI —— 静默降级会让错误推迟到任务启动后才暴露。这也是白模预演必须排在对象存储之后的原因 |
 | 切到 Kling / Veo / 即梦生成视频必崩 | `resolveSingleVideoMode` 只看分镜数据算模式，不知道 provider 支不支持；`multimodal` 是绝大多数镜头的默认模式，而这三家 provider 只实现了首帧/首尾帧两种 body（Kling 对 undefined 的 `initialImage` 取 base64 崩溃、Veo 抛 `Veo requires an image input`、即梦提交空图列表） | 新增 `video-capabilities.ts` 能力注册表；`downgradeVideoMode(ideal, cap)` 在生成前把模式降级到 provider 真正支持的那个，并通过响应体 `capabilityNotes` 回传前端 toast 告知用户本次丢了什么 |
 | 参考素材上限写死 Seedance 2.0 的 9/3，换模型不跟着变 | `MAX_MULTIMODAL_REFS=9` / `MAX_AUDIO_REFS=3` 是 `handleSingleVideoGenerate` 里的**函数内局部常量**，未导出、未共享 | 改读 `cap.refs.image` / `cap.refs.audio`；`model-limits.ts` 整体并入 `video-capabilities.ts` 后删除 |
+| 视频编辑器报 `TypeError: Failed to fetch`，但缩略图和下载都正常 | 产物迁到 OSS 后，`/api/uploads/_oss/<key>` 会 **302 跳转**到 OSS 签名 URL，跳转后就是跨域请求。而 bucket 默认**没有任何 CORS 规则** —— `<img src>`/`<video src>`/下载不需要 CORS 所以毫无异常，唯独 `fetch()` 需要，浏览器因响应缺少 `Access-Control-Allow-Origin` 直接拦掉。`VideoPreview.tsx:491` 正是用 `fetch()` 把视频流喂给 `MP4Clip`，报错信息里**完全看不出是跨域问题** | 新增 `pnpm oss:cors --apply` 配置规则（GET/HEAD、`allowedHeader: *` 以支持 Range 分段、`exposeHeader` 暴露 Content-Length/Accept-Ranges/Content-Range 供 MP4Clip 使用）。**部署生产必须带 `--origin https://线上域名` 重跑**，否则线上复现同样报错。注意放开 CORS ≠ 放开访问：bucket 仍私有、请求仍需有效签名 |
 | migration 0042/0043 被记为「已应用」但从未生效，三列至今仍在库里 | 两个缺陷叠加：① `0042.sql` 里**没有 `statement-breakpoint`**，整份 SQL 作为一块交给 `sqlite.exec()`，而迁移执行器**没有事务包裹** —— 第一次跑 `CREATE TABLE shots_new` 提交成功、后续 `INSERT` 失败，留下一张空表；② 第二次跑时 `CREATE` 报 `already exists`，被执行器「兼容旧库」的 catch 吞掉，`exec()` 在第一句就中止、后面的 `INSERT`/`DROP`/`RENAME` 从未执行，**却照样写入了 `__drizzle_migrations`**。于是 `emotion`/`framing`/`lightingAtm` 永久留在 `shots` 表里，而 CLAUDE.md 三处都写着「已完全移除」 | `runMigrations()` 加事务包裹（`BEGIN`/`COMMIT`/失败 `ROLLBACK`），一份迁移要么整体生效要么整体回滚；残留的空表 `shots_new` 已删除（删前校验 0 行、0 条独有数据 + 整库备份）。三列随后由 migration `0057` 用 `ALTER TABLE DROP COLUMN` 补删（SQLite 3.35+ 原生支持，无需重建表）。**教训：`rename-copy-drop` 式迁移必须有事务，且「already exists」这种容错会掩盖真实失败** |
 | CLAUDE.md 把两个已删除的功能当现存功能写，照着写代码会直接 tsc 报错 | migration `0047_drop_enhance_prompts_link_shots` 删了 `projects.enhance_prompts` 和 `link_shots_via_cut_point` 两列（前者是 no-op、后者被手动按钮取代），但约定 4、约定 8、关键表 `projects` 行、Provider 规则、开发检查清单五处都没同步。连带发现 `prompt-enhancer.ts` 的 `enhanceImagePrompt`/`enhanceVideoPrompt` 在生产代码里**零调用方**（只剩 eval + 单测），而文档还写着「新增 provider 时必须同步添加 system prompt」 | 约定 4 / 约定 8 改写为「已移除」记录并保留编号（避免打乱交叉引用），列出已不存在的函数名（`maybeAutoLinkNextShotAfterVideo` / `linkNextShotAnchorFromCutPoint` / `isCrowdToCharacterCut`）；「AI Prompt 增强系统」一节加停用标注；开发检查清单那条换成 `VIDEO_CAPABILITIES`。**教训：删列的 migration 必须同步扫一遍 CLAUDE.md 里的列名** |
 | MiniMax 音乐接口停用，BGM 生成整条链路失效 | MiniMax Music 接口已不可用；替代品「豆包音乐」实为火山「AI 生成音乐大模型 · 生成纯音乐」，与 MiniMax 有四处结构性差异：AK/SK 签名（非 Bearer）、submit+轮询（非同步返回）、返回 CDN wav URL（非 hex 串）、`Duration` 是真参数且强制 30–120 整数秒（非塞进 prompt 文字） | protocol `minimax` → `volc-music`；`bgm/generate/route.ts` 重写为 `generateWithVolcMusic`（`@volcengine/openapi` 签名，`serviceName=imagination`，`GenBGMForTime`/`QuerySong`，`Version=2024-08-12`）；`provider-form.tsx` 的 `needsSecretKey` 必须加 `volc-music`，否则 UI 不显示 SK 输入框 |
