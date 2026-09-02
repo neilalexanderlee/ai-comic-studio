@@ -70,6 +70,13 @@ export async function buildPreviewProxy(
       "-crf", String(PROXY_CRF),
       // 关键帧间隔调密，编辑器拖动播放头时 seek 更快
       "-g", "48",
+      // ⚠️ 必须禁用 B 帧：B 帧要求解码器缓冲并重排帧序（先解未来帧才能输出当前帧），
+      // 在浏览器 WebCodecs 实时播放里会造成周期性卡顿。实测代价只有 +12% 体积。
+      // 项目的导出路由早就在用 -bf 0，代理这边最初漏了。
+      "-bf", "0",
+      "-tune", "fastdecode",
+      "-profile:v", "main",
+      "-pix_fmt", "yuv420p",
       "-c:a", "aac",
       "-b:a", "96k",
       // moov 前置：让浏览器边下边播，不必等整个文件到齐

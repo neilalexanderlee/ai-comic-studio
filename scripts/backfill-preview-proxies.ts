@@ -26,6 +26,8 @@ import Database from "better-sqlite3";
 const execFileAsync = promisify(execFile);
 
 const APPLY = process.argv.includes("--apply");
+/** 重建已有代理。避免"先清空 preview_url 再重跑"——那样一旦中途失败，编辑器就没代理可用了。 */
+const FORCE = process.argv.includes("--force");
 const LIMIT = (() => {
   const i = process.argv.indexOf("--limit");
   return i >= 0 ? Number(process.argv[i + 1]) || Infinity : Infinity;
@@ -52,9 +54,21 @@ async function materialize(ref: string): Promise<{ p: string; clean: () => void 
   if (!oss) throw new Error("引用是 oss:// 但未配置 OSS");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "acs-bf-"));
   const dest = path.join(dir, path.basename(ref));
-  const r = await oss.get(ref.slice(6));
-  fs.writeFileSync(dest, r.content);
-  return { p: dest, clean: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} } };
+  // 大文件下载偶发超时/抖动，重试 3 次再放弃
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await oss.get(ref.slice(6));
+      fs.writeFileSync(dest, r.content);
+      return { p: dest, clean: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} } };
+    } catch (e) {
+      lastErr = e;
+      console.warn(`  · 下载重试 ${attempt}/3：${ref} — ${e instanceof Error ? e.message.split("\n")[0] : e}`);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
+    }
+  }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  throw lastErr;
 }
 
 async function save(key: string, buf: Buffer): Promise<string> {
@@ -84,7 +98,7 @@ async function main() {
     .prepare(
       `SELECT id, sequence, video_url AS videoUrl FROM shots
        WHERE video_url IS NOT NULL AND video_url != ''
-         AND (preview_url IS NULL OR preview_url = '')
+         ${FORCE ? "" : "AND (preview_url IS NULL OR preview_url = '')"}
        ORDER BY sequence`
     )
     .all() as { id: string; sequence: number; videoUrl: string }[];
@@ -102,14 +116,20 @@ async function main() {
 
   for (const row of rows) {
     if (done >= LIMIT) break;
-    const src = await materialize(row.videoUrl);
+    // ⚠️ materialize 必须在 try 之内：它要从 OSS 下载源片，一次网络抖动就会
+    // 抛出整个循环、中断整批（真实发生过 —— 而且当时 preview_url 已被清空，
+    // 编辑器一度全部退回原片）。代理是可选优化，单条失败只该跳过这一条。
+    let src: { p: string; clean: () => void } | null = null;
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acs-proxy-"));
     const id = crypto.randomUUID();
     const mp4 = path.join(tmp, `${id}.mp4`);
     const jpg = path.join(tmp, `${id}.jpg`);
     try {
+      src = await materialize(row.videoUrl);
       await execFileAsync("ffmpeg", ["-y", "-i", src.p, "-vf", "scale=-2:480",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-g", "48",
+        // 禁用 B 帧：浏览器 WebCodecs 播放时 B 帧的帧序重排会造成周期性卡顿
+        "-bf", "0", "-tune", "fastdecode", "-profile:v", "main", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", mp4]);
       await execFileAsync("ffmpeg", ["-y", "-i", src.p, "-frames:v", "1",
         "-vf", "scale=-2:480", "-q:v", "4", jpg]);
@@ -130,7 +150,7 @@ async function main() {
       failed++;
       console.error(`  ✗ 分镜${row.sequence} 失败：${err instanceof Error ? err.message.split("\n")[0] : err}`);
     } finally {
-      src.clean();
+      src?.clean();
       try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
     }
   }
