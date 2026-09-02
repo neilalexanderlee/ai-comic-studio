@@ -6,6 +6,9 @@ describe("buildVideoCutPointUpdate", () => {
   const mockFetch = vi.fn();
 
   beforeEach(() => {
+    // 存储层按 UPLOAD_DIR 换算相对 key，并拒绝根目录之外的路径。
+    // 测试用例传的 uploadDir 是 /tmp/uploads，这里让存储根与之一致。
+    vi.stubEnv("UPLOAD_DIR", "/tmp/uploads");
     vi.stubGlobal("fetch", mockFetch);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -20,6 +23,7 @@ describe("buildVideoCutPointUpdate", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     mockFetch.mockReset();
   });

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { ulid } from "ulid";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 function generateKlingToken(accessKey: string, secretKey: string): string {
   const now = Math.floor(Date.now() / 1000);
@@ -102,10 +103,7 @@ export class KlingImageProvider implements AIProvider {
     const buffer = Buffer.from(await imageRes.arrayBuffer());
     const ext = imageUrl.split("?")[0].split(".").pop() || "png";
     const filename = `${ulid()}.${ext}`;
-    const dir = path.join(this.uploadDir, "images");
-    fs.mkdirSync(dir, { recursive: true });
-    const filepath = path.join(dir, filename);
-    fs.writeFileSync(filepath, buffer);
+    const filepath = await saveArtifactAt(path.join(this.uploadDir, "images"), filename, buffer);
 
     console.log(`[Kling Image] Saved to ${filepath}`);
     return filepath;

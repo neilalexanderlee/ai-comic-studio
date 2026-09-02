@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { requireUser } from "@/lib/api-guard";
+import { OSS_URL_SEGMENT } from "@/lib/utils/upload-url";
+import { resolveArtifactUrl } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -44,6 +46,21 @@ export async function GET(
   if (!guard.ok) return guard.response;
 
   const { path: segments } = await params;
+
+  // OSS 引用：鉴权通过后 302 到临时签名 URL。
+  // 不在这里代理下载 —— 那会让所有流量绕经我们的服务器，白白吃掉带宽，
+  // 而 OSS 直传是免费的（上传免费、下行走用户就近节点）。
+  if (segments[0] === OSS_URL_SEGMENT) {
+    const key = segments.slice(1).join("/");
+    if (!key) return NextResponse.json({ error: "Missing object key" }, { status: 400 });
+    try {
+      return NextResponse.redirect(resolveArtifactUrl(`oss://${key}`), 302);
+    } catch (err) {
+      console.error("[uploads] 签发 OSS 签名 URL 失败:", err);
+      return NextResponse.json({ error: "OSS 未配置或签名失败" }, { status: 500 });
+    }
+  }
+
   const filePath = path.join(uploadDir, ...segments);
 
   // Prevent directory traversal

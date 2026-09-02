@@ -31,7 +31,13 @@ import path from "node:path";
 
 import { getOssClient, isOssEnabled, OSS_REF_PREFIX } from "./oss-client";
 
-const LOCAL_ROOT = process.env.UPLOAD_DIR || "./uploads";
+/**
+ * 本地存储根。**惰性读取**而非模块加载时求值 —— 模块级 const 会把测试和
+ * 运行时的 UPLOAD_DIR 冻死在第一次 import 的那一刻，既不可测也不可重配。
+ */
+function localRoot(): string {
+  return process.env.UPLOAD_DIR || "./uploads";
+}
 
 /** 产物分类，对应存储中的一级目录 */
 export type ArtifactCategory =
@@ -69,7 +75,7 @@ export async function saveArtifact(relPath: string, data: Buffer): Promise<strin
     return `${OSS_REF_PREFIX}${normalized}`;
   }
 
-  const dest = path.join(LOCAL_ROOT, normalized);
+  const dest = path.join(localRoot(), normalized);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, data);
   // 返回**实际写入路径**，而不是硬编码的 `./uploads/...`。
@@ -77,6 +83,35 @@ export async function saveArtifact(relPath: string, data: Buffer): Promise<strin
   // 与 download-with-retry.ts 的既有做法一致；存量数据中 `./uploads/x` 和 `uploads/x`
   // 两种形态本来就并存，读取与 URL 解析都能处理。
   return dest;
+}
+
+/**
+ * 按「绝对目录 + 文件名」保存产物 —— 供迁移既有写盘点使用。
+ *
+ * 既有代码把 `uploadDir` 一路透传给 provider，且分镜版本会传**版本化子目录**
+ * （`<UPLOAD_DIR>/projects/<pid>/<label>`）。这个助手把绝对目录换算回相对 key，
+ * 于是每个写盘点只需把
+ *   `mkdirSync + writeFileSync + return filepath`
+ * 换成
+ *   `return saveArtifactAt(dir, filename, buf)`
+ * 而不必改动 uploadDir 的传递链路。
+ */
+export async function saveArtifactAt(
+  absDir: string,
+  filename: string,
+  data: Buffer
+): Promise<string> {
+  const rel = path
+    .relative(path.resolve(localRoot()), path.resolve(absDir))
+    .replace(/\\/g, "/");
+
+  // 目录跑到存储根之外说明调用方传错了。落 OSS 时这会变成诡异的 key，
+  // 与其静默写到奇怪的位置，不如直接报错。
+  if (rel.startsWith("..")) {
+    throw new Error(`[storage] 目标目录不在 UPLOAD_DIR 之内：${absDir}`);
+  }
+
+  return saveArtifact(rel ? `${rel}/${filename}` : filename, data);
 }
 
 /** 读取一个产物。同时支持本地路径与 `oss://` 引用。 */
@@ -115,6 +150,19 @@ export async function deleteArtifact(ref: string | null | undefined): Promise<vo
   } catch {
     /* 已经没了，无所谓 */
   }
+}
+
+/**
+ * 判断两个存储引用是否指向同一产物。
+ *
+ * 不能直接对引用用 `path.resolve` 比较：`oss://bgm/x.wav` 会被解析成
+ * `<cwd>/oss:/bgm/x.wav`，虽然两边同样被拧坏时相等性侥幸成立，
+ * 但混用本地与 OSS 引用时结果就不可预料了。
+ */
+export function isSameArtifact(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  if (isOssRef(a) || isOssRef(b)) return a === b;
+  return path.resolve(a) === path.resolve(b);
 }
 
 /** 签名 URL 默认有效期（秒）。够浏览器播放/下载一次，又不至于被长期转发。 */

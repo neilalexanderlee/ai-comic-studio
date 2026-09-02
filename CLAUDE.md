@@ -492,6 +492,12 @@ Docker 里 `UPLOAD_DIR=/app/uploads`，硬编码会让引用指向不存在的�
 **OSS bucket 必须私有**：`resolveArtifactUrl` 对 OSS 引用签发 1 小时有效的签名 URL；
 匿名裸 URL 返回 403（已实测验证）。
 
+**读路径必须和写路径同时改**，否则就是「写进去了但界面显示缺失」：
+`uploadUrl()` 是纯客户端函数（46 个调用点），拿不到 OSS 密钥签不了名，
+所以它把 `oss://frames/x.png` 映射成 `/api/uploads/_oss/frames/x.png`，
+由 `/api/uploads/[...path]` 鉴权后 **302 跳转**到签名 URL。
+不在服务端代理下载 —— 那会让所有流量绕经自己的服务器白吃带宽。
+
 ⚠️ `ali-oss` 必须列在 `next.config.ts` 的 `serverExternalPackages` 里 ——
 它依赖的 `urllib` 会运行时 `require('proxy-agent')`，打包器静态解析不到会直接构建失败。
 **这个错误 tsc 检查不出来，只有真跑才会暴露。**

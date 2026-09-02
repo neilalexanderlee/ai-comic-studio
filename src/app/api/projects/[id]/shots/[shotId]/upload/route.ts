@@ -6,6 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
 import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -32,29 +33,36 @@ export async function POST(
     return NextResponse.json({ error: "Invalid field" }, { status: 400 });
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const ext = file.name.split(".").pop() || "png";
-  const filename = `${ulid()}.${ext}`;
-  const dir = path.join(uploadDir, "frames");
-  fs.mkdirSync(dir, { recursive: true });
-  const filepath = path.join(dir, filename);
-  fs.writeFileSync(filepath, buffer);
+  try {
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const ext = file.name.split(".").pop() || "png";
+    const filename = `${ulid()}.${ext}`;
+    const filepath = await saveArtifactAt(path.join(uploadDir, "frames"), filename, buffer);
 
-  const updateFields =
-    field === "anchorFirst"
-      ? {
-          [field as AllowedField]: filepath,
-          chainSourceShotId: null,
-          chainSourceType: null,
-          anchorFirstContinuityMode: null,
-        }
-      : { [field as AllowedField]: filepath };
+    const updateFields =
+      field === "anchorFirst"
+        ? {
+            [field as AllowedField]: filepath,
+            chainSourceShotId: null,
+            chainSourceType: null,
+            anchorFirstContinuityMode: null,
+          }
+        : { [field as AllowedField]: filepath };
 
-  const [updated] = await db
-    .update(shots)
-    .set(updateFields)
-    .where(eq(shots.id, shotId))
-    .returning();
+    const [updated] = await db
+      .update(shots)
+      .set(updateFields)
+      .where(eq(shots.id, shotId))
+      .returning();
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  } catch (err) {
+    // 上传失败必须报出原因：空白 500 会让「存储配置错了」和「磁盘满了」
+    // 这类完全不同的故障长得一模一样
+    console.error(`[ShotUpload] shot ${shotId} field ${field}:`, err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : String(err) },
+      { status: 500 }
+    );
+  }
 }

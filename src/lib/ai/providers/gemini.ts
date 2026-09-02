@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ulid } from "ulid";
 import { isGeminiModelCompatible } from "../model-capabilities";
+import { saveArtifactAt } from "@/lib/storage/artifact-store";
 
 export class GeminiProvider implements AIProvider {
   private client: GoogleGenAI;
@@ -127,11 +128,7 @@ CRITICAL CHARACTER CONSISTENCY RULES:
         const buffer = Buffer.from(part.inlineData.data, "base64");
         const ext = part.inlineData.mimeType?.includes("png") ? "png" : "jpg";
         const filename = `${ulid()}.${ext}`;
-        const dir = path.join(this.uploadDir, "frames");
-        fs.mkdirSync(dir, { recursive: true });
-        const filepath = path.join(dir, filename);
-        fs.writeFileSync(filepath, buffer);
-        return filepath;
+        return saveArtifactAt(path.join(this.uploadDir, "frames"), filename, buffer);
       }
     }
     const responseText = responseParts

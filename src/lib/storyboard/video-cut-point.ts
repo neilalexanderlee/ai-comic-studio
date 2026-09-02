@@ -1,5 +1,5 @@
-import fs from "node:fs";
 import path from "node:path";
+import { saveArtifactAt, deleteArtifact, isSameArtifact } from "@/lib/storage/artifact-store";
 
 /**
  * 下载 Seedance return_last_frame → 写入本镜 cut_point（不覆盖 anchor_last_ai）。
@@ -19,24 +19,19 @@ export async function buildVideoCutPointUpdate(params: {
   if (!frameRes.ok) return {};
 
   const buffer = Buffer.from(await frameRes.arrayBuffer());
-  const framesDir = path.join(params.uploadDir, "frames");
-  fs.mkdirSync(framesDir, { recursive: true });
-  const framePath = path.join(
-    framesDir,
-    `${params.shotId}_seedance_lastframe_${Date.now()}.png`
+  const framePath = await saveArtifactAt(
+    path.join(params.uploadDir, "frames"),
+    `${params.shotId}_seedance_lastframe_${Date.now()}.png`,
+    buffer
   );
-  fs.writeFileSync(framePath, buffer);
 
-  const isSameAsAnchorLastAi =
-    params.existingAnchorLastAi &&
-    path.resolve(params.existingCutPoint ?? "") === path.resolve(params.existingAnchorLastAi);
+  // 旧尾帧同时被 anchorLastAi 引用时不能删，否则会删掉用户手动生成的 AI 尾帧
+  const isSameAsAnchorLastAi = isSameArtifact(params.existingCutPoint, params.existingAnchorLastAi);
 
   if (params.existingCutPoint && params.existingCutPoint !== framePath && !isSameAsAnchorLastAi) {
-    try {
-      fs.unlinkSync(params.existingCutPoint);
-    } catch {
-      /* ignore */
-    }
+    // 必须走 deleteArtifact：旧引用可能是 oss://，用 fs.unlinkSync 会静默失败
+    // 并把对象永久遗留在 bucket 里（孤儿文件持续计费）
+    await deleteArtifact(params.existingCutPoint);
   }
 
   return { cutPoint: framePath };
