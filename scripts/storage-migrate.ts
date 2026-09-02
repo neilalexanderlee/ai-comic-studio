@@ -242,6 +242,7 @@ async function migrate() {
 
   const wdb = new Database(DB_FILE);
   let updated = 0;
+  let snapshotsRewritten = 0, snapshotRefsReplaced = 0;
   const tx = wdb.transaction(() => {
     for (const e of mapping) {
       // 条件里带上旧值：期间若有并发改动，这条就不更新，而不是覆盖掉新值
@@ -250,6 +251,34 @@ async function migrate() {
         .run(e.to, e.id, e.from);
       updated += r.changes;
     }
+
+    // ⚠️ 引用不只在列里：episodes.editor_state 是一段内嵌素材路径的 JSON。
+    // 只改列不改它，用户保存的时间线在本地副本清理后会全部失效
+    // （这是真实发生过的事故，见 repair-editor-state-refs.ts）。
+    const pathToOss = new Map<string, string>();
+    for (const e of mapping) {
+      pathToOss.set(e.from, e.to);
+      pathToOss.set(e.from.replace(/^\.\//, ""), e.to);
+      pathToOss.set("./" + e.from.replace(/^\.\//, ""), e.to);
+    }
+    try {
+      const snaps = wdb
+        .prepare(`SELECT id, editor_state AS state FROM episodes WHERE editor_state IS NOT NULL AND editor_state != ''`)
+        .all() as { id: string; state: string }[];
+      for (const snap of snaps) {
+        let next = snap.state;
+        for (const p of new Set(snap.state.match(/(?:\.\/)?uploads\/[^"\\\s]+/g) ?? [])) {
+          const to = pathToOss.get(p);
+          if (!to) continue;
+          next = next.split(`"${p}"`).join(`"${to}"`);
+          snapshotRefsReplaced++;
+        }
+        if (next !== snap.state) {
+          wdb.prepare(`UPDATE episodes SET editor_state = ? WHERE id = ?`).run(next, snap.id);
+          snapshotsRewritten++;
+        }
+      }
+    } catch { /* 列不存在 */ }
   });
   tx();
   wdb.close();
@@ -258,6 +287,9 @@ async function migrate() {
   fs.writeFileSync(mapPath, JSON.stringify(mapping, null, 2));
 
   console.log(`✓ 已更新 ${updated} 条 DB 引用`);
+  if (snapshotsRewritten > 0) {
+    console.log(`✓ 同步改写 ${snapshotsRewritten} 集时间线快照，替换 ${snapshotRefsReplaced} 处内嵌引用`);
+  }
   console.log(`✓ 映射文件 → ${mapPath}`);
   console.log(`  回滚：pnpm storage:migrate --rollback ${mapPath} --apply`);
   console.log(`\n本地文件一个都没删 —— OSS 上是新增副本。请先跑 pnpm storage:audit 复核。`);

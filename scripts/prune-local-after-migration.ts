@@ -93,6 +93,17 @@ async function main() {
       }
     } catch { /* 表/列不存在 */ }
   }
+  // ⚠️ 引用不只在列里：时间线快照 JSON 里内嵌的路径同样算"仍被引用"。
+  // 漏掉这里会把"时间线正在用、但没有任何列指向它"的素材（典型是 BGM）删掉。
+  try {
+    for (const r of db
+      .prepare(`SELECT editor_state AS s FROM episodes WHERE editor_state IS NOT NULL AND editor_state != ''`)
+      .all() as { s: string }[]) {
+      for (const m of r.s.match(/(?:\.\/)?uploads\/[^"\\\s]+/g) ?? []) {
+        stillReferenced.add(path.resolve(m));
+      }
+    }
+  } catch { /* 列不存在 */ }
   db.close();
 
   const deletable: MappingEntry[] = [];
