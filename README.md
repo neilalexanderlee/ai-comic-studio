@@ -413,7 +413,6 @@ git push -u origin main
   [AIComicBuilder](https://github.com/twwch/AIComicBuilder) 的部分继续单纯按 Apache-2.0 授权
 - 补充协议**不追溯**：在其加入之前发布的版本继续按纯 Apache-2.0 可用
 
-> ⚠️ 补充协议目前为**草案，尚未经律师复核**，措辞可能调整。
 
 
 
