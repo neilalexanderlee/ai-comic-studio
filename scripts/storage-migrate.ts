@@ -86,6 +86,10 @@ function ossClient() {
     accessKeyId: OSS_ACCESS_KEY_ID,
     accessKeySecret: OSS_ACCESS_KEY_SECRET,
     secure: true,
+    // 默认 60s 对大文件不够：成片动辄 80MB+，实测会 ResponseTimeoutError。
+    // 刻意不改用 multipartUpload —— 分片上传的 ETag 不是文件 MD5，
+    // 会让下面的内容校验失效，而校验是这次迁移的安全底线。
+    timeout: 15 * 60 * 1000,
   });
 }
 
@@ -182,7 +186,21 @@ async function migrate() {
     }
 
     try {
-      await oss.put(key, buf);
+      // 大文件偶发超时/网络抖动，重试 3 次再判失败
+      let putErr: unknown = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await oss.put(key, buf);
+          putErr = null;
+          break;
+        } catch (e) {
+          putErr = e;
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`  · 第 ${attempt}/3 次上传失败（${(buf.length / 1048576).toFixed(1)}MB）：${msg}`);
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 3000 * attempt));
+        }
+      }
+      if (putErr) throw putErr;
       // 校验：拿 OSS 上对象的 ETag（单次 put 的 ETag 即 MD5）比对
       const head = await oss.head(key);
       const etag = String(head.res.headers.etag ?? "").replace(/"/g, "").toLowerCase();

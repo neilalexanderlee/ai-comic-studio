@@ -7,6 +7,7 @@ import { extractDialoguesFromMotionScript } from "@/lib/storyboard/extract-dialo
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { deleteArtifact } from "@/lib/storage/artifact-store";
+import { deleteProjectCharactersCascade } from "@/lib/db/cascade";
 
 function tryDeleteFile(filePath: string | null | undefined) {
   if (!filePath) return;
@@ -215,7 +216,11 @@ export async function DELETE(
     }
   }
 
-  // 2. Delete DB record — cascade handles all child tables
+  // 2. 先显式清角色资产 —— character_assets 的外键约束在数据库里实际不存在，
+  //    不显式删会留下孤儿行（历史上已因此积压 249 条，见 lib/db/cascade.ts）
+  await deleteProjectCharactersCascade(id);
+
+  // 3. Delete DB record — 其余子表由真实存在的外键级联处理
   await db.delete(projects).where(eq(projects.id, id));
   return new NextResponse(null, { status: 204 });
 }

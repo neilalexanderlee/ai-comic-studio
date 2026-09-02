@@ -4,6 +4,7 @@ import { characters, episodeCharacters } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { requireProjectOwner, requireCharacterInProject } from "@/lib/api-guard";
+import { deleteCharacterCascade } from "@/lib/db/cascade";
 
 export async function PATCH(
   request: Request,
@@ -76,6 +77,8 @@ export async function DELETE(
   if (!guard.ok) return guard.response;
   const scope = await requireCharacterInProject(characterId, projectId);
   if (!scope.ok) return scope.response;
-  await db.delete(characters).where(eq(characters.id, characterId));
+  // 必须走 cascade 助手：character_assets 的外键约束实际不存在于数据库里，
+  // 直接 db.delete(characters) 会把资产行和文件都留成孤儿（见 lib/db/cascade.ts）
+  await deleteCharacterCascade(characterId);
   return new NextResponse(null, { status: 204 });
 }
