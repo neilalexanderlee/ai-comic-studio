@@ -470,6 +470,32 @@ refund   冻结 → 余额（失败/超时全额退回）
 定价在 `src/lib/billing/pricing.ts`（纯函数，前后端共用），时长按能力表 clamp，
 **报价永不为 0**——为 0 意味着可以无限白嫖。
 
+### 8d. 存储抽象层 — 本地与 OSS 共存，不是一次性切换
+
+产物存储走 `src/lib/storage/artifact-store.ts`，**不要再直接 `fs.writeFileSync` 到 uploadDir**。
+
+数据库里存的是**存储引用**，两种形态并存：
+
+| 形态 | 例 | 何时产生 |
+|---|---|---|
+| 本地路径 | `uploads/bgm/x.wav` | 未配置 OSS（与改造前一致） |
+| OSS 引用 | `oss://bgm/x.wav` | 四个 `OSS_*` 变量齐全时 |
+
+`readArtifact` / `artifactExists` / `deleteArtifact` / `resolveArtifactUrl` 同时认这两种，
+所以**存量 1.1GB 本地文件不需要迁移就能继续读**，迁移可按目录分批做、中途中断也不会坏。
+这是刻意避免「半途而废的存储层重构」——那种状态下写入与读取路径不一致，
+症状是「文件明明生成了但界面显示缺失」，极难排查。
+
+**`saveArtifact` 返回的是实际写入路径（跟随 `UPLOAD_DIR`），不是硬编码的 `./uploads/...`。**
+Docker 里 `UPLOAD_DIR=/app/uploads`，硬编码会让引用指向不存在的位置（单测锁死了这条）。
+
+**OSS bucket 必须私有**：`resolveArtifactUrl` 对 OSS 引用签发 1 小时有效的签名 URL；
+匿名裸 URL 返回 403（已实测验证）。
+
+⚠️ `ali-oss` 必须列在 `next.config.ts` 的 `serverExternalPackages` 里 ——
+它依赖的 `urllib` 会运行时 `require('proxy-agent')`，打包器静态解析不到会直接构建失败。
+**这个错误 tsc 检查不出来，只有真跑才会暴露。**
+
 ### 9. Drizzle null 比较
 
 ```typescript

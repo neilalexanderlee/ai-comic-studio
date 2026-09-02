@@ -1,14 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Service } from "@volcengine/openapi";
 import { bootstrap } from "@/lib/bootstrap";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
 import { getProviderSecret } from "@/lib/provider-secrets";
 import { openBillingGate } from "@/lib/billing/gate";
-
-const uploadDir = process.env.UPLOAD_DIR || "./uploads";
+import { saveArtifact } from "@/lib/storage/artifact-store";
 
 /** 火山「生成纯音乐」单段时长硬限制（官方约束，超出会被接口拒绝） */
 export const VOLC_MUSIC_MIN_DURATION = 30;
@@ -145,13 +142,12 @@ async function callMusicProvider(
 
 // ── 音频下载 ──────────────────────────────────────────────────────────────────
 
-/** 下载上游 CDN 音频并落盘（CDN 链接 24h 过期，必须立刻转存）。 */
+/** 下载上游 CDN 音频（链接 24h 过期，必须立刻转存），返回内容交由存储层落地。 */
 async function downloadAudioWithRetry(
   audioUrl: string,
-  destPath: string,
   attempts = 3,
   delayMs = 2_000
-): Promise<void> {
+): Promise<Buffer> {
   let lastError: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
@@ -161,8 +157,7 @@ async function downloadAudioWithRetry(
       }
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length === 0) throw new Error("download failed: empty response body");
-      fs.writeFileSync(destPath, buffer);
-      return;
+      return buffer;
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : String(error);
@@ -258,13 +253,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 保存音频文件
-  const bgmDir = path.join(uploadDir, "bgm");
-  fs.mkdirSync(bgmDir, { recursive: true });
-
+  // 保存音频：配置了 OSS 就走 OSS，否则落本地磁盘（行为与改造前一致）
   const filename = `${randomUUID()}.${result.format}`;
+  let filePath: string;
   try {
-    await downloadAudioWithRetry(result.audioUrl, path.join(bgmDir, filename));
+    const audio = await downloadAudioWithRetry(result.audioUrl);
+    filePath = await saveArtifact(`bgm/${filename}`, audio);
   } catch (err) {
     // 上游已生成（钱已花），但我们没拿到文件。仍然退还用户积分——
     // 这笔损失由平台承担，不该让用户为拿不到的产物付费。
@@ -278,7 +272,7 @@ export async function POST(request: NextRequest) {
   await billing.settle();
 
   return NextResponse.json({
-    filePath: `./uploads/bgm/${filename}`,
+    filePath,
     duration: result.durationSec,
     name: `BGM - ${prompt.trim().slice(0, 20)}`,
     ...(billing.credits > 0 && { creditsCharged: billing.credits }),

@@ -29,6 +29,7 @@
     "@webav/av-canvas": "^1.2.8",
     "@webav/av-cliper": "^1.2.8",
     "ai": "^6.0.116",
+    "ali-oss": "^6.23.0",
     "archiver": "^7.0.1",
     "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",
@@ -61,6 +62,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/ali-oss": "^6.23.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/fluent-ffmpeg": "^2.1.28",
     "@types/node": "^20",
