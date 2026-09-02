@@ -1,5 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
+
+// 删除旧尾帧前会跨表查「有没有别的分镜正引用它」。这里默认返回空（无人引用），
+// 需要模拟「被引用」的用例自行覆盖 selectResult。
+let selectResult: { id: string }[] = [];
+vi.mock("@/lib/db", () => ({
+  db: {
+    select: () => ({
+      from: () => ({
+        where: () => ({ limit: async () => selectResult }),
+      }),
+    }),
+  },
+}));
+
 import { buildVideoCutPointUpdate } from "@/lib/storyboard/video-cut-point";
 
 describe("buildVideoCutPointUpdate", () => {
@@ -9,6 +23,7 @@ describe("buildVideoCutPointUpdate", () => {
     // 存储层按 UPLOAD_DIR 换算相对 key，并拒绝根目录之外的路径。
     // 测试用例传的 uploadDir 是 /tmp/uploads，这里让存储根与之一致。
     vi.stubEnv("UPLOAD_DIR", "/tmp/uploads");
+    selectResult = [];
     vi.stubGlobal("fetch", mockFetch);
     mockFetch.mockResolvedValue({
       ok: true,
@@ -73,6 +88,20 @@ describe("buildVideoCutPointUpdate", () => {
       uploadDir: "/tmp/uploads",
       existingCutPoint: sharedPath,
       existingAnchorLastAi: sharedPath,
+    });
+    expect(fs.unlinkSync).not.toHaveBeenCalled();
+  });
+
+  it("不删被别的分镜 anchorFirst 引用的旧尾帧（承接上一镜尾帧是路径直拷）", async () => {
+    // 真实事故：分镜3 用「承接上一镜尾帧」直拷了分镜2 的 cutPoint 路径；
+    // 分镜2 视频重新生成时把旧文件删了，分镜3 的首帧当场变死链。
+    selectResult = [{ id: "shot-3" }];
+    await buildVideoCutPointUpdate({
+      remoteLastFrameUrl: "https://cdn.example/last.png",
+      shotId: "shot-2",
+      uploadDir: "/tmp/uploads",
+      existingCutPoint: "/tmp/uploads/frames/shot-2_seedance_lastframe_111.png",
+      existingAnchorLastAi: null,
     });
     expect(fs.unlinkSync).not.toHaveBeenCalled();
   });

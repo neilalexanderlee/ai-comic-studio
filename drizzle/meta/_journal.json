@@ -400,6 +400,13 @@
       "when": 1779000032000,
       "tag": "0056_billing",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1779000033000,
+      "tag": "0057_drop_vestigial_shot_columns",
+      "breakpoints": true
     }
   ]
 }

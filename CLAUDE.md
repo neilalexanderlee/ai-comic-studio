@@ -200,7 +200,7 @@ VideoProvider    // generateVideo
 | `projects` | 顶层实体，含 `visualStyle`、`videoRatio`、`useProjectPrompts`、`finalVideoUrl`（`enhancePrompts` / `linkShotsViaCutPoint` 两列已由 migration 0047 删除）|
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`sceneId` 已移除；`emotion`/`framing`/`lightingAtm` **三列实际仍在库里**，见约定 14 的说明，代码侧不读不写） |
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
 | `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
 | `character_assets` | 角色图片/音频；`assetType`（`morph`/`blueprint`/`prop`）；`isDefault`（1=当前主定妆图）；`audioPath`（音色参考，用于 Seedance 音色克隆）|
@@ -640,12 +640,10 @@ NOTE: The following are the ONLY lines of speech...
 
 `startFrameDesc` / `endFrameDesc` 是图像生成的唯一画面依据，必须自包含**五要素**（机位空间坐标/景别取景范围/角色姿态/主光/情绪身体解剖）。`emotion`、`framing`、`lightingAtm` 三个冗余字段已从 `schema.ts` 和全部代码路径移除，所有信息统一写入 `startFrameDesc`。
 
-⚠️ **但这三列在数据库里实际还在**（2026-09-02 审计发现）。migration `0042`/`0043` 打算用
-「建新表→拷数据→删旧表→改名」把它们删掉，但当年执行到一半失败、又被误记为已应用（详见
-已知陷阱表「migration 0042/0043 被记为已应用但从未生效」一条）。
-
-**不要为了删这三列去重建 `shots` 表** —— Drizzle schema 不声明它们、代码不读不写，
-它们是纯粹的惰性残留；而重建一张有数据的表是高风险操作，收益为零。
+历史注记：migration `0042`/`0043` 当年想用「建新表→拷数据→删旧表→改名」删掉它们，
+但执行到一半失败又被误记为已应用，三列一直留在库里（详见已知陷阱表）。
+2026-09-02 由 migration `0057` 用 `ALTER TABLE ... DROP COLUMN` 补删完成 ——
+better-sqlite3 内置 SQLite 3.51 原生支持该语法，不必再走重建表那套高风险流程。
 
 五要素用全角分号「；」分隔，形成五个独立子句：
 
@@ -906,7 +904,7 @@ src/lib/evals/
 | 角色解析后变成写实风 | `handleCharacterExtract` 用裸 `resolvePrompt` 未注入 visualStyle | 使用 `resolveCharacterExtractSystemPrompt(visualStyle, …)` |
 | 尾帧人物与定妆图不符 | 尾帧 prompt 未明确角色设定图优先于首帧 | `registry.ts` `LAST_FRAME_RELATIONSHIP_TO_FIRST` + `LAST_FRAME_RENDERING_QUALITY` |
 | PPT割裂感（群演→主角切换） | 强制继承上一镜头尾帧导致首帧图像错误 | 智能链式中断：`isCrowdToCharacterCut` 检测，独立生成首帧（历史记录：该函数已随自动衔接功能一并移除，现在衔接全靠用户手动触发，见约定 8） |
-| 生成首帧出现火光/动态元素 | `lightingAtm` 含视频级动态描述被注入静帧 `【光影】` 段 | migration 0042/0043 从 `schema.ts` 和代码路径移除 `emotion`/`framing`/`lightingAtm`；光影信息统一写入 `startFrameDesc`（注：这三列在数据库里实际未删掉，见下方 migration 未生效那一条）|
+| 生成首帧出现火光/动态元素 | `lightingAtm` 含视频级动态描述被注入静帧 `【光影】` 段 | migration 0042/0043 从 `schema.ts` 和代码路径移除 `emotion`/`framing`/`lightingAtm`；光影信息统一写入 `startFrameDesc`（注：这三列当年未真正删掉，已由 migration 0057 补删）|
 | Seedance 多参音色错位 | audioPath 有值但 hasAudio 未传入 | `handleBatchVideoGenerate` 查询 `character_assets.audioPath` |
 | Track 分组后视频混乱 | 分镜不连续（有跳号 sequence）| 重新「自动分配 Track」重计算分组 |
 | 视频编辑器字幕未显示 | Canvas 字幕轨道 clip 时间范围不覆盖当前播放头 | 调整字幕 clip 的 startTime / endTime |
@@ -931,7 +929,7 @@ src/lib/evals/
 | Seedance 2.5 参考视频传本地路径会静默失败 | 2.5 的参考视频**只接受公网 URL 或 `asset://` 素材 ID，不支持 base64**（图片和音频可以），沿用图片的 `toDataUrl` 思路必然出错 | 新增 `toVideoUrl()`，遇到本地路径**直接抛错**而非降级成 data URI —— 静默降级会让错误推迟到任务启动后才暴露。这也是白模预演必须排在对象存储之后的原因 |
 | 切到 Kling / Veo / 即梦生成视频必崩 | `resolveSingleVideoMode` 只看分镜数据算模式，不知道 provider 支不支持；`multimodal` 是绝大多数镜头的默认模式，而这三家 provider 只实现了首帧/首尾帧两种 body（Kling 对 undefined 的 `initialImage` 取 base64 崩溃、Veo 抛 `Veo requires an image input`、即梦提交空图列表） | 新增 `video-capabilities.ts` 能力注册表；`downgradeVideoMode(ideal, cap)` 在生成前把模式降级到 provider 真正支持的那个，并通过响应体 `capabilityNotes` 回传前端 toast 告知用户本次丢了什么 |
 | 参考素材上限写死 Seedance 2.0 的 9/3，换模型不跟着变 | `MAX_MULTIMODAL_REFS=9` / `MAX_AUDIO_REFS=3` 是 `handleSingleVideoGenerate` 里的**函数内局部常量**，未导出、未共享 | 改读 `cap.refs.image` / `cap.refs.audio`；`model-limits.ts` 整体并入 `video-capabilities.ts` 后删除 |
-| migration 0042/0043 被记为「已应用」但从未生效，三列至今仍在库里 | 两个缺陷叠加：① `0042.sql` 里**没有 `statement-breakpoint`**，整份 SQL 作为一块交给 `sqlite.exec()`，而迁移执行器**没有事务包裹** —— 第一次跑 `CREATE TABLE shots_new` 提交成功、后续 `INSERT` 失败，留下一张空表；② 第二次跑时 `CREATE` 报 `already exists`，被执行器「兼容旧库」的 catch 吞掉，`exec()` 在第一句就中止、后面的 `INSERT`/`DROP`/`RENAME` 从未执行，**却照样写入了 `__drizzle_migrations`**。于是 `emotion`/`framing`/`lightingAtm` 永久留在 `shots` 表里，而 CLAUDE.md 三处都写着「已完全移除」 | `runMigrations()` 加事务包裹（`BEGIN`/`COMMIT`/失败 `ROLLBACK`），一份迁移要么整体生效要么整体回滚；残留的空表 `shots_new` 已删除（删前校验 0 行、0 条独有数据 + 整库备份）。**三列本身不动** —— schema 不声明、代码不读写，重建一张有数据的表风险远大于收益。**教训：`rename-copy-drop` 式迁移必须有事务，且「already exists」这种容错会掩盖真实失败** |
+| migration 0042/0043 被记为「已应用」但从未生效，三列至今仍在库里 | 两个缺陷叠加：① `0042.sql` 里**没有 `statement-breakpoint`**，整份 SQL 作为一块交给 `sqlite.exec()`，而迁移执行器**没有事务包裹** —— 第一次跑 `CREATE TABLE shots_new` 提交成功、后续 `INSERT` 失败，留下一张空表；② 第二次跑时 `CREATE` 报 `already exists`，被执行器「兼容旧库」的 catch 吞掉，`exec()` 在第一句就中止、后面的 `INSERT`/`DROP`/`RENAME` 从未执行，**却照样写入了 `__drizzle_migrations`**。于是 `emotion`/`framing`/`lightingAtm` 永久留在 `shots` 表里，而 CLAUDE.md 三处都写着「已完全移除」 | `runMigrations()` 加事务包裹（`BEGIN`/`COMMIT`/失败 `ROLLBACK`），一份迁移要么整体生效要么整体回滚；残留的空表 `shots_new` 已删除（删前校验 0 行、0 条独有数据 + 整库备份）。三列随后由 migration `0057` 用 `ALTER TABLE DROP COLUMN` 补删（SQLite 3.35+ 原生支持，无需重建表）。**教训：`rename-copy-drop` 式迁移必须有事务，且「already exists」这种容错会掩盖真实失败** |
 | CLAUDE.md 把两个已删除的功能当现存功能写，照着写代码会直接 tsc 报错 | migration `0047_drop_enhance_prompts_link_shots` 删了 `projects.enhance_prompts` 和 `link_shots_via_cut_point` 两列（前者是 no-op、后者被手动按钮取代），但约定 4、约定 8、关键表 `projects` 行、Provider 规则、开发检查清单五处都没同步。连带发现 `prompt-enhancer.ts` 的 `enhanceImagePrompt`/`enhanceVideoPrompt` 在生产代码里**零调用方**（只剩 eval + 单测），而文档还写着「新增 provider 时必须同步添加 system prompt」 | 约定 4 / 约定 8 改写为「已移除」记录并保留编号（避免打乱交叉引用），列出已不存在的函数名（`maybeAutoLinkNextShotAfterVideo` / `linkNextShotAnchorFromCutPoint` / `isCrowdToCharacterCut`）；「AI Prompt 增强系统」一节加停用标注；开发检查清单那条换成 `VIDEO_CAPABILITIES`。**教训：删列的 migration 必须同步扫一遍 CLAUDE.md 里的列名** |
 | MiniMax 音乐接口停用，BGM 生成整条链路失效 | MiniMax Music 接口已不可用；替代品「豆包音乐」实为火山「AI 生成音乐大模型 · 生成纯音乐」，与 MiniMax 有四处结构性差异：AK/SK 签名（非 Bearer）、submit+轮询（非同步返回）、返回 CDN wav URL（非 hex 串）、`Duration` 是真参数且强制 30–120 整数秒（非塞进 prompt 文字） | protocol `minimax` → `volc-music`；`bgm/generate/route.ts` 重写为 `generateWithVolcMusic`（`@volcengine/openapi` 签名，`serviceName=imagination`，`GenBGMForTime`/`QuerySong`，`Version=2024-08-12`）；`provider-form.tsx` 的 `needsSecretKey` 必须加 `volc-music`，否则 UI 不显示 SK 输入框 |
 | BGM API key 从客户端传来不安全 | 前端把 apiKey 放 body 传给 route | 改为 route 从 DB 读 `getProviderSecret(userId, providerId)`；客户端只传 `providerId + protocol + baseUrl` |
