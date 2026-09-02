@@ -99,6 +99,57 @@ describe("artifact-store", () => {
     });
   });
 
+  describe("OSS 签名 URL —— 必须可被浏览器缓存", () => {
+    beforeEach(() => {
+      for (const k of OSS_ENV) vi.stubEnv(k, "test-value");
+      vi.stubEnv("OSS_REGION", "oss-cn-beijing");
+      vi.stubEnv("OSS_BUCKET", "test-bucket");
+    });
+
+    /**
+     * 这条断言防的是一次真实事故：签名 URL 原本用 `now + TTL`，Expires 逐秒变化，
+     * 浏览器缓存命中率恒为 0，编辑器每刷新一次就把整条时间线重新下载一遍——
+     * 两天调试打出 3.51 GB 外网流出，吃穿 2 GB/月的免费流量包并导致 OSS 欠费停服。
+     */
+    it("同一窗口内对同一 key 签发的 URL 必须逐字节相同", async () => {
+      const store = await freshStore(tmp);
+      // 起点取「网格边界 +1 秒」——最坏起点，此后仍有整整一个窗口是稳定的。
+      // （对齐必然在网格边界翻一次 URL，那是窗口化的固有代价，不是缺陷。）
+      const t0 = 1_800_000_001_000;
+      const spy = vi.spyOn(Date, "now");
+      try {
+        spy.mockReturnValue(t0);
+        const first = store.resolveArtifactUrl("oss://videos/a.mp4");
+        for (const deltaSec of [1, 60, 600, 1200, 1798]) {
+          spy.mockReturnValue(t0 + deltaSec * 1000);
+          expect(store.resolveArtifactUrl("oss://videos/a.mp4")).toBe(first);
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("有效期下界仍不短于 TTL（对齐只会延长，不会缩短）", async () => {
+      const store = await freshStore(tmp);
+      const spy = vi.spyOn(Date, "now");
+      try {
+        // 逐秒扫过一整个窗口，任一时刻签出的 URL 剩余有效期都要 >= TTL
+        const base = 1_800_000_000_000;
+        for (let i = 0; i < store.SIGNED_URL_WINDOW_SECONDS; i += 97) {
+          const nowMs = base + i * 1000;
+          spy.mockReturnValue(nowMs);
+          const url = store.resolveArtifactUrl("oss://videos/a.mp4");
+          const expires = Number(new URL(url).searchParams.get("Expires"));
+          expect(expires - Math.floor(nowMs / 1000)).toBeGreaterThanOrEqual(
+            store.SIGNED_URL_TTL_SECONDS
+          );
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
   describe("引用形态判别", () => {
     beforeEach(clearOssEnv);
 

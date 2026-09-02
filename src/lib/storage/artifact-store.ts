@@ -224,8 +224,27 @@ export function isSameArtifact(a: string | null | undefined, b: string | null | 
   return path.resolve(a) === path.resolve(b);
 }
 
-/** 签名 URL 默认有效期（秒）。够浏览器播放/下载一次，又不至于被长期转发。 */
+/** 签名 URL 最短有效期（秒）。够浏览器播放/下载一次，又不至于被长期转发。 */
 export const SIGNED_URL_TTL_SECONDS = 3600;
+
+/**
+ * 签名 URL 的过期时刻对齐窗口（秒）。
+ *
+ * ⚠️ **过期时刻必须对齐到固定窗口，不能用 `now + TTL`。**
+ *
+ * ali-oss 把 Expires 编进签名，所以逐秒调用会生成**逐秒不同**的 URL。
+ * 浏览器按 URL 做缓存键，URL 一变就是一个全新资源 —— 缓存命中率恒为 0，
+ * 编辑器每刷新一次就把整条时间线的视频代理重新下载一遍。
+ *
+ * 这不是理论问题：两天调试跑出 3.51 GB 外网流出流量，把 2 GB/月的
+ * 免费下行流量包吃穿，账户欠费 ¥0.75，OSS 直接 `UserDisable` 停服。
+ * 存储只用了 881 MB（20 GB 包的 4%）、请求 1503 次（20 万次包的 0.75%）——
+ * **唯一超标的计费项就是重复下载打出来的流量。**
+ *
+ * 对齐之后，同一窗口内的所有调用返回**逐字节相同**的 URL，缓存正常命中。
+ * 代价是有效期在 TTL ~ TTL+窗口 之间浮动，下界仍然是完整的 TTL。
+ */
+export const SIGNED_URL_WINDOW_SECONDS = 1800;
 
 /**
  * 把存储引用解析成浏览器可访问的 URL。
@@ -235,7 +254,12 @@ export const SIGNED_URL_TTL_SECONDS = 3600;
  */
 export function resolveArtifactUrl(ref: string): string {
   if (isOssRef(ref)) {
-    return getOssClient().signatureUrl(ossKeyOf(ref), { expires: SIGNED_URL_TTL_SECONDS });
+    const nowSec = Math.floor(Date.now() / 1000);
+    // 先算出对齐后的**绝对**过期时刻，再换算回 ali-oss 要的相对秒数
+    const alignedExpiry =
+      Math.ceil((nowSec + SIGNED_URL_TTL_SECONDS) / SIGNED_URL_WINDOW_SECONDS) *
+      SIGNED_URL_WINDOW_SECONDS;
+    return getOssClient().signatureUrl(ossKeyOf(ref), { expires: alignedExpiry - nowSec });
   }
   const normalized = ref.replace(/\\/g, "/");
   return `/api/uploads/${normalized.replace(/^.*uploads\//, "")}`;

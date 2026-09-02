@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { requireUser } from "@/lib/api-guard";
 import { OSS_URL_SEGMENT } from "@/lib/utils/upload-url";
-import { resolveArtifactUrl } from "@/lib/storage/artifact-store";
+import { resolveArtifactUrl, SIGNED_URL_WINDOW_SECONDS } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
 
@@ -54,7 +54,12 @@ export async function GET(
     const key = segments.slice(1).join("/");
     if (!key) return NextResponse.json({ error: "Missing object key" }, { status: 400 });
     try {
-      return NextResponse.redirect(resolveArtifactUrl(`oss://${key}`), 302);
+      const res = NextResponse.redirect(resolveArtifactUrl(`oss://${key}`), 302);
+      // 让浏览器缓存这一跳。没有它，每次播放都要重新走一遍 302 并重新下载文件——
+      // 签名 URL 已按窗口对齐（见 SIGNED_URL_WINDOW_SECONDS），窗口内 URL 逐字节相同，
+      // 所以缓存住的重定向目标一定还在有效期内。private：签名 URL 因人而异，不得进共享缓存。
+      res.headers.set("Cache-Control", `private, max-age=${SIGNED_URL_WINDOW_SECONDS}`);
+      return res;
     } catch (err) {
       console.error("[uploads] 签发 OSS 签名 URL 失败:", err);
       return NextResponse.json({ error: "OSS 未配置或签名失败" }, { status: 500 });
