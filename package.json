@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "eval": "tsx src/lib/evals/index.ts",
-    "prune-prompt-overrides": "tsx scripts/prune-prompt-overrides.ts"
+    "prune-prompt-overrides": "tsx scripts/prune-prompt-overrides.ts",
+    "storage:audit": "tsx scripts/storage-audit.ts",
+    "storage:migrate": "tsx scripts/storage-migrate.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",
