@@ -20,7 +20,8 @@
     "assets:prune": "tsx scripts/prune-orphan-assets.ts",
     "oss:cors": "tsx scripts/oss-setup-cors.ts",
     "proxies:backfill": "tsx scripts/backfill-preview-proxies.ts",
-    "local:prune": "tsx scripts/prune-local-after-migration.ts"
+    "local:prune": "tsx scripts/prune-local-after-migration.ts",
+    "editor-state:repair": "tsx scripts/repair-editor-state-refs.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",

@@ -69,6 +69,14 @@ function ossClient() {
   });
 }
 
+/**
+ * `episodes.editor_state` 是一段 JSON，里面**内嵌**了素材引用（视频 url / BGM audioUrl /
+ * 缩略图）。它不是一个「列 = 一个引用」的结构，所以最初的审计漏掉了它 ——
+ * 结果是存量迁移改了列却没改这段 JSON，本地副本清理后用户保存的剪辑全部失效，
+ * 而审计还报全绿。必须一并扫描。
+ */
+const EDITOR_STATE_PATH_RE = /(?:\.\/)?uploads\/[^"\\\s]+/g;
+
 export async function runAudit(dbPath?: string): Promise<AuditReport> {
   const file = (dbPath ?? process.env.DATABASE_URL ?? "./data/aicomic.db").replace("file:", "");
   const db = new Database(file, { readonly: true });
@@ -112,6 +120,33 @@ export async function runAudit(dbPath?: string): Promise<AuditReport> {
       rows.push({ table, column, id, ref, kind: isOss ? "oss" : "local", exists });
     }
     byColumn.push({ table, column, total: records.length, missing, oss: ossCount });
+  }
+
+  // 时间线快照里的内嵌引用（见上方 EDITOR_STATE_PATH_RE 的说明）
+  try {
+    const snaps = db
+      .prepare(`SELECT id, editor_state AS state FROM episodes WHERE editor_state IS NOT NULL AND editor_state != ''`)
+      .all() as { id: string; state: string }[];
+    let missing = 0, ossCount = 0, total = 0;
+    for (const s of snaps) {
+      const locals = new Set(s.state.match(EDITOR_STATE_PATH_RE) ?? []);
+      const ossHits = s.state.match(/oss:\/\/[^"\\\s]+/g) ?? [];
+      for (const ref of ossHits) {
+        total++; ossCount++;
+        const exists = oss ? ossKeys.has(ref.slice("oss://".length)) : false;
+        if (!exists) missing++;
+        rows.push({ table: "episodes", column: "editor_state", id: s.id, ref, kind: "oss", exists });
+      }
+      for (const ref of locals) {
+        total++;
+        const exists = fs.existsSync(ref);
+        if (!exists) missing++;
+        rows.push({ table: "episodes", column: "editor_state", id: s.id, ref, kind: "local", exists });
+      }
+    }
+    byColumn.push({ table: "episodes", column: "editor_state", total, missing, oss: ossCount });
+  } catch {
+    /* 表/列不存在 */
   }
 
   db.close();
