@@ -166,6 +166,19 @@ export function runMigrations() {
 
     console.log(`[DB] Applying migration: ${entry.tag}`);
 
+    // ⚠️ 必须整体事务包裹。
+    //
+    // 真实事故（migration 0042）：文件里没有 statement-breakpoint，整份 SQL 作为
+    // 一块交给 exec()，序列是 CREATE shots_new → INSERT → DROP shots → RENAME。
+    // 无事务时第一次跑 CREATE 提交成功、INSERT 失败，留下一张空的 shots_new；
+    // 第二次跑 CREATE 报 "already exists" 被下面的 catch 吞掉，exec() 在第一句
+    // 就中止、后三句从未执行，**却照样被记录为「已应用」** ——
+    // 于是 emotion / framing / lighting_atm 三列永远留在了 shots 表里。
+    //
+    // 加上事务后，一份迁移要么整体生效、要么整体回滚，不会再留下半截状态。
+    sqlite.exec("BEGIN");
+    let committed = false;
+    try {
     for (const chunk of chunks) {
       try {
         sqlite.exec(chunk);
@@ -185,11 +198,24 @@ export function runMigrations() {
       }
     }
 
-    sqlite
-      .prepare(
-        "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
-      )
-      .run(hash, Date.now());
+      sqlite
+        .prepare(
+          "INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)"
+        )
+        .run(hash, Date.now());
+
+      sqlite.exec("COMMIT");
+      committed = true;
+    } finally {
+      // 任一语句抛出时整体回滚，绝不留下半截迁移
+      if (!committed) {
+        try {
+          sqlite.exec("ROLLBACK");
+        } catch {
+          /* 没有活跃事务时 ROLLBACK 会报错，忽略 */
+        }
+      }
+    }
   }
 
   console.log("[DB] Migrations complete.");
