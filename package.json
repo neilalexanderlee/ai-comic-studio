@@ -18,7 +18,8 @@
     "storage:audit": "tsx scripts/storage-audit.ts",
     "storage:migrate": "tsx scripts/storage-migrate.ts",
     "assets:prune": "tsx scripts/prune-orphan-assets.ts",
-    "oss:cors": "tsx scripts/oss-setup-cors.ts"
+    "oss:cors": "tsx scripts/oss-setup-cors.ts",
+    "proxies:backfill": "tsx scripts/backfill-preview-proxies.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",

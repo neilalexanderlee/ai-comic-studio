@@ -45,6 +45,7 @@ import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { shouldResolveMultimodalCharacterRefs } from "@/lib/ai/multimodal-refs";
 import { openBillingGate } from "@/lib/billing/gate";
+import { tryBuildPreviewProxy } from "@/lib/video/preview-proxy";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -3009,8 +3010,22 @@ async function handleSingleVideoGenerate(
       }
     }
 
+    // 预览代理：编辑器直接解码 1080p 源片会把音频解码线程饿死（MP4Clip.tick audio timeout）
+    // 并严重卡顿。转一份 480p 代理 + 封面帧，编辑器优先用它们。
+    // tryBuild 吞掉所有错误 —— 视频已经生成出来、钱也花了，不能因为转码失败就判整体失败。
+    const proxy = await tryBuildPreviewProxy(
+      result.filePath,
+      `${path.relative(process.env.UPLOAD_DIR || "./uploads", versionedUploadDir).replace(/\\/g, "/")}/previews`
+    );
+
     await db.update(shots)
-      .set({ videoUrl: result.filePath, status: "completed", videoResolution: resolution ?? null, ...singleLastFrameUpdate })
+      .set({
+        videoUrl: result.filePath,
+        status: "completed",
+        videoResolution: resolution ?? null,
+        ...(proxy && { previewUrl: proxy.previewUrl, posterUrl: proxy.posterUrl }),
+        ...singleLastFrameUpdate,
+      })
       .where(eq(shots.id, shotId));
 
     await billing.settle();

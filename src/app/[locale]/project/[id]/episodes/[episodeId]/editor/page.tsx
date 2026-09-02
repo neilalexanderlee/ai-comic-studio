@@ -100,6 +100,10 @@ interface Shot {
   sequence: number;
   prompt: string;
   videoUrl: string | null;
+  /** 低码率预览代理；编辑器优先用它，导出仍用 videoUrl */
+  previewUrl?: string | null;
+  /** 视频封面帧；anchorFirst 为空的分镜靠它显示缩略图 */
+  posterUrl?: string | null;
   duration: number;
   anchorFirst?: string | null;
   bgmNote?: string | null;

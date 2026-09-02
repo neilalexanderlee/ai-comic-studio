@@ -169,6 +169,18 @@ export const shots = sqliteTable("shots", {
   /** AI 尾帧公网 URL */
   anchorLastAiRemoteUrl: text("anchor_last_ai_remote_url"),
   videoUrl: text("video_url"),
+  /**
+   * 预览代理（低码率 480p）与封面帧。
+   *
+   * 编辑器在浏览器里解码源片会卡：源片是 1080p、单个可达 55MB，
+   * 主线程忙于解视频帧时音频解码线程会被饿死，报 `MP4Clip.tick audio timeout`。
+   * 实测 480p/CRF30 代理可把 55MB 压到 764KB（73x），加载 5.5s → 0.07s。
+   *
+   * 导出成片仍用原片 `videoUrl`，代理只服务于预览。
+   */
+  previewUrl: text("preview_url"),
+  /** 视频首帧封面（jpg）。没有 anchorFirst 的分镜靠它在编辑器里显示缩略图 */
+  posterUrl: text("poster_url"),
   remoteVideoUrl: text("remote_video_url"),
   remoteVideoTaskId: text("remote_video_task_id"),
   remoteVideoStatus: text("remote_video_status"),

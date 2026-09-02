@@ -17,6 +17,10 @@ interface Shot {
   sequence: number;
   prompt: string;
   videoUrl: string | null;
+  /** 低码率预览代理；编辑器优先用它，导出仍用 videoUrl */
+  previewUrl?: string | null;
+  /** 视频封面帧；anchorFirst 为空的分镜靠它显示缩略图 */
+  posterUrl?: string | null;
   duration: number;
   anchorFirst?: string | null;
 }
@@ -65,9 +69,11 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
     addClip(track.id, {
       type: "video",
       name: `分镜 ${shot.sequence}`,
-      url: shot.videoUrl,
+      // 预览优先用低码率代理：直接解码 1080p 源片会把音频解码线程饿死并严重卡顿。
+      // 导出时 render 路由用的是 shots.videoUrl 原片，画质不受影响。
+      url: shot.previewUrl || shot.videoUrl,
       shotId: shot.id,
-      thumbnailUrl: shot.anchorFirst ?? undefined,
+      thumbnailUrl: shot.anchorFirst ?? shot.posterUrl ?? undefined,
       startTime,
       duration: shot.duration || 10,
     });
@@ -94,7 +100,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
         name: `分镜 ${shot.sequence}`,
         url: shot.videoUrl!,
         shotId: shot.id,
-        thumbnailUrl: shot.anchorFirst ?? undefined,
+        thumbnailUrl: shot.anchorFirst ?? shot.posterUrl ?? undefined,
         startTime: cursor,
         duration,
       });
@@ -217,9 +223,9 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                   onClick={() => addVideoClip(shot)}
                   title="点击添加到时间线"
                 >
-                  {shot.anchorFirst ? (
+                  {(shot.anchorFirst ?? shot.posterUrl) ? (
                     <img
-                      src={uploadUrl(shot.anchorFirst)}
+                      src={uploadUrl((shot.anchorFirst ?? shot.posterUrl)!)}
                       className="h-10 w-16 shrink-0 rounded object-cover"
                       alt=""
                     />
