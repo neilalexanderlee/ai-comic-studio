@@ -68,6 +68,16 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
   const avCanvasTimeRef = useRef(0);
   const isPlayingRef = useRef(false);
+  /**
+   * 当前这轮 syncSprites 的 promise。
+   *
+   * syncSprites 是异步的：每个 clip 都要 fetch + 构建 MP4Clip（迁到 OSS 后还要走网络）。
+   * 素材尚未全部 addSprite 就调 avCanvas.play()，播放器会播到「已加载内容的末尾」
+   * 就触发 ended —— 表现为「第一次点播放，播一会儿进度归零并停止，第二次才正常」。
+   * 所以 handlePlay 必须先 await 这个 promise。
+   */
+  const syncPromiseRef = useRef<Promise<void> | null>(null);
+  const [spritesLoading, setSpritesLoading] = useState(false);
 
   const tracks = useEditorStore((s) => s.tracks);
   const playhead = useEditorStore((s) => s.playhead);
@@ -384,7 +394,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     .join("|");
 
   useEffect(() => {
-    syncSprites();
+    syncPromiseRef.current = syncSprites();
   }, [tracksKey]);
 
   async function syncSprites() {
@@ -395,6 +405,8 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     const abort = new AbortController();
     syncAbortRef.current = abort;
 
+    setSpritesLoading(true);
+    try {
     const spriteMap = spriteMapRef.current;
     const snapshotMap = clipSnapshotRef.current;
 
@@ -480,6 +492,10 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
     if (!abort.signal.aborted && !isPlaying) {
       await avCanvas.previewFrame(playhead * 1e6).catch(() => {});
+    }
+    } finally {
+      // 只有仍是当前这轮才收起 loading（被后一轮 abort 时不要误清）
+      if (syncAbortRef.current === abort) setSpritesLoading(false);
     }
   }
 
@@ -597,7 +613,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   }, [playhead]);
 
   // ── 播放控制 ────────────────────────────────────────────────────────────────
-  function handlePlay() {
+  async function handlePlay() {
     const avCanvas = avCanvasRef.current;
     if (!avCanvas || total === 0) return;
 
@@ -606,6 +622,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       isPlayingRef.current = false;
       setPlaying(false);
     } else {
+      // 必须等素材全部就绪再播 —— 否则会播到「已加载部分的末尾」就触发 ended，
+      // 进度归零并停止（用户看到的是「第一次点播放会中途停下」）
+      await syncPromiseRef.current;
+      if (!avCanvasRef.current) return;
+
       const start = playhead >= total ? 0 : playhead;
       if (start === 0 && playhead >= total) {
         avCanvasTimeRef.current = 0;
@@ -762,10 +783,17 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           </button>
           <button
             onClick={handlePlay}
-            disabled={total === 0}
+            disabled={total === 0 || spritesLoading}
+            title={spritesLoading ? "素材加载中…" : undefined}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black hover:bg-white/90 disabled:opacity-40"
           >
-            {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-0.5" />}
+            {spritesLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="h-4 w-4" />
+            ) : (
+              <Play className="h-4 w-4 translate-x-0.5" />
+            )}
           </button>
           <button
             onClick={() => handleSeek(total)}

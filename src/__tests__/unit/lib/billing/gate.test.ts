@@ -16,6 +16,11 @@ async function freshGate() {
   return await import("@/lib/billing/gate");
 }
 
+// vi.resetModules() 后重新 import 会把整条依赖链（db / drizzle）重新求值，
+// 实测单次约 3 秒，机器一忙就会超过 vitest 默认的 5 秒。
+// 慢在模块加载本身、与断言无关，所以给这一组显式放宽超时，而不是让它偶发 flaky。
+const SLOW_IMPORT_TIMEOUT = 30_000;
+
 describe("计费闸门默认关闭", () => {
   afterEach(() => vi.unstubAllEnvs());
 
@@ -23,7 +28,7 @@ describe("计费闸门默认关闭", () => {
     vi.stubEnv("BILLING_ENABLED", "");
     const { isBillingEnabled } = await freshGate();
     expect(isBillingEnabled()).toBe(false);
-  });
+  }, SLOW_IMPORT_TIMEOUT);
 
   it.each(["0", "false", "true", "yes", "on", ""])(
     'BILLING_ENABLED="%s" 不应启用（只认字面量 "1"）',
@@ -31,14 +36,15 @@ describe("计费闸门默认关闭", () => {
       vi.stubEnv("BILLING_ENABLED", val);
       const { isBillingEnabled } = await freshGate();
       expect(isBillingEnabled()).toBe(false);
-    }
+    },
+    SLOW_IMPORT_TIMEOUT
   );
 
   it('只有 BILLING_ENABLED="1" 才启用', async () => {
     vi.stubEnv("BILLING_ENABLED", "1");
     const { isBillingEnabled } = await freshGate();
     expect(isBillingEnabled()).toBe(true);
-  });
+  }, SLOW_IMPORT_TIMEOUT);
 
   it("关闭时 openBillingGate 返回空操作，且不触碰数据库", async () => {
     vi.stubEnv("BILLING_ENABLED", "");
@@ -57,7 +63,7 @@ describe("计费闸门默认关闭", () => {
     expect(gate.credits).toBe(0);
     await expect(gate.settle()).resolves.toBeUndefined();
     await expect(gate.refund("x")).resolves.toBeUndefined();
-  });
+  }, SLOW_IMPORT_TIMEOUT);
 
   it("关闭时不会因为用户不存在 / 余额为 0 而返回 402", async () => {
     vi.stubEnv("BILLING_ENABLED", "");
@@ -66,5 +72,5 @@ describe("计费闸门默认关闭", () => {
       const gate = await openBillingGate("user-with-no-account", { kind });
       expect(gate.ok, `${kind} 在计费关闭时不应被拦截`).toBe(true);
     }
-  });
+  }, SLOW_IMPORT_TIMEOUT);
 });
