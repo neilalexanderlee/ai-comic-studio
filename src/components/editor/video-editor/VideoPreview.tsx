@@ -792,7 +792,9 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
             ) : isPlaying ? (
               <Pause className="h-4 w-4" />
             ) : (
-              <Play className="h-4 w-4 translate-x-0.5" />
+              // lucide 的 Play 路径本身就偏右（x 5→20.008，几何中心 12.5 vs viewBox 的 12），
+              // 再推 2px 会明显偏出圆心；1px 刚好补上三角形视觉重心偏左的错觉
+              <Play className="h-4 w-4 translate-x-px" />
             )}
           </button>
           <button
