@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api-fetch";
 import { toast } from "sonner";
-import { X, Loader2, Camera, Plus, Trash2, RotateCw, Play, Pause, Film, Diamond } from "lucide-react";
+import { X, Loader2, Camera, Plus, Trash2, RotateCw, Play, Pause, Film, Diamond, PenLine } from "lucide-react";
 import { useStageRenderer } from "./use-stage-renderer";
 import {
   DEFAULT_FIGURE_HEIGHT,
@@ -30,6 +30,7 @@ import {
   type StageFigure,
 } from "@/lib/previz/stage-types";
 import { chestHeight, eyeHeight } from "@/lib/previz/humanoid";
+import { buildPrevizWriteback, type PrevizWriteback } from "@/lib/previz/describe";
 
 const POSE_LABEL: Record<FigurePose, string> = {
   stand: "站",
@@ -55,6 +56,9 @@ interface PrevizStageProps {
   anchorFirst?: string | null;
   /** 本集其他分镜的帧，供换背景用 */
   backdropCandidates?: { id: string; sequence: number; url: string }[];
+  /** 本镜现有的帧描述与运镜说明 —— 回写时要在它们之上做外科手术式替换 */
+  startFrameDesc?: string | null;
+  cameraDirection?: string | null;
   onClose: () => void;
   onUpdate: () => void;
 }
@@ -73,6 +77,8 @@ export function PrevizStage({
   duration,
   anchorFirst,
   backdropCandidates = [],
+  startFrameDesc,
+  cameraDirection,
   onClose,
   onUpdate,
 }: PrevizStageProps) {
@@ -95,6 +101,8 @@ export function PrevizStage({
    * 会把 0s 也一起改掉，首尾变成同一个机位，运镜视频等于静止画面。这个坑实测踩过。
    */
   const [editingT, setEditingT] = useState(0);
+  /** 回写面板。null = 未打开。打开时装着**可编辑**的草稿，应用前不碰数据库。 */
+  const [writeback, setWriteback] = useState<(PrevizWriteback & { applying: boolean }) | null>(null);
   const aspect = ratioToAspect(videoRatio);
 
   // ── 载入 ────────────────────────────────────────────────────────────────
@@ -445,6 +453,48 @@ export function PrevizStage({
     }
   }
 
+  /**
+   * 打开回写面板。**只算，不写** —— 结果放进可编辑的草稿里给用户过目。
+   *
+   * `startFrameDesc` 是帧生成的唯一事实来源（约定 14），里面的光影与情绪子句
+   * 是这里算不出来的。静默覆盖等于不可逆的数据损失，所以必须经这一步。
+   */
+  function openWriteback() {
+    if (!scene || !blocking) return;
+    setWriteback({
+      ...buildPrevizWriteback({
+        scene,
+        blocking,
+        duration,
+        existingStartFrameDesc: startFrameDesc,
+        existingCameraDirection: cameraDirection,
+      }),
+      applying: false,
+    });
+  }
+
+  async function applyWriteback() {
+    if (!writeback) return;
+    setWriteback({ ...writeback, applying: true });
+    try {
+      const res = await apiFetch(`/api/projects/${projectId}/shots/${shotId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          startFrameDesc: writeback.startFrameDesc,
+          cameraDirection: writeback.cameraDirection,
+        }),
+      });
+      if (!res.ok) throw new Error("写入失败");
+      toast.success("机位与景别已写回分镜");
+      setWriteback(null);
+      onUpdate();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "写回失败");
+      setWriteback((w) => (w ? { ...w, applying: false } : w));
+    }
+  }
+
   const loading = !scene || !blocking;
   const selPlacement = editingFrame?.placements.find((p) => p.figureId === selectedFigureId);
   const selFigure = scene?.figures.find((f) => f.id === selectedFigureId);
@@ -459,6 +509,16 @@ export function PrevizStage({
         </span>
         <div className="ml-auto flex items-center gap-2">
           {/* 深色面板上不能用默认的 outline 配色：那是给浅色背景设计的，文字会隐形 */}
+          <Button
+            size="xs"
+            variant="outline"
+            onClick={openWriteback}
+            disabled={loading}
+            className="border-white/25 bg-transparent text-white hover:bg-white/10 hover:text-white"
+          >
+            <PenLine className="h-3 w-3" />
+            回写机位与景别
+          </Button>
           <Button
             size="xs"
             variant="outline"
@@ -914,6 +974,74 @@ export function PrevizStage({
           </div>
         </div>
       </div>
+
+      {/* 回写面板 —— 算出来的两段文本在这里可编辑，确认后才落库 */}
+      {writeback && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/70 p-6">
+          <div className="flex max-h-full w-[680px] max-w-full flex-col overflow-hidden rounded-xl border border-white/15 bg-[#16161c] text-white">
+            <div className="flex items-center gap-2 border-b border-white/10 px-4 py-2.5">
+              <PenLine className="h-3.5 w-3.5 text-white/60" />
+              <span className="text-sm font-medium">回写机位与景别</span>
+              <button
+                onClick={() => setWriteback(null)}
+                className="ml-auto flex h-6 w-6 items-center justify-center rounded text-white/50 hover:bg-white/10 hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[11px]">
+              <ul className="mb-3 space-y-1 rounded-lg bg-white/5 px-3 py-2 text-white/55">
+                {writeback.notes.map((n, i) => (
+                  <li key={i}>· {n}</li>
+                ))}
+              </ul>
+
+              <p className="mb-1 text-white/70">首帧描述（只替换机位与景别两个子句）</p>
+              {startFrameDesc && (
+                <p className="mb-1 rounded bg-white/5 px-2 py-1 leading-relaxed text-white/35 line-through decoration-white/20">
+                  {startFrameDesc}
+                </p>
+              )}
+              <textarea
+                value={writeback.startFrameDesc}
+                onChange={(e) => setWriteback((w) => (w ? { ...w, startFrameDesc: e.target.value } : w))}
+                rows={5}
+                className="mb-4 w-full resize-y rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 leading-relaxed outline-none focus:border-white/35"
+              />
+
+              <p className="mb-1 text-white/70">
+                运镜说明
+                <span className="ml-1 text-white/35">叙事目的算不出来，需要你自己写</span>
+              </p>
+              {cameraDirection && (
+                <p className="mb-1 rounded bg-white/5 px-2 py-1 leading-relaxed text-white/35 line-through decoration-white/20">
+                  {cameraDirection}
+                </p>
+              )}
+              <textarea
+                value={writeback.cameraDirection}
+                onChange={(e) => setWriteback((w) => (w ? { ...w, cameraDirection: e.target.value } : w))}
+                rows={3}
+                className="w-full resize-y rounded-lg border border-white/15 bg-black/30 px-2 py-1.5 leading-relaxed outline-none focus:border-white/35"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-white/10 px-4 py-2.5">
+              <span className="text-[10px] text-white/40">姿态、光影、情绪三个子句原样保留</span>
+              <Button
+                size="xs"
+                className="ml-auto"
+                onClick={applyWriteback}
+                disabled={writeback.applying}
+              >
+                {writeback.applying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                写入分镜
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -615,6 +615,8 @@ export function ShotDrawer({
             layoutUrl={shot.previzLayoutUrl}
             shotDuration={shot.duration}
             anchorFirst={shot.anchorFirst}
+            startFrameDesc={shot.startFrameDesc}
+            cameraDirection={shot.cameraDirection}
             backdropCandidates={frameRefShots
               .filter((f) => f.anchorFirst && f.id !== shot.id)
               .map((f) => ({ id: f.id, sequence: f.sequence, url: f.anchorFirst! }))}

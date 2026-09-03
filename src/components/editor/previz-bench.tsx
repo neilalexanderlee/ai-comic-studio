@@ -44,6 +44,9 @@ interface PrevizBenchProps {
   anchorFirst?: string | null;
   /** 本集其他分镜的首帧，供换背景 */
   backdropCandidates?: { id: string; sequence: number; url: string }[];
+  /** 本镜现有帧描述与运镜说明 —— 导演台把机位与景别回写进它们 */
+  startFrameDesc?: string | null;
+  cameraDirection?: string | null;
   onPreview: (src: string) => void;
   onUpdate: () => void;
 }
@@ -68,6 +71,8 @@ export function PrevizBench({
   shotDuration = 5,
   anchorFirst,
   backdropCandidates,
+  startFrameDesc,
+  cameraDirection,
   onPreview,
   onUpdate,
 }: PrevizBenchProps) {
@@ -298,6 +303,8 @@ export function PrevizBench({
           duration={shotDuration}
           anchorFirst={anchorFirst}
           backdropCandidates={backdropCandidates}
+          startFrameDesc={startFrameDesc}
+          cameraDirection={cameraDirection}
           onClose={() => setStageOpen(false)}
           onUpdate={onUpdate}
         />
