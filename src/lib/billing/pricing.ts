@@ -29,6 +29,10 @@ export type BillableKind = "image" | "video" | "music" | "text";
 const VIDEO_COST_PER_SECOND_YUAN: { match: string; cost: number }[] = [
   // 更具体的排前面（与 video-capabilities 的家族匹配同一原则）
   { match: "seedance-2-5", cost: 2.0 },
+  // 官方计价页（元/百万 tokens）：2.0 = 28，fast = 16.5，mini = 5.6（均为「包含视频输入」档）。
+  // mini / 2.0 = 5.6/28 = 0.2；「不含视频输入」档同样是 9.2/46 = 0.2 —— 两档比例一致，
+  // 所以直接按 2.0 的五分之一换算。
+  { match: "seedance-2-0-mini", cost: 0.2 },
   { match: "seedance-2-0-fast", cost: 0.5 },
   { match: "seedance-2-0", cost: 1.0 },
   { match: "seedance-1-5-lite", cost: 0.4 },
@@ -46,6 +50,7 @@ const RESOLUTION_MULTIPLIER: Record<string, number> = {
   "1080p": 5.06,  // (1920×1080) / (854×480)
   "768P": 2.4,
   "2K": 9,
+  "4k": 20.25,    // (3840×2160) / (854×480)
 };
 
 /** 单张图片的上游成本（元） */

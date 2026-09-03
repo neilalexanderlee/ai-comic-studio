@@ -173,7 +173,11 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
     modelIds: ["doubao-seedance-2-0-260128"],
     families: ["seedance-2-0"],
     duration: { min: 4, max: 15, auto: true },
-    resolutions: ["480p", "720p"],
+    // 官方文档：480P / 720P / 1080P / 4k。此前表里只写了前两档 ——
+    // 少声明的后果是用户在分镜页的分辨率选择器里**根本看不到 1080P**，而它是支持的。
+    // ⚠️ 4K 另有独立限流口径（RPM 0.015k、并发独享 1；非 4K 是 0.18k、共享 3）。
+    // 本表没有表达限流的字段，超了会拿到上游 429 —— 信息明确，不是静默问题。
+    resolutions: ["480p", "720p", "1080p", "4k"],
     outputFormats: ["mp4"],
   },
   {
@@ -183,10 +187,8 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
     modelIds: ["doubao-seedance-2-0-mini-260615"],
     // 必须比 "seedance-2-0" 更长更具体，家族匹配才会优先命中这一条（FAMILY_ORDER 取更长者）
     families: ["seedance-2-0-mini"],
-    // ⚠️ 时长与分辨率**沿用 2.0**，未经官方文档确认。
-    // 方舟的参数校验错误只说"not valid"、不枚举合法值，实测同一取值两次结论相反，
-    // 反推不可靠 —— 与其写一组猜出来的数字（能力表是唯一事实来源，写错会造成静默 clamp），
-    // 不如按同代 2.0 保守取值。拿到官方文档后改这两行即可。
+    // 官方文档确认：4~15s / 480P、720P / 24fps —— 与同代 2.0 的时长一致，
+    // 但分辨率封顶在 720P（2.0 可到 4k）。
     duration: { min: 4, max: 15, auto: true },
     resolutions: ["480p", "720p"],
     outputFormats: ["mp4"],
