@@ -43,6 +43,9 @@ const NO_AUTH_ALLOWLIST: Record<string, string> = {
   "prompt-templates/registry/route.ts": "只返回内置提示词注册表常量，不读任何用户数据",
   "prompt-templates/preview/route.ts": "纯函数：按传入 slots 拼装提示词，不读库不调用 AI",
   "prompt-templates/validate/route.ts": "纯函数：校验提示词模板格式，不读库不调用 AI",
+  "billing/callback/[channel]/route.ts":
+    "支付渠道异步回调：请求来自渠道服务器而不是浏览器，没有用户会话。" +
+    "身份由渠道签名证明（verifySignature），入账本身幂等（UNIQUE(channel, channel_trade_no) 兜底）。",
 };
 
 function listRouteFiles(dir: string, acc: string[] = []): string[] {

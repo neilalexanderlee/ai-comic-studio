@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
@@ -495,17 +495,115 @@ export const trackVideos = sqliteTable("track_videos", {
 //      任何余额变动都必须写一条流水；不允许只改 credit_accounts 不写流水。
 //   3. usage_records 记录每次调用的上游真实用量，用于事后核对报价是否偏离成本。
 
-/** 用户积分账户。balance = 可用余额，frozen = 已预扣但未结算的部分 */
+/**
+ * 用户积分账户。
+ *
+ * ## 为什么是「双余额」而不是单一余额
+ *
+ * 订阅赠送的积分**周期末清零**，加油包买的积分**永不过期** —— 两种寿命，
+ * 单个 balance 字段表达不了。
+ *
+ * 标准解法是积分批次（每次发放建一个 lot，带 remaining + expiresAt，按到期日先扣）。
+ * 但批次有个真实复杂度：**退款必须退回原批次**，否则可以套利 —— 用会过期的积分预扣、
+ * 取消、退进永久桶，把订阅积分洗成永久积分。
+ *
+ * 而在本项目里，**同一时刻最多只有一个会过期的桶**（当前订阅周期），
+ * 批次就退化成「一个字段 + 一个到期时间」。所以取双余额：拿到批次方案 90% 的正确性、
+ * 20% 的复杂度。
+ *
+ * ⚠️ 代价：将来若要卖「90 天有效的促销积分」（多个不同到期日并存），双余额就不够了。
+ * 缓解办法是 `usage_records.reservedFromSubscription` 记下每次预扣的拆分，
+ * 届时迁到批次是机械转换。
+ */
 export const creditAccounts = sqliteTable("credit_accounts", {
   userId: text("user_id").primaryKey(),
-  /** 可用余额（积分，1 积分 = ¥0.01 面值） */
+  /** 永久余额（充值/加油包/后台赠送）。1 积分 = ¥0.01 面值 */
   balance: integer("balance").notNull().default(0),
-  /** 冻结中（已预扣、等待结算或退还） */
+  /** 冻结中（已预扣、等待结算或退还）。不区分来源，退还时按 usage_records 的拆分还原 */
   frozen: integer("frozen").notNull().default(0),
+  /** 本订阅周期发放、周期末清零的积分 */
+  subscriptionBalance: integer("subscription_balance").notNull().default(0),
+  /** subscriptionBalance 的失效时刻。到点后由 ensureSubscriptionPeriod 惰性清零 */
+  subscriptionExpiresAt: integer("subscription_expires_at", { mode: "timestamp" }),
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
+
+/**
+ * 订阅。一个用户同时只有一条（`userId` 唯一）。
+ *
+ * 周期滚动是**惰性**的：没有 cron，`ensureSubscriptionPeriod()` 在闸门和余额读取处调用，
+ * 发现 periodEnd 已过就在一个事务里「清零旧周期 + 发放新周期」。这个项目没有 worker
+ * 基础设施，惰性滚动比引入调度器现实得多，而且天然幂等。
+ */
+export const subscriptions = sqliteTable("subscriptions", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().unique(),
+  /** 对应 src/lib/billing/plans.ts 的 Plan.code。刻意不建 plans 表，见该文件注释 */
+  planCode: text("plan_code").notNull(),
+  status: text("status", { enum: ["active", "canceled", "expired"] })
+    .notNull()
+    .default("active"),
+  periodStart: integer("period_start", { mode: "timestamp" }).notNull(),
+  periodEnd: integer("period_end", { mode: "timestamp" }).notNull(),
+  /** 付费档到期后是否自动续期。免费档恒为 true（无限续） */
+  autoRenew: integer("auto_renew").notNull().default(1),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/**
+ * 订单。
+ *
+ * 状态机：`pending` → `paid`（回调）/ `closed`（超时）；`paid` → `refunded`。
+ *
+ * **发放积分与状态迁移必须在同一个事务里** —— 支付回调重试是常态，分两步做必然重复发放。
+ * `UNIQUE(channel, channel_trade_no)` 是数据库层的兜底：即使逻辑有漏也拒得掉第二次。
+ *
+ * 价格与积分在下单时**快照**进本表，所以之后改 plans.ts 的定价不影响历史订单。
+ */
+export const orders = sqliteTable(
+  "orders",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    /** subscription=订阅套餐  topup=加油包 */
+    kind: text("kind", { enum: ["subscription", "topup"] }).notNull(),
+    /** Plan.code 或 CreditPack.code */
+    planCode: text("plan_code").notNull(),
+    /** 下单时的价格快照（分） */
+    amountCents: integer("amount_cents").notNull(),
+    /** 下单时的积分快照 */
+    creditsGranted: integer("credits_granted").notNull(),
+    /** mock=本地测试通道；真实渠道待商户号到位 */
+    channel: text("channel").notNull().default("mock"),
+    status: text("status", { enum: ["pending", "paid", "closed", "refunded"] })
+      .notNull()
+      .default("pending"),
+    /** 我方订单号，展示与对账用 */
+    outTradeNo: text("out_trade_no").notNull().unique(),
+    /** 渠道流水号。与 channel 一起构成幂等键 */
+    channelTradeNo: text("channel_trade_no"),
+    /** 超时关闭时刻 */
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    paidAt: integer("paid_at", { mode: "timestamp" }),
+    /** 原始回调报文，留档备查 */
+    rawCallback: text("raw_callback"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .$defaultFn(() => new Date()),
+  },
+  (t) => ({
+    // 回调幂等的硬保证：同一渠道的同一笔流水只能入账一次
+    channelTradeUnique: uniqueIndex("orders_channel_trade_uq").on(t.channel, t.channelTradeNo),
+    userCreatedIdx: index("orders_user_created_idx").on(t.userId, t.createdAt),
+  })
+);
 
 /** 积分流水（只追加，不修改不删除） */
 export const creditLedger = sqliteTable("credit_ledger", {
@@ -547,6 +645,14 @@ export const usageRecords = sqliteTable("usage_records", {
   creditsCharged: integer("credits_charged").notNull().default(0),
   /** 上游返回的真实用量（如 Seedance 的 completion_tokens） */
   upstreamUsage: integer("upstream_usage"),
+  /**
+   * 本次预扣中，从**会过期的订阅余额**里扣了多少（其余来自永久余额）。
+   *
+   * 退还时必须按这个拆分原路退回 —— 否则可以套利：用订阅积分预扣、取消、
+   * 退进永久桶，把会过期的积分洗成永久的。
+   * 它同时也是将来迁移到「积分批次」方案时的依据。
+   */
+  reservedFromSubscription: integer("reserved_from_subscription").notNull().default(0),
   /** reserved / settled / refunded */
   status: text("status").notNull().default("reserved"),
   createdAt: integer("created_at", { mode: "timestamp" })
