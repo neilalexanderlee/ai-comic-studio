@@ -5,6 +5,7 @@ import { ProviderSection } from "@/components/settings/provider-section";
 import { AiMediaKitSection } from "@/components/settings/ai-mediakit-section";
 import { ArkAssetLibrarySection } from "@/components/settings/ark-asset-library-section";
 import { AuthSection } from "@/components/settings/auth-section";
+import { BillingSection } from "@/components/settings/billing-section";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music, ShieldCheck } from "lucide-react";
@@ -38,6 +39,9 @@ export default function SettingsPage() {
 
       <main className="flex-1 bg-[--surface] p-4 lg:p-6">
         <div className="mx-auto max-w-4xl animate-page-in space-y-5">
+          {/* 账户与套餐 —— 未启用计费时组件自己返回 null，整块不渲染 */}
+          <BillingSection />
+
           {/* Default model selection */}
           <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
             <h3 className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
