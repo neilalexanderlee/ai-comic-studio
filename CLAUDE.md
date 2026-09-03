@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 59` — `0059_shot_previz`
+**当前最新迁移索引**：`idx 60` — `0060_previz_stage`
 
 ### 关键表
 
@@ -201,6 +201,8 @@ VideoProvider    // generateVideo
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`previewUrl`/`posterUrl`（480p 预览代理与封面，migration 0058）；`previzSelectedId`（已选用的白模预演，migration 0059）；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
+| `episodes.previz_scene` | 3D 导演台的**场景**（JSON）：一集搭好的景 + 出场演员身形，跨镜共用。只有数字，不内嵌素材路径 |
+| `shots.previz_blocking` / `previz_layout_url` | 本镜的走位与机位（JSON，参数化机位：主体/方位角/距离/高度/焦距）；以及导演台导出的构图参考图 |
 | `shot_previz` | 白模预演 take（一个分镜可多条）；`videoUrl`/`posterUrl`/`prompt`/`modelId`/`duration`/`resolution`。选中的那条由 `shots.previzSelectedId` 指向，正式生成时作为 `reference_video` 传给 Seedance 2.5 |
 | `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
@@ -558,6 +560,32 @@ seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、k
 （窗口对齐是为浏览器缓存服务的；上游排队后才来拉，TTL 卡紧会变成任务启动后才报的异步错误），
 作为 `@视频N` 加入 `multimodalRefs`。**每条拒绝路径都必须给出理由**并经 `capabilityNotes` 回传前端 ——
 用户点过"选用这条运镜"却毫无关系地出片，是最难排查的一类问题。
+
+### 8h. 3D 导演台 —— 机位是算出来的，不是让 LLM 猜的
+
+`src/components/editor/previz-stage/` + `src/lib/previz/stage-types.ts`。
+
+**它和预演台的分工**：预演台回答「模型会怎么理解我的运镜」，导演台回答「运镜到底该是什么」。
+后者原本靠 LLM 凭空写 `startFrameDesc` 的第一要素（机位空间坐标）—— 那是 LLM 最不擅长的，
+所以约定 14 才要用那么大篇幅去约束它。3D 摆位是确定的、免费的、秒级的。
+
+**机位刻意不是自由 6 自由度**，而是相对某个主体的极坐标（`CameraRig`：
+主体 / 方位角 / 距离 / 机位高度 / 焦距）。因为约定 14 要的就是
+「摄影机在[主体][方位][距离]，镜头高度[身体部位]」这四个量 —— 存自由位姿的话回写时
+还得反解「它在谁的什么方位」，而多人场景里这个反解是有歧义的。
+
+**景别是算出来的**：`distanceForShotSize` / `shotSizeForDistance` 双向换算，
+所以景别词与机位坐标永远自洽，不会出现「写着近景、机位却在 8 米外」。
+
+**盒体人偶，不引外部模型资源**：零授权问题，且场景 JSON 里不会出现素材路径 ——
+`editor_state` 正是因为内嵌路径给存储脚本留下了扫描盲区（见 `verify-editor-state-refs.ts`）。
+
+**导出的构图图写进 `shots.previz_layout_url`，刻意不写 `anchor_first`**：
+后者是真要送去生成视频的首帧，被一张灰盒渲染图覆盖是不可逆的。
+
+**当前进度**：P1（摆位 + 存取 + 导出构图图）已完成。P2（确定性回写 startFrameDesc
+第一要素与 cameraDirection 起落幅）、P3（相机关键帧 → 本地渲染灰模视频 → 写 `shot_previz`，
+复用预演台已有的「选用 → @视频N → 正式生成」链路）尚未开始。
 
 ### 9. Drizzle null 比较
 

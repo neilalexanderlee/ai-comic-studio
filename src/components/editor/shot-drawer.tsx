@@ -69,6 +69,8 @@ interface DrawerShot {
   remoteVideoExpiresAt?: string | Date | null;
   remoteVideoLastDownloadAt?: string | Date | null;
   videoResolution?: string | null;
+  /** 3D 导演台导出的构图参考图 */
+  previzLayoutUrl?: string | null;
   dialogues: Dialogue[];
   chainSourceShotId?: string | null;
   /** "strict_start"=像素级严格首帧承接；"reference_redraw"/null=普通。决定视频生成用 initialImage 还是 multimodal 模式 */
@@ -101,6 +103,8 @@ interface ShotDrawerProps {
   chainSourceType?: string | null;
   /** 本镜命名角色数量，用于动态计算用户可手选的参考图上限 */
   namedCharacterCount?: number;
+  /** 本镜出场的具名角色（3D 导演台首次打开时据此自动建演员） */
+  shotCharacters?: { id: string; name: string }[];
 }
 
 export function ShotDrawer({
@@ -124,6 +128,7 @@ export function ShotDrawer({
   chainSourceSequence = null,
   chainSourceType = null,
   namedCharacterCount = 0,
+  shotCharacters = [],
 }: ShotDrawerProps) {
   const t = useTranslations();
   const getModelConfig = useModelStore((s) => s.getModelConfig);
@@ -605,6 +610,9 @@ export function ShotDrawer({
           {/* Step 3.5: 预演台 —— 便宜地把运镜先验一遍，再去跑贵的正式生成 */}
           <PrevizBench
             projectId={projectId}
+            episodeId={episodeId}
+            shotCharacters={shotCharacters}
+            layoutUrl={shot.previzLayoutUrl}
             shotId={shot.id}
             videoRatio={videoRatio}
             versionId={selectedVersionId ?? undefined}

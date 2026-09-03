@@ -1127,9 +1127,10 @@ export default function EpisodeStoryboardPage() {
         const chainSourceSequence = drawerShot?.chainSourceShotId
           ? project.shots.find((s) => s.id === drawerShot.chainSourceShotId)?.sequence ?? null
           : null;
-        const drawerNamedCharacterCount = drawerShot
-          ? filterShotCharacters(buildShotCharacterText(drawerShot), project.characters).length
-          : 0;
+        const drawerNamedCharacters = drawerShot
+          ? filterShotCharacters(buildShotCharacterText(drawerShot), project.characters)
+          : [];
+        const drawerNamedCharacterCount = drawerNamedCharacters.length;
         return (
           <ShotDrawer
             shots={drawerShots}
@@ -1160,6 +1161,7 @@ export default function EpisodeStoryboardPage() {
             chainSourceSequence={chainSourceSequence}
             chainSourceType={drawerShot?.chainSourceType ?? null}
             namedCharacterCount={drawerNamedCharacterCount}
+            shotCharacters={drawerNamedCharacters.map((c) => ({ id: c.id, name: c.name }))}
           />
         );
       })()}

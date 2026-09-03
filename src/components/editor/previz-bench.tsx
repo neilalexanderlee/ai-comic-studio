@@ -8,7 +8,14 @@ import { useModelStore } from "@/stores/model-store";
 import { useModelGuard } from "@/hooks/use-model-guard";
 import { resolveVideoCapability } from "@/lib/ai/video-capabilities";
 import { toast } from "sonner";
-import { Loader2, Clapperboard, Check, Trash2, Play } from "lucide-react";
+import { Loader2, Clapperboard, Check, Trash2, Play, Box } from "lucide-react";
+import dynamic from "next/dynamic";
+
+// three.js 约 600KB，只有真的打开导演台才值得加载
+const PrevizStage = dynamic(
+  () => import("./previz-stage/PrevizStage").then((m) => m.PrevizStage),
+  { ssr: false }
+);
 
 interface PrevizTake {
   id: string;
@@ -21,11 +28,16 @@ interface PrevizTake {
 
 interface PrevizBenchProps {
   projectId: string;
+  episodeId?: string;
   shotId: string;
   videoRatio: string;
   versionId?: string;
   /** 页面级"有别的生成在跑"标记 */
   anyGenerating?: boolean;
+  /** 本镜出场的具名角色，3D 导演台首次打开时据此自动建演员 */
+  shotCharacters?: { id: string; name: string }[];
+  /** 已存在的构图参考图（3D 导演台导出的相机视图） */
+  layoutUrl?: string | null;
   onPreview: (src: string) => void;
   onUpdate: () => void;
 }
@@ -40,13 +52,17 @@ interface PrevizBenchProps {
  */
 export function PrevizBench({
   projectId,
+  episodeId,
   shotId,
   videoRatio,
   versionId,
   anyGenerating,
+  shotCharacters = [],
+  layoutUrl,
   onPreview,
   onUpdate,
 }: PrevizBenchProps) {
+  const [stageOpen, setStageOpen] = useState(false);
   const getModelConfig = useModelStore((s) => s.getModelConfig);
   const videoGuard = useModelGuard("video");
 
@@ -214,6 +230,29 @@ export function PrevizBench({
         </div>
       )}
 
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        {episodeId && (
+          <Button size="xs" variant="outline" onClick={() => setStageOpen(true)}>
+            <Box className="h-3 w-3" />
+            3D 导演台
+          </Button>
+        )}
+        {layoutUrl && (
+          <button
+            type="button"
+            onClick={() => onPreview(uploadUrl(layoutUrl))}
+            className="h-10 overflow-hidden rounded border border-[--border-subtle]"
+            title="3D 导演台导出的构图参考图"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={uploadUrl(layoutUrl)} alt="构图参考" className="h-full w-auto object-cover" />
+          </button>
+        )}
+        <span className="text-[10px] text-[--text-muted]">
+          先摆机位与走位（免费、即时），再决定要不要花钱验
+        </span>
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="xs"
@@ -236,8 +275,20 @@ export function PrevizBench({
 
       {selectedId && !supportsReferenceVideo && (
         <p className="mt-1.5 text-[10px] text-amber-600">
-          当前模型不支持参考视频，已选用的运镜不会参与正式生成（需 Seedance 2.5）。
+          当前模型不支持参考视频，已选用的运镜不会参与正式生成（需 Seedance 2.5 或 2.0 mini）。
         </p>
+      )}
+
+      {stageOpen && episodeId && (
+        <PrevizStage
+          projectId={projectId}
+          episodeId={episodeId}
+          shotId={shotId}
+          shotCharacters={shotCharacters}
+          videoRatio={videoRatio}
+          onClose={() => setStageOpen(false)}
+          onUpdate={onUpdate}
+        />
       )}
     </section>
   );

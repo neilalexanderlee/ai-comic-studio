@@ -42,6 +42,18 @@ export const episodes = sqliteTable("episodes", {
   keywords: text("keywords").default(""),
   finalVideoUrl: text("final_video_url"),
   editorState: text("editor_state"),  // JSON 快照：时间线轨道+clip 数据
+  /**
+   * 3D 导演台的**场景**（JSON）：这一集搭好的「景」+ 出场演员的身形。
+   *
+   * 一集一份、跨镜共用 —— 这正是剧组的工作方式：景是搭好的，每个镜头变的是机位和走位
+   * （走位与机位存在 `shots.previz_blocking`）。跨镜共用同一套空间坐标，也是七律视觉
+   * 连续性能成立的前提。
+   *
+   * ⚠️ 这段 JSON 里**只有数字**（尺寸/坐标/颜色），不内嵌任何素材路径。
+   * 这是刻意的：`editor_state` 因为内嵌素材路径，给存储迁移与本地清理脚本留下了扫描盲区
+   * （见 scripts/verify-editor-state-refs.ts）。用盒体代理而不是贴图模型，顺带避开了同一个坑。
+   */
+  previzScene: text("previz_scene"),
   targetDurationSeconds: integer("target_duration_seconds"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -190,6 +202,20 @@ export const shots = sqliteTable("shots", {
    * 读取端查不到就当作没选（见 resolveSelectedPreviz）。
    */
   previzSelectedId: text("previz_selected_id"),
+  /**
+   * 3D 导演台的**本镜走位与机位**（JSON）：相机位置/朝向/焦距 + 每个演员站哪、朝哪、什么姿态。
+   *
+   * 与 `episodes.previz_scene` 的分工：那边是「景和演员是谁」，这边是「这一镜怎么摆、怎么拍」。
+   * 同样只存数字，不内嵌素材路径。
+   */
+  previzBlocking: text("previz_blocking"),
+  /**
+   * 3D 导演台渲染出的**相机视图**（存储引用）。
+   *
+   * 它是构图参考，不是首帧 —— 所以刻意不写进 `anchorFirst`：那个字段是真正要送去生成视频的
+   * 首帧，被一张灰盒渲染图覆盖掉是不可逆的。
+   */
+  previzLayoutUrl: text("previz_layout_url"),
   remoteVideoUrl: text("remote_video_url"),
   remoteVideoTaskId: text("remote_video_task_id"),
   remoteVideoStatus: text("remote_video_status"),

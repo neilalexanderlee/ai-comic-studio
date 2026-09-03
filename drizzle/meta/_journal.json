@@ -421,6 +421,13 @@
       "when": 1779000035000,
       "tag": "0059_shot_previz",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1779000036000,
+      "tag": "0060_previz_stage",
+      "breakpoints": true
     }
   ]
 }
