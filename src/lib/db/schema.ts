@@ -181,6 +181,15 @@ export const shots = sqliteTable("shots", {
   previewUrl: text("preview_url"),
   /** 视频首帧封面（jpg）。没有 anchorFirst 的分镜靠它在编辑器里显示缩略图 */
   posterUrl: text("poster_url"),
+  /**
+   * 已选用的白模预演（`shot_previz.id`）。
+   *
+   * 选中之后，正式视频生成会把这条预演作为 `reference_video` 一起传给模型
+   * （Seedance 2.5 特性），让成片复现已确认的运镜与走位。
+   * 不加外键：预演被删时留个悬空 id 比级联清掉分镜上的选择更安全，
+   * 读取端查不到就当作没选（见 resolveSelectedPreviz）。
+   */
+  previzSelectedId: text("previz_selected_id"),
   remoteVideoUrl: text("remote_video_url"),
   remoteVideoTaskId: text("remote_video_task_id"),
   remoteVideoStatus: text("remote_video_status"),
@@ -255,6 +264,36 @@ export const shotVideoHistory = sqliteTable("shot_video_history", {
   createdAt: integer("created_at").notNull(), // Unix ms
 });
 
+
+/**
+ * 白模预演（previz）—— 一个分镜可以有多条 take。
+ *
+ * 正式视频一条 5~10 分钟、按秒计费，运镜不对就整条作废。预演先用 480p + flex 档
+ * 出一段**无材质的灰白模**，只验证机位/运镜路径/景别变化/主体走位；确认之后再把这条
+ * 预演当作 `reference_video` 喂给正式生成，让贵的那次照着已确认的运镜出片。
+ *
+ * 之所以是独立表而不是 shots 上的几个列：预演的价值就在于"不满意就再来一条、并排比较"，
+ * 单列存不下多条 take。
+ */
+export const shotPreviz = sqliteTable("shot_previz", {
+  id: text("id").primaryKey(),
+  shotId: text("shot_id")
+    .notNull()
+    .references(() => shots.id, { onDelete: "cascade" }),
+  projectId: text("project_id")
+    .notNull()
+    .references(() => projects.id, { onDelete: "cascade" }),
+  /** 预演视频的存储引用。参考视频只能传公网 URL，所以实际可用的前提是它是 oss:// */
+  videoUrl: text("video_url").notNull(),
+  /** 封面帧，用于 take 列表缩略图 */
+  posterUrl: text("poster_url"),
+  /** 送给模型的完整提示词，便于对照"为什么这条运镜是这样" */
+  prompt: text("prompt"),
+  modelId: text("model_id"),
+  duration: integer("duration"),
+  resolution: text("resolution"),
+  createdAt: integer("created_at").notNull(), // Unix ms
+});
 
 export const importLogs = sqliteTable("import_logs", {
   id: text("id").primaryKey(),

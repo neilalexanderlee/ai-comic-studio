@@ -414,6 +414,13 @@
       "when": 1779000034000,
       "tag": "0058_shot_preview_proxy",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1779000035000,
+      "tag": "0059_shot_previz",
+      "breakpoints": true
     }
   ]
 }

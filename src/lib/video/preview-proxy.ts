@@ -112,6 +112,47 @@ export async function buildPreviewProxy(
 }
 
 /**
+ * 只抽一张封面帧，不做转码。
+ *
+ * 白模预演本身就是 480p，再转一遍代理纯属浪费 CPU；它需要的只是 take 列表上的缩略图。
+ * 同样吞掉所有错误：视频已经生成、钱已经花了，抽帧失败不该判整体失败。
+ */
+export async function tryBuildPoster(
+  videoRef: string,
+  keyPrefix: string
+): Promise<string | null> {
+  let src: Awaited<ReturnType<typeof materializeArtifact>> | null = null;
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "acs-poster-"));
+  try {
+    src = await materializeArtifact(videoRef);
+    const id = ulid();
+    const posterPath = path.join(tmpDir, `${id}.jpg`);
+    await execFileAsync("ffmpeg", [
+      "-y",
+      "-i", src.path,
+      "-frames:v", "1",
+      "-vf", `scale=-2:${PROXY_HEIGHT}`,
+      "-q:v", "4",
+      posterPath,
+    ]);
+    return await saveArtifact(`${keyPrefix}/${id}.jpg`, fs.readFileSync(posterPath));
+  } catch (err) {
+    console.warn(
+      `[PreviewProxy] 封面帧抽取失败（不影响视频本身）：${videoRef} —`,
+      err instanceof Error ? err.message : err
+    );
+    return null;
+  } finally {
+    src?.cleanup();
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* 临时目录清理失败不该影响主流程 */
+    }
+  }
+}
+
+/**
  * 生成代理并吞掉所有错误 —— 供视频生成成功后「顺带」调用。
  *
  * 代理失败**绝不能**让整个视频生成失败：视频已经生成出来了（钱也花了），

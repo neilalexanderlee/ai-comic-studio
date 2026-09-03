@@ -54,6 +54,12 @@ export type SeedanceShot = {
   dialogues?: SeedanceDialogue[];
   /** 分镜图本地路径（用于上传后得到参考编号） */
   storyboardImagePath?: string | null;
+  /**
+   * 是否带一条已确认的白模预演作为参考视频（Seedance 2.5）。
+   * 置 true 时会在图片轮之后、音频轮之前分配一个 `@视频N` —— 顺序必须与
+   * `buildMultimodalBody` 的 content 数组（图片 → 视频 → 音频）严格一致。
+   */
+  hasPrevizVideo?: boolean;
 };
 
 export type SeedanceMultiParamInput = {
@@ -82,7 +88,8 @@ type RefEntry =
   | { kind: "asset_image"; refNum: number; label: string; asset: SeedanceAsset }
   | { kind: "asset_angle_image"; refNum: number; label: string; asset: SeedanceAsset; angle: string }
   | { kind: "asset_audio"; refNum: number; label: string; asset: SeedanceAsset }
-  | { kind: "storyboard_image"; refNum: number; label: string; shotIndex: number };
+  | { kind: "storyboard_image"; refNum: number; label: string; shotIndex: number }
+  | { kind: "previz_video"; refNum: number; label: string; shotIndex: number };
 
 function refLabel(
   numbering: "global" | "per-type",
@@ -114,7 +121,9 @@ function buildRefEntries(
   // per-type 模式下音频从 1 独立起编。
   let imageCounter = 1;
   let audioCounter = 1;
+  let videoCounter = 1;
   const nextImage = () => imageCounter++;
+  const nextVideo = () => (numbering === "global" ? imageCounter++ : videoCounter++);
   const nextAudio = () => (numbering === "global" ? imageCounter++ : audioCounter++);
 
   // 第一轮：所有资产图片（主图 + 紧跟其角度变体：3q → profile → back）
@@ -141,6 +150,21 @@ function buildRefEntries(
         kind: "storyboard_image",
         refNum: n,
         label: refLabel(numbering, "image", n),
+        shotIndex: i,
+      });
+    }
+  }
+
+  // 第二轮半：白模预演参考视频。
+  // 必须排在图片之后、音频之前 —— buildMultimodalBody 的 content 数组就是这个顺序，
+  // 编号与数组一旦错位，模型会把某张图当成视频去理解。
+  for (let i = 0; i < shots.length; i++) {
+    if (shots[i].hasPrevizVideo) {
+      const n = nextVideo();
+      entries.push({
+        kind: "previz_video",
+        refNum: n,
+        label: refLabel(numbering, "video", n),
         shotIndex: i,
       });
     }
@@ -275,6 +299,14 @@ export function buildSeedanceMultiParamVideoPrompt(input: SeedanceMultiParamInpu
     } else if (entry.kind === "storyboard_image") {
       const shot = shots[entry.shotIndex];
       lines.push(`${entry.label}: 分镜${entry.shotIndex + 1}，${shot.sceneName || shot.sceneDescription.slice(0, 20)}`);
+    } else if (entry.kind === "previz_video") {
+      // 说清楚"参考什么、不参考什么"：白模是灰白无材质的，不加限定的话模型会把
+      // 那身灰白也一并学过去，成片直接失色。
+      lines.push(
+        `${entry.label}: 分镜${entry.shotIndex + 1}的运镜预演（白模）。` +
+          `只参考它的机位、运镜路径与速度、景别变化和主体在画面中的走位；` +
+          `不要参考它的材质、颜色、光影和细节——那些以图片参考与文字描述为准。`
+      );
     }
     // asset_audio 不另起行（已追加在资产行尾）
   }

@@ -4,7 +4,7 @@ import { jsonSchema } from "ai";
 import { createLanguageModel, extractJSON } from "@/lib/ai/ai-sdk";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { db } from "@/lib/db";
-import { projects, episodes, characters, shots, storyboardVersions, episodeCharacters, characterAssets, trackVideos } from "@/lib/db/schema";
+import { projects, episodes, characters, shots, storyboardVersions, episodeCharacters, characterAssets, trackVideos, shotPreviz } from "@/lib/db/schema";
 import { eq, asc, and, lt, gt, desc, inArray, isNull, sql } from "drizzle-orm";
 import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-grouping";
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
@@ -45,7 +45,10 @@ import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { shouldResolveMultimodalCharacterRefs } from "@/lib/ai/multimodal-refs";
 import { openBillingGate } from "@/lib/billing/gate";
-import { tryBuildPreviewProxy } from "@/lib/video/preview-proxy";
+import { tryBuildPreviewProxy, tryBuildPoster } from "@/lib/video/preview-proxy";
+import { wrapAsPrevizPrompt } from "@/lib/ai/prompts/previz";
+import { decidePrevizReference } from "@/lib/storyboard/previz-reference";
+import { resolveArtifactUrlForUpstream, isOssRef } from "@/lib/storage/artifact-store";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
@@ -366,6 +369,10 @@ export async function POST(
 
   if (action === "single_video_generate") {
     return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig);
+  }
+
+  if (action === "previz_generate") {
+    return handlePrevizGenerate(projectId, userId, payload, resolvedModelConfig);
   }
 
   if (action === "single_video_prompt") {
@@ -2513,6 +2520,185 @@ async function handleSingleFrameGenerate(
   }
 }
 
+// --- previz_generate: 白模预演（低成本验证运镜/构图，确认后作为参考视频参与正式生成）---
+
+/**
+ * 生成一条白模预演。
+ *
+ * 与正式生成刻意拉开的几处差别，都是为了**便宜且只回答一个问题**（运镜对不对）：
+ *  - 分辨率固定 480p、service_tier 走 flex（约省一半）、不生成音频；
+ *  - **不传角色定妆图/角度图/音色/道具**：传了会把模型往"出正式彩色画面"上拽，
+ *    白模就白不起来；预演要验的机位、运镜路径、走位，anchorFirst + motionScript 已经够表达；
+ *  - 时长用镜头完整时长 —— 运镜要整段看才判断得准，截短了等于没验。
+ */
+async function handlePrevizGenerate(
+  projectId: string,
+  userId: string,
+  payload?: Record<string, unknown>,
+  modelConfig?: ModelConfig,
+) {
+  const shotId = payload?.shotId as string;
+  if (!shotId) {
+    return NextResponse.json({ error: "No shotId provided" }, { status: 400 });
+  }
+  if (!modelConfig?.video) {
+    return NextResponse.json({ error: "No video model configured" }, { status: 400 });
+  }
+
+  const [shot] = await db.select().from(shots).where(eq(shots.id, shotId));
+  if (!shot || shot.projectId !== projectId) {
+    return NextResponse.json({ error: "Shot not found" }, { status: 404 });
+  }
+
+  const videoProtocol = modelConfig.video.protocol ?? "";
+  const capability = resolveVideoCapability(modelConfig.video.modelId, videoProtocol);
+
+  // 预演本身只需要"参考生视频"这一种模式；不支持的模型直接说清楚，不做无意义的降级 ——
+  // 降级到首帧模式生成出来的东西既不是白模也验证不了运镜。
+  if (!capability.modes.includes("multimodal")) {
+    return NextResponse.json(
+      { error: `${capability.label} 不支持参考生视频，无法做白模预演。请切换到 Seedance 2.x 系列。` },
+      { status: 400 }
+    );
+  }
+
+  // 预演必须有首帧作构图锚点。
+  // 不只是"效果更好"：参考生视频任务在 2.5 下会显式声明 omni_reference_task_type="reference"，
+  // 一个参考素材都不带就成了自相矛盾的请求；而且没有构图锚点的预演也验不出走位。
+  if (!shot.anchorFirst || !shotFrameUsable(shot.anchorFirst)) {
+    return NextResponse.json(
+      { error: "白模预演需要先有首帧作为构图锚点，请先生成画面" },
+      { status: 400 }
+    );
+  }
+
+  const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
+  const videoProvider = resolveVideoProvider(modelConfig, versionedUploadDir);
+
+  const effectiveDuration = Math.min(shot.duration ?? 10, capability.duration.max);
+  const ratio =
+    resolveRatioForMode(capability, "multimodal") ?? (payload?.ratio as string) ?? "16:9";
+
+  // 预演也走计费闸门：它同样消耗上游算力。480p + flex 的报价本来就低。
+  const billing = await openBillingGate(
+    userId,
+    {
+      kind: "video",
+      modelId: modelConfig.video.modelId,
+      durationSeconds: effectiveDuration,
+      resolution: "480p",
+    },
+    { projectId, shotId, protocol: videoProtocol }
+  );
+  if (!billing.ok) return billing.response;
+
+  try {
+    const { videoPrompt: syncedVideoPrompt } = await syncVideoPromptIfStale({
+      shot,
+      userId,
+      projectId,
+      deps: { stripBgmContent },
+    });
+    const { motionText } = resolveVideoMotionAndScene(shot);
+
+    // visualStyle 传 undefined：白模不要项目画风标签，风格由 wrapAsPrevizPrompt 的
+    // 白模覆盖段接管（正式生成才用 VISUAL_STYLE_PRESETS 的 tag）。
+    const previzShot: SeedanceShot = {
+      hasStoryboardImage: true,
+      duration: effectiveDuration,
+      sceneDescription: shot.prompt || "",
+      cameraDirection: shot.cameraDirection || null,
+      motionScript: syncedVideoPrompt || motionText || shot.prompt || "",
+      soundEffect: null,
+      // 预演不发声，台词一并省掉：口型和音色都不是这一步要验的东西
+      dialogues: [],
+    };
+
+    const previzPrompt = wrapAsPrevizPrompt(
+      stripBgmContent(
+        buildSeedanceMultiParamVideoPrompt({
+          visualStyle: undefined,
+          assets: [],
+          shots: [previzShot],
+          refNumbering: capability.refNumbering === "per-type" ? "per-type" : "global",
+        }),
+        shot.bgmNote
+      )
+    );
+
+    const multimodalRefs: import("@/lib/ai/types").MultimodalRefItem[] = [
+      { type: "image", path: shot.anchorFirst! },
+    ];
+
+    console.log(
+      `[PrevizGenerate] Shot ${shot.sequence}: ${effectiveDuration}s / 480p / flex / 带首帧构图锚点`
+    );
+
+    const result = await videoProvider.generateVideo({
+      multimodalRefs,
+      prompt: previzPrompt,
+      duration: effectiveDuration,
+      ratio,
+      resolution: "480p",
+      serviceTier: "flex",
+      generateAudio: false,
+    });
+
+    // 预演本身就是 480p，不再转代理，只抽一张封面帧用于 take 列表缩略图
+    const posterUrl = await tryBuildPoster(
+      result.filePath,
+      `${path.relative(process.env.UPLOAD_DIR || "./uploads", versionedUploadDir).replace(/\\/g, "/")}/previz`
+    );
+
+    const previzId = ulid();
+    await db.insert(shotPreviz).values({
+      id: previzId,
+      shotId,
+      projectId,
+      videoUrl: result.filePath,
+      posterUrl,
+      prompt: previzPrompt,
+      modelId: modelConfig.video.modelId ?? null,
+      duration: effectiveDuration,
+      resolution: "480p",
+      createdAt: Date.now(),
+    });
+
+    // 新出的这条自动选中：绝大多数情况下用户就是想用最新这条，
+    // 不满意再切回旧 take（take 列表里随时可换）。
+    await db.update(shots).set({ previzSelectedId: previzId }).where(eq(shots.id, shotId));
+
+    await billing.settle();
+
+    // 参考视频只接受公网 URL —— 没配 OSS 时预演能看，但没法参与正式生成。
+    // 这一点必须当场说清楚，否则用户会以为"确认了运镜"而实际什么都没传过去。
+    const usableAsReference = isOssRef(result.filePath);
+
+    return NextResponse.json({
+      shotId,
+      previzId,
+      videoUrl: result.filePath,
+      posterUrl,
+      usableAsReference,
+      ...(usableAsReference
+        ? {}
+        : {
+            notes: [
+              "未配置对象存储，这条预演只能预览，无法作为参考视频参与正式生成（参考视频必须是公网 URL）。",
+            ],
+          }),
+      ...(billing.credits > 0 && { creditsCharged: billing.credits }),
+    });
+  } catch (err) {
+    console.error(`[PrevizGenerate] Error for shot ${shotId}:`, err);
+    await billing.refund(extractErrorMessage(err));
+    return NextResponse.json(
+      { shotId, error: extractErrorMessage(err) },
+      { status: mapUpstreamErrorHttpStatus(err) }
+    );
+  }
+}
+
 // --- single_video_generate: synchronous video generation for one shot ---
 
 async function handleSingleVideoGenerate(
@@ -2732,6 +2918,38 @@ async function handleSingleVideoGenerate(
         )
       : [];
 
+    // ── 已确认的白模预演 → 参考视频 ────────────────────────────────────────────
+    // 必须在 prompt 构建**之前**决定：@视频N 的编号要和 multimodalRefs 的
+    // content 数组（图片 → 视频 → 音频）严格对齐，编号一错模型就会把某张图当视频理解。
+    const selectedPreviz = shot.previzSelectedId
+      ? (
+          await db
+            .select({ videoUrl: shotPreviz.videoUrl })
+            .from(shotPreviz)
+            .where(eq(shotPreviz.id, shot.previzSelectedId))
+        )[0]
+      : undefined;
+    const previzDecision = decidePrevizReference({
+      mode: singleVideoMode,
+      capability: videoCapability,
+      selectedId: shot.previzSelectedId,
+      previzVideoUrl: selectedPreviz?.videoUrl,
+      isRemoteRef: !!selectedPreviz?.videoUrl && isOssRef(selectedPreviz.videoUrl),
+    });
+    if (!previzDecision.use && previzDecision.note) {
+      capabilityNotes.push(previzDecision.note);
+    }
+    // 签名放在这里而不是 provider 里：TTL 6 小时，覆盖上游排队后才来拉取的情况。
+    let previzUpstreamUrl: string | null = null;
+    if (previzDecision.use) {
+      try {
+        previzUpstreamUrl = resolveArtifactUrlForUpstream(previzDecision.ref);
+      } catch (err) {
+        console.warn(`[SingleVideoGenerate] Shot ${shot.sequence}: 预演签名失败`, err);
+        capabilityNotes.push("运镜预演的访问地址签发失败，本次未参与生成");
+      }
+    }
+
     // ── Seedance 新格式：@参考N + 音色 + 台词类型 ──────────────────────────────
     let videoPromptBase: string;
     if (usesSeedanceDialect && (!shotForVideo.videoPrompt || singleVideoMode === "multimodal")) {
@@ -2772,6 +2990,7 @@ async function handleSingleVideoGenerate(
 
       const seedanceSingleShot: SeedanceShot = {
         hasStoryboardImage: !!shotForVideo.anchorFirst,
+        hasPrevizVideo: !!previzUpstreamUrl,
         duration: effectiveDuration,
         sceneDescription: shotForVideo.prompt || "",
         cameraDirection: shotForVideo.cameraDirection || null,
@@ -2936,6 +3155,11 @@ async function handleSingleVideoGenerate(
       if (shotForVideo.anchorFirst && shotFrameUsable(shotForVideo.anchorFirst)) {
         multimodalRefs.push({ type: "image", path: shotForVideo.anchorFirst });
       }
+      // 第二轮半：白模预演参考视频（对应 buildRefEntries 的 previz_video 轮）。
+      // 视频是独立类型，不占图片配额（capability.refs.video 另计）。
+      if (previzUpstreamUrl) {
+        multimodalRefs.push({ type: "video", path: previzUpstreamUrl });
+      }
       // 第三轮：音频（对应 buildRefEntries 的 asset_audio 轮），最多 MAX_AUDIO_REFS 个
       let audioRefCount = 0;
       for (const ci of charImagesForVideo) {
@@ -2962,6 +3186,7 @@ async function handleSingleVideoGenerate(
       console.log(
         `[SingleVideoGenerate] Shot ${shot.sequence}: multimodal refs — ` +
           `${multimodalRefs.filter((r) => r.type === "image").length} image(s), ` +
+          `${multimodalRefs.filter((r) => r.type === "video").length} video(s), ` +
           `${multimodalRefs.filter((r) => r.type === "audio").length} audio(s)`
       );
 

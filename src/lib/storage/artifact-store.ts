@@ -264,3 +264,32 @@ export function resolveArtifactUrl(ref: string): string {
   const normalized = ref.replace(/\\/g, "/");
   return `/api/uploads/${normalized.replace(/^.*uploads\//, "")}`;
 }
+
+/** 给上游模型服务用的签名 URL 有效期：6 小时。 */
+export const UPSTREAM_SIGNED_URL_TTL_SECONDS = 6 * 3600;
+
+/**
+ * 签发给**上游模型服务**（而非浏览器）的签名 URL。
+ *
+ * 与 `resolveArtifactUrl` 的两点差别，都是刻意的：
+ *
+ * 1. **不做窗口对齐。** 对齐是为了让浏览器缓存命中（同一窗口内 URL 逐字节相同），
+ *    火山那边不存在这个诉求，对齐只会让有效期变得难以推理。
+ * 2. **TTL 长得多。** 视频生成是提交后排队再执行的异步任务，模型服务什么时候真正
+ *    去拉这个 URL 不由我们决定。TTL 卡得紧的话，排队久一点就变成任务启动后才报的
+ *    异步错误 —— 那类错误的排查成本远高于多给几个小时的有效期。
+ *
+ * 只接受 OSS 引用：本地路径没有公网地址，参考视频这类"必须给对方一个 URL"的场景
+ * 根本走不通，这里直接抛比让它一路飘到 provider 再炸要好定位。
+ */
+export function resolveArtifactUrlForUpstream(
+  ref: string,
+  ttlSeconds: number = UPSTREAM_SIGNED_URL_TTL_SECONDS
+): string {
+  if (!isOssRef(ref)) {
+    throw new Error(
+      `需要公网可访问的地址，但 ${ref} 是本地引用。请先配置对象存储（OSS_* 四个环境变量）。`
+    );
+  }
+  return getOssClient().signatureUrl(ossKeyOf(ref), { expires: ttlSeconds });
+}

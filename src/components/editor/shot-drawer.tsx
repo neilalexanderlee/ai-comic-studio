@@ -34,6 +34,7 @@ import { ShotExternalFrameHelper } from "./shot-external-frame-helper";
 import { ShotRestoreFromScriptButton } from "./shot-restore-from-script-button";
 import { RemoteVideoRecoveryHint } from "./remote-video-recovery-hint";
 import { ShotVideoEnhanceButton } from "./shot-video-enhance-button";
+import { PrevizBench } from "./previz-bench";
 
 interface Dialogue {
   id: string;
@@ -600,6 +601,17 @@ export function ShotDrawer({
               }
             </Button>
           </section>
+
+          {/* Step 3.5: 预演台 —— 便宜地把运镜先验一遍，再去跑贵的正式生成 */}
+          <PrevizBench
+            projectId={projectId}
+            shotId={shot.id}
+            videoRatio={videoRatio}
+            versionId={selectedVersionId ?? undefined}
+            anyGenerating={anyGenerating || generatingVideo}
+            onPreview={setPreviewSrc}
+            onUpdate={onUpdate}
+          />
 
           {/* Step 4: Video */}
           <section>
