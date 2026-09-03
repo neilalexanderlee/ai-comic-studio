@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 60` — `0060_previz_stage`
+**当前最新迁移索引**：`idx 61` — `0061_subscriptions_orders`
 
 ### 关键表
 
@@ -203,6 +203,8 @@ VideoProvider    // generateVideo
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`previewUrl`/`posterUrl`（480p 预览代理与封面，migration 0058）；`previzSelectedId`（已选用的白模预演，migration 0059）；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
 | `episodes.previz_scene` | 3D 导演台的**场景**（JSON）：一集搭好的景 + 出场演员身形，跨镜共用。只有数字，不内嵌素材路径 |
 | `shots.previz_blocking` / `previz_layout_url` | 本镜的走位与机位（JSON，参数化机位：主体/方位角/距离/高度/焦距）；以及导演台导出的构图参考图 |
+| `subscriptions` | 订阅（一用户一条）。周期滚动是**惰性**的：`ensureSubscriptionPeriod()` 在闸门与余额读取处调用，发现周期已过就当场滚动，不用 cron |
+| `orders` | 订单。状态机 `pending → paid / closed → refunded`；价格与积分在下单时快照，改价不影响历史；`UNIQUE(channel, channel_trade_no)` 是回调幂等的数据库兜底 |
 | `shot_previz` | 白模预演 take（一个分镜可多条）；`videoUrl`/`posterUrl`/`prompt`/`modelId`/`duration`/`resolution`。选中的那条由 `shots.previzSelectedId` 指向，正式生成时作为 `reference_video` 传给 Seedance 2.5 |
 | `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
@@ -616,6 +618,40 @@ seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、k
 
 **当前进度**：P1（摆位 + 导出构图图）、P3（运镜时间线 + 本地渲染运镜视频）、
 背景板均已完成。P2（确定性回写 startFrameDesc 第一要素与 cameraDirection 起落幅）尚未开始。
+
+### 8i. 订阅 / 套餐 —— 两种寿命的积分
+
+`src/lib/billing/plans.ts`（套餐是**代码常量，不建表**，与 `VIDEO_CAPABILITIES` 同一套做法；
+可审计性由订单快照保证）、`subscription.ts`、`orders.ts`。
+
+**产品前提**：这门生意几乎是纯成本转嫁（2.5 · 720p 上游 ¥1.51/秒），**积分本身就是商品**，
+不存在一层零边际成本的功能能单独卖钱。所以订阅不是"解锁功能"，而是**按月产能承诺**：
+
+| 来源 | 寿命 | 存哪 |
+|---|---|---|
+| 订阅每月发放 | **周期末清零** | `credit_accounts.subscription_balance` |
+| 加油包购买 | **永不过期** | `credit_accounts.balance` |
+
+消费顺序：**先花会过期的**。退还**按原路**（拆分记在 `usage_records.reserved_from_subscription`）——
+少了这条就能套利：订阅积分预扣 → 取消 → 退进永久桶，把会过期的洗成永久的。
+
+**为什么是双余额而不是积分批次**：批次是通用解，但要求退款退回原批次；而本项目同一时刻
+最多只有一个会过期的桶（当前订阅周期），批次退化成一个字段 + 一个到期时间。
+将来若要卖"限期促销积分"（多个到期日并存）才需要升级成批次，那时拆分记录就是迁移依据。
+
+**周期滚动不用 cron**：项目没有调度器，改成惰性滚动 —— 天然幂等、天然补偿，
+也没有"任务没跑起来所以没发积分"这种故障模式。
+
+⚠️ **裸 SQL 写时间戳必须换算成秒**：Drizzle 的 `mode:"timestamp"` 存的是秒，
+写毫秒不会报错，只会被当成公元五万年读出来 —— 于是「周期是否已过」永远为否，
+**订阅再也不会滚动而且毫无征兆**。各文件里的 `toDbTime()` 就是为此。
+
+**BILLING_ENABLED 未设为 "1" 时**：套餐接口返回空列表、功能位返回 `UNLIMITED_FEATURES`、
+下单直接拒绝、UI 整块不渲染。与约定 8c 是同一条原则。
+
+**支付回调**（`/api/billing/callback/[channel]`）没有用户会话，身份由渠道签名证明，
+已在 `route-auth-guard.test.ts` 的 `NO_AUTH_ALLOWLIST` 登记。目前只有 mock 通道，
+真实渠道需要商户号（企业资质）。
 
 ### 9. Drizzle null 比较
 
