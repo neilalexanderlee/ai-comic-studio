@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 51` — `0051_shot_prop_refs`
+**当前最新迁移索引**：`idx 59` — `0059_shot_previz`
 
 ### 关键表
 
@@ -200,7 +200,8 @@ VideoProvider    // generateVideo
 | `projects` | 顶层实体，含 `visualStyle`、`videoRatio`、`useProjectPrompts`、`finalVideoUrl`（`enhancePrompts` / `linkShotsViaCutPoint` 两列已由 migration 0047 删除）|
 | `episodes` | 分属 project 的剧集 |
 | `storyboard_versions` | 分镜版本，每个版本对应一批 shots |
-| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
+| `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`previewUrl`/`posterUrl`（480p 预览代理与封面，migration 0058）；`previzSelectedId`（已选用的白模预演，migration 0059）；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
+| `shot_previz` | 白模预演 take（一个分镜可多条）；`videoUrl`/`posterUrl`/`prompt`/`modelId`/`duration`/`resolution`。选中的那条由 `shots.previzSelectedId` 指向，正式生成时作为 `reference_video` 传给 Seedance 2.5 |
 | `dialogues` | 台词；`type`（'dialogue'\|'os'\|'vo'）|
 | `characters` | 项目/剧集角色，含 `visualHint`、`voiceHint`（9维音色描述）|
 | `character_assets` | 角色图片/音频；`assetType`（`morph`/`blueprint`/`prop`）；`isDefault`（1=当前主定妆图）；`audioPath`（音色参考，用于 Seedance 音色克隆）|
@@ -301,7 +302,7 @@ UI 的「生成画面」/「重新生成帧」按钮**始终**只生成首帧（
 
 一条 capability 描述：支持的生成模式（`modes`）、时长区间、比例（含 `ratioLockedModes` 这种
 「某模式下比例被 API 锁死」的约束）、分辨率、各类参考素材上限与传输方式（`refs` / `refTransport`）、
-特性开关（`generateAudio` / `voiceClone` / `returnLastFrame` / `realFaceBlocked`）、
+特性开关（`generateAudio` / `voiceClone` / `returnLastFrame` / `realFaceBlocked` / `serviceTierModes`）、
 提示词方言（`promptDialect`）、`@参考N` 编号规则。
 
 **禁止再在业务代码里写协议判断**。以下写法一律改为读能力表：
@@ -510,6 +511,53 @@ Docker 里 `UPLOAD_DIR=/app/uploads`，硬编码会让引用指向不存在的�
 ⚠️ `ali-oss` 必须列在 `next.config.ts` 的 `serverExternalPackages` 里 ——
 它依赖的 `urllib` 会运行时 `require('proxy-agent')`，打包器静态解析不到会直接构建失败。
 **这个错误 tsc 检查不出来，只有真跑才会暴露。**
+
+### 8e. Provider 存储桥 — DB 存 `oss://`，provider 只认本地文件
+
+**所有 provider 出口都过 `withArtifactBridge` / `withVideoArtifactBridge`
+（`src/lib/ai/provider-artifact-bridge.ts`，接在 `provider-factory.ts` 的两个工厂出口）。**
+
+每个 provider 都是照着「素材是本地文件」写的（`fs.readFileSync(path)` 转 base64：
+seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、kling / jimeng / veo 同理）。
+产物迁到 OSS 之后 DB 里存的是 `oss://frames/x.png`，这些读取要么抛错，要么被上游的
+「文件存在吗」检查提前静默丢弃。桥负责把 OSS 引用先下到临时文件再交给 provider，调用结束即清理。
+
+**不碰三类引用**：`asset://`（火山私域素材 ID，必须原样传）、`http(s)://`（已是公网地址）、
+以及**参考视频**（Seedance 2.5 的 `reference_video` 只接受 URL，下成本地文件反而走不通）。
+
+新增 provider 不需要知道 OSS 存在 —— 只要它走 `createAIProvider` / `createVideoProvider`
+就自动享受这一层。
+
+### 8f. `shotFrameUsable` — 语义是「引用可用」，不是「本地磁盘上有」
+
+`src/lib/storyboard/frame-reference.server.ts` 的 `shotFrameUsable(ref)`
+（旧名 `shotFrameFileOnDisk`，2026-09-02 改名）：
+
+- `oss://` / `asset://` / `http(s)://` → **一律判为可用**（DB 里的引用即事实）
+- 本地路径 → 仍查磁盘（自部署、未配置 OSS 的情况）
+
+保持同步函数：它在生成路径上每个角色、每个道具各调一次，改成异步的 `artifactExists`
+等于给每次调用加一个网络 HEAD。真正的悬空引用交给 provider 那一步显式报错 ——
+比静默丢弃好排查得多。
+
+### 8g. 预演台（白模预演）— 先便宜地验运镜，再花钱出正式片
+
+`action = "previz_generate"` → `handlePrevizGenerate`（`generate/route.ts`）。
+
+与正式生成刻意拉开的差别，都是为了**便宜且只回答一个问题**（运镜对不对）：
+480p、不生成音频、**不传角色定妆图/角度图/音色/道具**（传了会把模型往"出正式彩色画面"上拽），
+时长用镜头完整时长（运镜要整段看才判断得准）。提示词在正式提示词外面**首尾各夹一段白模覆盖**
+（`wrapAsPrevizPrompt`，`src/lib/ai/prompts/previz.ts`）——只放一处压不住正文里大量的材质与光影描写。
+
+**必须有 `anchorFirst`**：参考生视频任务在 2.5 下会显式声明 `omni_reference_task_type="reference"`，
+一个参考素材都不带就是自相矛盾的请求。
+
+确认后的那条经 `shots.previzSelectedId` 参与正式生成：`decidePrevizReference`
+（`src/lib/storyboard/previz-reference.ts`）判定能不能用，能用则由
+`resolveArtifactUrlForUpstream(ref)` 签一个 **6 小时、不做窗口对齐**的 URL
+（窗口对齐是为浏览器缓存服务的；上游排队后才来拉，TTL 卡紧会变成任务启动后才报的异步错误），
+作为 `@视频N` 加入 `multimodalRefs`。**每条拒绝路径都必须给出理由**并经 `capabilityNotes` 回传前端 ——
+用户点过"选用这条运镜"却毫无关系地出片，是最难排查的一类问题。
 
 ### 9. Drizzle null 比较
 
@@ -985,6 +1033,10 @@ src/lib/evals/
 | `video.md`（7 风格各一份）在 `resolveStyleTag` 改为读 `VISUAL_STYLE_PRESETS` 后变成 100% 无代码路径读取的死内容，但仍摆在目录里像是仍被使用，容易诱使后人重新写正则解析它 | 无 | 7 个风格的 `video.md` 全部物理删除（含摄影机运镜/景深/王家卫调性等未被任何代码消费的 prose——曾经短暂考虑过"标签表格删、prose 保留"的折中方案，但确认零调用后判断"没人用又没地方去"的内容留着只会增加误导，直接清空更干净；这些内容仍在 git 历史里，需要时可以找回）；`ArtStyleFileType` 移除 `"video"` |
 | `rewrite_vocab.md`（每风格一份）最初只从 `storyboard.md` 摘了 光影/风格锚定/进阶技法 三段，两个文件并存导致重复维护风险 | 复查时发现 `storyboard.md` 在 A/B 两项重构后已经**彻底没有任何代码路径读取**（`buildStyleSection`/`extractNegativePrompt` 改读 `VISUAL_STYLE_PRESETS`，`batch_storyboard_rewrite` 改读 `rewrite_vocab.md`，三个原读取点全部迁走）——不是"两处都在用、内容会漂移"，是"一处在用、另一处已经是像 `video.md` 一样的死文件" | 把 `storyboard.md` 剩余还有价值但从未被任何代码消费过的三段（情绪→面容/眼神词映射、场景质感约束词、美学禁止项）一并整理进 `rewrite_vocab.md`，`storyboard.md` 整个删除（7 个风格全删）；跳过了"完整生成示例"（Seedream/Nanobanana 完整格式范例，混进 LLM 系统提示词会造成格式误导）和"快速参考卡"（前两节的浓缩重复）。`ArtStyleFileType` 移除 `"storyboard"`，`art-style-consistency.test.ts` 的必需文件清单同步移除；`rewrite_vocab.md` 现在是该风格图像/视频生成侧唯一权威词库文件，不再有第二份需要同步的副本 |
 | `single-shot-rewrite.ts`/`single-shot-rewrite-defaults.ts` 早已零调用方（route handler 已删、registry 未注册），但文件仍在仓库里，内部还带一份和本次同类的正则段落抽取逻辑（`table.md` 按 `## 标题` 切片） | 之前几次清理只置空了别的废弃文件，这两个漏删 | 物理删除两个文件及对应测试 `single-shot-rewrite-defaults.test.ts`；`registry.ts` 顶部移除死 import（`SINGLE_SHOT_REWRITE_DEFAULT_SLOTS`/`assembleSingleShotRewriteSystem` 全文件无第二处引用）；`prompt-template-standards.ts` 的 `PROMPT_TEMPLATE_SOURCE_FILES` 同步移除该文件名（否则 deplot 扫描测试会读一个不存在的文件报错）。DB 里 `single_shot_rewrite` 覆盖数据的清理逻辑（`prune-stale-prompt-overrides.ts`）不受影响，继续保留 |
+| 迁到 OSS 之后，**所有参考图都被静默丢弃**：角色定妆图锁不住外貌、分镜首帧进不了构图参考、道具图完全失效 | 两处叠加：① `shotFrameFileOnDisk` 的实现是 `fs.existsSync(path.resolve(ref))`，`oss://frames/x.png` 会被 `path.resolve` 拧成 `<cwd>/oss:/frames/x.png`，**恒为 false**，于是每个参考图都被判成「文件不存在」并悄悄跳过；② 就算漏过这道检查，各 provider 内部也一律 `fs.readFileSync(本地路径)` 转 base64，同样读不到。界面上没有任何提示，只表现为「效果突然变差」 | ① 函数改名 `shotFrameUsable` 并改语义为「引用可用」（`oss://`/`asset://`/http(s) 一律可用，本地路径仍查磁盘），见约定 8f；② 新增 `provider-artifact-bridge.ts` 接在 `provider-factory.ts` 两个工厂出口，统一把 OSS 引用物化成临时文件再交给 provider，见约定 8e。**教训：产物存储层换掉之后，凡是「判断文件在不在」和「读文件」的地方都要跟着改，前者出错是静默的，比后者危险得多** |
+| 参考生视频传 `service_tier: flex` 被同步拒绝 | `InvalidParameter: the specified parameter service_tier is not supported for model doubao-seedance-2-0 in r2v, must be empty`。这个参数**按模式**开放而不是按模型，而 `resolveServiceTier` 对所有模式一视同仁（`SEEDANCE_SERVICE_TIER` 环境变量一直是这么用的，只是从没人在 r2v 下设过它，所以一直没暴露）| 能力表 `features.serviceTierModes` 声明哪些模式接受该参数（Seedance 系列为 `["initialImage","keyframe"]`）；`resolveServiceTier(mode, requested)` 对不接受的模式直接吞掉。`video-capability-consistency.test.ts` 断言任何 capability 都不得在 `multimodal` 上声明它 |
+| 编辑器首次加载要等一分多钟，且每打开一次吃掉 125MB OSS 下行流量 | 两处叠加：① `initFromShots` 与存量时间线快照里 `clip.url` 存的是**源片**而不是 480p 代理（`MediaLibrary` 用了代理，时间线初始化没用），实测一集 15 条 = 源片 125.5MB vs 代理 12.5MB；② `syncSprites` 里十几个 clip 完全串行 `await buildSprite`，而 `MP4Clip.ready`（av-cliper 1.2.8）要等**整个流下载并解析完**才 resolve | ① `Clip` 拆成 `url`（导出源，永远是源片）+ `previewUrl`（浏览器解码源），存量快照在 `loadFromSnapshot` 前经 `healSnapshotMediaRefs` 自愈（顺带修掉「从素材库拖进来的 clip 导出会降级成 480p」）；② 改为 4 路并发 + 按离播放头距离排序 + 渐进可播（门只等播放头附近的素材）；③ 新增 `mediaCache.ts` 用 Cache Storage 按**稳定的存储引用**（不是签名 URL）缓存。实测：可播 70s → 2.5s（缓存命中 142ms），单次流量 125MB → 12.5MB → 0 |
+| 「首次点播放会跳回 0」的真正成因（此前靠 loading 门掩盖）| `syncSprites` 结尾 `if (!abort.signal.aborted && !isPlaying) previewFrame(playhead)` 用的是**这一轮 sync 开始时捕获的闭包值**。`previewFrame` 内部先 `pause()`（emit paused）再把时间强设为传入值 —— sync 期间用户点了播放，sync 结束时却以为自己还处在暂停态、还停在 0 秒 | 改读 `isPlayingRef.current` 与 `useEditorStore.getState().playhead`。这个修复是渐进可播的前提：门放开后 sync 必然在播放中结束 |
 | 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)，`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
 
 ---
@@ -1038,7 +1090,9 @@ pnpm dev
 
 ## 新功能开发检查清单
 
-- [ ] schema 改动有对应 migration 文件
+- [ ] schema 改动有对应 migration 文件（每条语句之间带 `--> statement-breakpoint`）
+- [ ] 新 provider 走 `createAIProvider` / `createVideoProvider`（自动过存储桥，约定 8e）
+- [ ] 新增「文件在不在」的判断用 `shotFrameUsable`，不要裸写 `fs.existsSync`（约定 8f）
 - [ ] 新视频 provider 在 `VIDEO_CAPABILITIES` 里有对应能力条目（约定 7a）
 - [ ] 新生成路径传入了 `visualStyleTag`
 - [ ] 新生成路径正确使用 `filterShotCharacters`（无 fallback）

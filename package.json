@@ -16,6 +16,7 @@
     "eval": "tsx src/lib/evals/index.ts",
     "prune-prompt-overrides": "tsx scripts/prune-prompt-overrides.ts",
     "storage:audit": "tsx scripts/storage-audit.ts",
+    "verify:editor-state": "tsx scripts/verify-editor-state-refs.ts",
     "storage:migrate": "tsx scripts/storage-migrate.ts",
     "assets:prune": "tsx scripts/prune-orphan-assets.ts",
     "oss:cors": "tsx scripts/oss-setup-cors.ts",

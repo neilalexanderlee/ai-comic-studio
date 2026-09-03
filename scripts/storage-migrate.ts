@@ -43,6 +43,10 @@ const REF_COLUMNS: [table: string, column: string][] = [
   ["shots", "anchor_last_ai"],
   ["shots", "video_url"],
   ["shots", "cut_point"],
+  // migration 0058 加的预览代理与封面帧。漏了这两列 = 审计看不见它们、
+  // 迁移也不会迁它们（另外两个 prune 脚本早就有，这两个一直漏着）。
+  ["shots", "preview_url"],
+  ["shots", "poster_url"],
   ["shot_video_history", "video_url"],
   ["track_videos", "video_url"],
 ];

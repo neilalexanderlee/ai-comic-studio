@@ -74,7 +74,10 @@ function ossClient() {
 async function main() {
   const oss = ossClient();
 
-  // 收集所有迁移映射
+  // 收集所有迁移映射。
+  // mkdir 而不是直接 readdir：目录不存在时 readdirSync 直接抛 ENOENT，
+  // 而"还没迁过任何东西"是完全正常的状态，应该报告"没有映射"而不是崩掉。
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const mapFiles = fs
     .readdirSync(BACKUP_DIR)
     .filter((f) => f.startsWith("storage-migration-") && f.endsWith(".json"));
