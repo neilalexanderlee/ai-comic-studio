@@ -1,5 +1,5 @@
 import "server-only";
-import { shotFrameFileOnDisk } from "@/lib/storyboard/frame-reference.server";
+import { shotFrameUsable } from "@/lib/storyboard/frame-reference.server";
 import type { EpisodeVideoBlockedShot, VideoReadinessIssue } from "@/lib/storyboard/shot-video-readiness";
 import type { VideoMode } from "@/lib/ai/video-capabilities";
 
@@ -32,7 +32,7 @@ export function resolveSingleVideoMode(
     anchorFirstContinuityMode?: string | null;
   }
 ): SingleVideoMode {
-  if (shotFrameFileOnDisk(shot.anchorLastAi)) return "keyframe";
+  if (shotFrameUsable(shot.anchorLastAi)) return "keyframe";
   if (shot.anchorFirstContinuityMode === "strict_start") return "initialImage";
   // Legacy rows created before anchorFirstContinuityMode existed used chainSourceShotId as the strict-start signal.
   if (shot.anchorFirstContinuityMode == null && shot.chainSourceShotId) return "initialImage";
@@ -70,7 +70,7 @@ export function shouldUseFirstFrameVideoMode(
 export function getShotVideoReadiness(
   shot: { anchorFirst?: string | null; anchorLastAi?: string | null }
 ): { ready: true } | { ready: false; issue: VideoReadinessIssue; message: string } {
-  if (!shot.anchorFirst || !shotFrameFileOnDisk(shot.anchorFirst)) {
+  if (!shot.anchorFirst || !shotFrameUsable(shot.anchorFirst)) {
     return {
       ready: false,
       issue: "missing_anchor_first",
@@ -111,7 +111,7 @@ export function collectVisionFramePaths(shot: {
   anchorLastAi?: string | null;
 }): string[] {
   const paths: string[] = [];
-  if (shot.anchorFirst && shotFrameFileOnDisk(shot.anchorFirst)) paths.push(shot.anchorFirst);
-  if (shot.anchorLastAi && shotFrameFileOnDisk(shot.anchorLastAi)) paths.push(shot.anchorLastAi);
+  if (shot.anchorFirst && shotFrameUsable(shot.anchorFirst)) paths.push(shot.anchorFirst);
+  if (shot.anchorLastAi && shotFrameUsable(shot.anchorLastAi)) paths.push(shot.anchorLastAi);
   return paths;
 }

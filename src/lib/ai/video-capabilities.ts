@@ -68,6 +68,17 @@ export interface VideoModelCapability {
     returnLastFrame: boolean;
     /** 是否拦截含真人人脸的参考图（决定要不要走私域素材库 asset:// 绕过） */
     realFaceBlocked: boolean;
+    /**
+     * 接受 `service_tier` 参数（弹性档，约省一半成本）的生成模式。空数组 = 完全不接受。
+     *
+     * ⚠️ 这个参数**按模式**而不是按模型开放。实测：Seedance 2.0 的参考生视频（r2v）
+     * 传 service_tier 会被同步拒绝 ——
+     * `InvalidParameter: the specified parameter service_tier is not supported for
+     *  model doubao-seedance-2-0 in r2v, must be empty`。
+     * 首帧/首尾帧模式沿用改造前的行为（`SEEDANCE_SERVICE_TIER` 环境变量一直是这么用的）。
+     * 2.5 在 r2v 下是否放开未经实测，按保守假设一并排除；确认放开后改这一行即可。
+     */
+    serviceTierModes: VideoMode[];
   };
 
   promptDialect: PromptDialect;
@@ -93,6 +104,7 @@ export const UNKNOWN_VIDEO_CAPABILITY: VideoModelCapability = {
     voiceClone: false,
     returnLastFrame: false,
     realFaceBlocked: false,
+    serviceTierModes: [],
   },
   promptDialect: "generic",
   refNumbering: "none",
@@ -116,6 +128,8 @@ const SEEDANCE_MULTIMODAL = {
     voiceClone: true,
     returnLastFrame: true,
     realFaceBlocked: true,
+    // r2v（参考生视频）明确不接受 service_tier，见 serviceTierModes 的说明
+    serviceTierModes: ["initialImage", "keyframe"] as VideoMode[],
   },
   promptDialect: "seedance-multi-param" as PromptDialect,
   refNumbering: "global" as const,
@@ -234,6 +248,7 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
       // 注：anchorLastAi 仅 Veo 2.x / 3.1+ 支持，3.0 会被 veo.ts 静默跳过
       returnLastFrame: false,
       realFaceBlocked: false,
+      serviceTierModes: [],
     },
     promptDialect: "generic",
     refNumbering: "none",
@@ -259,6 +274,7 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
       voiceClone: false,
       returnLastFrame: false,
       realFaceBlocked: false,
+      serviceTierModes: [],
     },
     promptDialect: "generic",
     refNumbering: "none",
@@ -280,6 +296,7 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
       voiceClone: false,
       returnLastFrame: false,
       realFaceBlocked: false,
+      serviceTierModes: [],
     },
     promptDialect: "generic",
     refNumbering: "none",
@@ -304,6 +321,7 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
       voiceClone: false,
       returnLastFrame: false,
       realFaceBlocked: false,
+      serviceTierModes: [],
     },
     promptDialect: "generic",
     refNumbering: "none",
@@ -336,6 +354,7 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
       voiceClone: true,
       returnLastFrame: false,
       realFaceBlocked: false,
+      serviceTierModes: [],
     },
     // 注：H3 的多模态 body 结构与 Seedance 同构，但 route 目前只为 Seedance 组装角色参考图
     // （见 shouldResolveMultimodalCharacterRefs），所以这里保持 generic 以维持现有行为。

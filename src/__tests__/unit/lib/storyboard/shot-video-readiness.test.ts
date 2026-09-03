@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const shotFrameFileOnDisk = vi.fn();
+const shotFrameUsable = vi.fn();
 
 vi.mock("@/lib/storyboard/frame-reference.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/storyboard/frame-reference.server")>();
   return {
     ...actual,
-    shotFrameFileOnDisk: (path: string | null | undefined) => shotFrameFileOnDisk(path),
+    shotFrameUsable: (path: string | null | undefined) => shotFrameUsable(path),
   };
 });
 
@@ -24,11 +24,11 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
   const characters = [{ id: "c1", name: "角色甲", description: "" }];
 
   beforeEach(() => {
-    shotFrameFileOnDisk.mockReset();
+    shotFrameUsable.mockReset();
   });
 
   it("无 video 且有 DB 首帧路径但磁盘缺失 → 列入 blocked", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
 
     const blocked = listBatchVideoBlockedShotsOnDisk(
       [
@@ -49,7 +49,7 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
   });
 
   it("已有 video 的镜不参与 new_only 预检", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
 
     const blocked = listBatchVideoBlockedShotsOnDisk(
       [
@@ -68,7 +68,7 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
   });
 
   it("有首帧路径且磁盘存在 → 不 blocked", () => {
-    shotFrameFileOnDisk.mockImplementation((p) => String(p).includes("first-ok"));
+    shotFrameUsable.mockImplementation((p) => String(p).includes("first-ok"));
 
     const blocked = listBatchVideoBlockedShotsOnDisk(
       [
@@ -90,18 +90,18 @@ describe("listBatchVideoBlockedShotsOnDisk", () => {
 
 describe("getShotVideoReadiness (server)", () => {
   beforeEach(() => {
-    shotFrameFileOnDisk.mockReset();
+    shotFrameUsable.mockReset();
   });
 
   it("无首帧路径 → not ready", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
     const r = getShotVideoReadiness({ anchorFirst: null });
     expect(r.ready).toBe(false);
     if (!r.ready) expect(r.issue).toBe("missing_anchor_first");
   });
 
   it("有首帧路径且磁盘存在 → ready（含群演）", () => {
-    shotFrameFileOnDisk.mockReturnValue(true);
+    shotFrameUsable.mockReturnValue(true);
     const r = getShotVideoReadiness(
       { anchorFirst: "/uploads/first.png", anchorLastAi: null }
     );
@@ -111,16 +111,16 @@ describe("getShotVideoReadiness (server)", () => {
 
 describe("resolveSingleVideoMode", () => {
   beforeEach(() => {
-    shotFrameFileOnDisk.mockReset();
+    shotFrameUsable.mockReset();
   });
 
   it("尾帧文件存在 → keyframe", () => {
-    shotFrameFileOnDisk.mockImplementation((p) => p === "/uploads/last-ok.png");
+    shotFrameUsable.mockImplementation((p) => p === "/uploads/last-ok.png");
     expect(resolveSingleVideoMode({ anchorLastAi: "/uploads/last-ok.png" })).toBe("keyframe");
   });
 
   it("无尾帧但 strict_start → initialImage", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
     expect(
       resolveSingleVideoMode({
         anchorLastAi: null,
@@ -131,7 +131,7 @@ describe("resolveSingleVideoMode", () => {
   });
 
   it("参考图重绘首帧即使有来源追溯 → multimodal", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
     expect(
       resolveSingleVideoMode({
         anchorLastAi: null,
@@ -142,12 +142,12 @@ describe("resolveSingleVideoMode", () => {
   });
 
   it("历史链源数据没有 continuity mode → initialImage", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
     expect(resolveSingleVideoMode({ anchorLastAi: null, chainSourceShotId: "legacy-prev-shot" })).toBe("initialImage");
   });
 
   it("普通只生成首帧镜头 → multimodal", () => {
-    shotFrameFileOnDisk.mockReturnValue(false);
+    shotFrameUsable.mockReturnValue(false);
     expect(resolveSingleVideoMode({ anchorLastAi: null, chainSourceShotId: null })).toBe("multimodal");
   });
 });

@@ -19,7 +19,7 @@
  *   - 参考图模式（initialImage）
  */
 import { ensureArkApiV3BaseUrl } from "../ark-base-url";
-import { resolveVideoCapability, type VideoModelCapability } from "../video-capabilities";
+import { resolveVideoCapability, type VideoModelCapability, type VideoMode } from "../video-capabilities";
 import type { VideoProvider, VideoGenerateParams, VideoGenerateResult, MultimodalRefItem } from "../types";
 import fs from "node:fs";
 import path from "node:path";
@@ -135,8 +135,18 @@ export class SeedanceProvider implements VideoProvider {
   /**
    * 获取服务层级：优先使用调用方传入的值，其次读取环境变量 SEEDANCE_SERVICE_TIER，默认不传（即 auto）。
    * 'flex' 模式成本降低约 50%，但生成时间更长，适合非实时批量任务。
+   *
+   * ⚠️ 这个参数**不是所有模式都接受**。参考生视频（r2v）下传它会被同步拒绝：
+   * `InvalidParameter: the specified parameter service_tier is not supported for
+   *  model doubao-seedance-2-0 in r2v, must be empty`。
+   * 哪些模式接受由能力表的 `features.serviceTierModes` 说了算 —— 不接受的模式
+   * 这里直接吞掉，而不是让调用方去记住这条约束（换模型时它还会变）。
    */
-  private resolveServiceTier(requested?: 'auto' | 'flex'): string | undefined {
+  private resolveServiceTier(
+    mode: VideoMode,
+    requested?: 'auto' | 'flex'
+  ): string | undefined {
+    if (!this.capability.features.serviceTierModes.includes(mode)) return undefined;
     const tier = requested ?? (process.env.SEEDANCE_SERVICE_TIER as 'auto' | 'flex' | undefined);
     if (tier === 'flex') return 'flex';
     return undefined; // 不传则使用 API 默认（auto）
@@ -150,7 +160,7 @@ export class SeedanceProvider implements VideoProvider {
         // 多模态参考模式不依赖远端 URL，始终用本地文件
         const body = this.buildMultimodalBody(params as VideoGenerateParams & { multimodalRefs: MultimodalRefItem[] });
         if (params.resolution) (body as Record<string, unknown>).resolution = params.resolution;
-        const serviceTier = this.resolveServiceTier(params.serviceTier);
+        const serviceTier = this.resolveServiceTier("multimodal", params.serviceTier);
         if (serviceTier) (body as Record<string, unknown>).service_tier = serviceTier;
         return body;
       }
@@ -164,7 +174,10 @@ export class SeedanceProvider implements VideoProvider {
             params as VideoGenerateParams & { initialImage: string }
           );
       if (params.resolution) (body as Record<string, unknown>).resolution = params.resolution;
-      const serviceTier = this.resolveServiceTier(params.serviceTier);
+      const serviceTier = this.resolveServiceTier(
+        isKeyframe ? "keyframe" : "initialImage",
+        params.serviceTier
+      );
       if (serviceTier) (body as Record<string, unknown>).service_tier = serviceTier;
       return body;
     };

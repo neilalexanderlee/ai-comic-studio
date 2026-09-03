@@ -65,7 +65,7 @@ import { getRemoteVideoExpiry, isRemoteVideoReusable } from "@/lib/video/remote-
 import {
   frameReferenceContinuityLabel,
   resolveFrameReferenceForProject,
-  shotFrameFileOnDisk,
+  shotFrameUsable,
 } from "@/lib/storyboard/frame-reference.server";
 import type { FrameReferencePayload, FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import {
@@ -2370,7 +2370,7 @@ async function handleSingleFrameGenerate(
         .from(characterAssets)
         .where(inArray(characterAssets.id, propRefIds)))
       .map((a) => a.imagePath)
-      .filter((p): p is string => !!p && shotFrameFileOnDisk(p))
+      .filter((p): p is string => !!p && shotFrameUsable(p))
     : [];
 
   try {
@@ -2579,7 +2579,7 @@ async function handleSingleVideoGenerate(
   // keyframe（首尾帧强约束）/ initialImage（严格首帧承接）都把 anchorFirst 当必需字段用
   // （下面会有 shotForVideo.anchorFirst! 非空断言）；multimodal 模式首帧只是可选构图参考，
   // 缺失时优雅降级为纯文字提示词 + 角色定妆图生成，不应该卡在这里。
-  if (singleVideoMode !== "multimodal" && (!shot.anchorFirst || !shotFrameFileOnDisk(shot.anchorFirst))) {
+  if (singleVideoMode !== "multimodal" && (!shot.anchorFirst || !shotFrameUsable(shot.anchorFirst))) {
     return NextResponse.json({ error: "首帧文件不存在，请重新生成首帧" }, { status: 400 });
   }
   // 向后兼容：prompt 拼接逻辑仍用此布尔值判断"是否首帧模式"
@@ -2711,7 +2711,7 @@ async function handleSingleVideoGenerate(
     const hasVisualFrameAnchors =
       !useSingleVideoReferenceMode &&
       !!shotForVideo.anchorLastAi &&
-      shotFrameFileOnDisk(shotForVideo.anchorLastAi);
+      shotFrameUsable(shotForVideo.anchorLastAi);
 
     // ── multimodal 模式预解析：在 prompt 构建前 resolve 角色图，确保 @参考N 编号与 refs 数组同步 ──
     // 只要是 Seedance multimodal，就必须解析角色图；已有 videoPrompt 也不能跳过，
@@ -2741,7 +2741,7 @@ async function handleSingleVideoGenerate(
       const charsForPrompt = needPreResolveCharImages
         ? singleVideoShotChars.filter((c) =>
             charImagesForVideo.some(
-              (ci) => ci.name === c.name && !!ci.imagePath && shotFrameFileOnDisk(ci.imagePath)
+              (ci) => ci.name === c.name && !!ci.imagePath && shotFrameUsable(ci.imagePath)
             )
           )
         : singleVideoShotChars;
@@ -2886,10 +2886,10 @@ async function handleSingleVideoGenerate(
       const charMainUsable = (ci: (typeof charImagesForVideo)[number]) =>
         ci.arkAssetStatus === "active" && ci.arkAssetId
           ? true
-          : !!(ci.imagePath && shotFrameFileOnDisk(ci.imagePath));
+          : !!(ci.imagePath && shotFrameUsable(ci.imagePath));
       const charMainCount = charImagesForVideo.filter(charMainUsable).length;
       const anchorCount =
-        shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst) ? 1 : 0;
+        shotForVideo.anchorFirst && shotFrameUsable(shotForVideo.anchorFirst) ? 1 : 0;
 
       // 预先获取道具图 ID，计算需预留的槽位（道具 > 角度变体）
       const videoPropRefIds: string[] = (() => {
@@ -2933,7 +2933,7 @@ async function handleSingleVideoGenerate(
         }
       }
       // 第二轮：分镜首帧（对应 buildRefEntries 的 storyboard_image 轮）
-      if (shotForVideo.anchorFirst && shotFrameFileOnDisk(shotForVideo.anchorFirst)) {
+      if (shotForVideo.anchorFirst && shotFrameUsable(shotForVideo.anchorFirst)) {
         multimodalRefs.push({ type: "image", path: shotForVideo.anchorFirst });
       }
       // 第三轮：音频（对应 buildRefEntries 的 asset_audio 轮），最多 MAX_AUDIO_REFS 个
@@ -2953,7 +2953,7 @@ async function handleSingleVideoGenerate(
           .where(inArray(characterAssets.id, videoPropRefIds));
         for (const pa of videoPropAssets) {
           const imageCount = multimodalRefs.filter((r) => r.type === "image").length;
-          if (pa.imagePath && shotFrameFileOnDisk(pa.imagePath) && imageCount < MAX_MULTIMODAL_REFS) {
+          if (pa.imagePath && shotFrameUsable(pa.imagePath) && imageCount < MAX_MULTIMODAL_REFS) {
             multimodalRefs.push({ type: "image", path: pa.imagePath });
           }
         }

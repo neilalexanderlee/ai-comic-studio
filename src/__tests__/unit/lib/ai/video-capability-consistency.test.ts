@@ -38,8 +38,10 @@ const read = (rel: string) => fs.readFileSync(path.join(SRC, rel), "utf-8");
 describe("VIDEO_CAPABILITIES ↔ provider-factory", () => {
   it("每个注册表协议在 createVideoProvider 里都有对应 case，反之亦然", () => {
     const factory = read("lib/ai/provider-factory.ts");
-    // 只取 createVideoProvider 函数体内的 case
-    const start = factory.indexOf("export function createVideoProvider");
+    // 只取真正做实例化的那个 switch 的 case。
+    // 导出的 createVideoProvider 现在是个薄包装（外面套了一层存储桥，
+    // 负责把 oss:// 引用物化成本地文件再交给 provider），switch 在 …Raw 里。
+    const start = factory.indexOf("function createVideoProviderRaw");
     expect(start).toBeGreaterThan(-1);
     const body = factory.slice(start, factory.indexOf("\n}", start));
 
@@ -119,6 +121,21 @@ describe("VIDEO_CAPABILITIES 自洽性", () => {
           locked
         );
       }
+
+      // service_tier 只能声明在该模型真正支持的模式上
+      for (const mode of cap.features.serviceTierModes) {
+        expect(
+          cap.modes,
+          `${cap.label} 在不支持的模式 ${mode} 上声明了 service_tier`
+        ).toContain(mode);
+      }
+
+      // 参考生视频（r2v）不接受 service_tier —— 实测被 API 同步拒绝，
+      // 漏掉这条会让"参考生视频 + flex"这类组合在提交时 400。
+      expect(
+        cap.features.serviceTierModes,
+        `${cap.label} 不应在 multimodal（r2v）上声明 service_tier`
+      ).not.toContain("multimodal");
     }
   );
 

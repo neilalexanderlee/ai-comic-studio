@@ -38,7 +38,7 @@ beforeEach(() => {
   queuedResults.length = 0;
 });
 
-const shotFrameFileOnDisk = vi.fn<(path: string | null | undefined) => boolean>(() => true);
+const shotFrameUsable = vi.fn<(path: string | null | undefined) => boolean>(() => true);
 const resolveChainFramePath = vi.fn(
   (shot: { cutPoint?: string | null; anchorLastAi?: string | null }) =>
     shot.cutPoint ?? shot.anchorLastAi ?? undefined
@@ -48,7 +48,7 @@ vi.mock("@/lib/storyboard/frame-reference.server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/storyboard/frame-reference.server")>();
   return {
     ...actual,
-    shotFrameFileOnDisk: (path: string | null | undefined) => shotFrameFileOnDisk(path),
+    shotFrameUsable: (path: string | null | undefined) => shotFrameUsable(path),
     resolveChainFramePath: (shot: { cutPoint?: string | null; anchorLastAi?: string | null }) =>
       resolveChainFramePath(shot),
   };
@@ -103,7 +103,7 @@ describe("resolvePreviousEpisodeTailFrame", () => {
     queueResult([{ id: "ep-1" }]);    // prevEp
     queueResult([lastShot]);          // lastShot
     resolveChainFramePath.mockReturnValueOnce("/uploads/cut-5.png");
-    shotFrameFileOnDisk.mockReturnValue(true);
+    shotFrameUsable.mockReturnValue(true);
 
     const result = await resolvePreviousEpisodeTailFrame({
       projectId: "proj-1",

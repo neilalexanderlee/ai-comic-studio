@@ -1,4 +1,5 @@
 import { ensureArkApiV3BaseUrl } from "./ark-base-url";
+import { withArtifactBridge, withVideoArtifactBridge } from "./provider-artifact-bridge";
 import { OpenAIProvider } from "./providers/openai";
 import { GeminiProvider } from "./providers/gemini";
 import { SeedanceProvider } from "./providers/seedance";
@@ -25,7 +26,16 @@ export interface ModelConfigPayload {
   video?: ProviderConfig | null;
 }
 
+/**
+ * 所有 provider 出口都过一道存储桥：DB 里存的是 `oss://…` 引用，而每个 provider
+ * 内部都只会 `fs.readFileSync(本地路径)`。桥负责把 OSS 引用先下到临时文件再交给它们，
+ * 调用结束即清理。少了这一层，参考图会被静默丢弃（详见 provider-artifact-bridge.ts）。
+ */
 export function createAIProvider(config: ProviderConfig, uploadDir?: string): AIProvider {
+  return withArtifactBridge(createAIProviderRaw(config, uploadDir));
+}
+
+function createAIProviderRaw(config: ProviderConfig, uploadDir?: string): AIProvider {
   switch (config.protocol) {
     case "openai":
       return new OpenAIProvider({
@@ -75,7 +85,12 @@ export function createAIProvider(config: ProviderConfig, uploadDir?: string): AI
   }
 }
 
+/** 同 createAIProvider：出口统一过存储桥，provider 内部继续只认本地路径。 */
 export function createVideoProvider(config: ProviderConfig, uploadDir?: string): VideoProvider {
+  return withVideoArtifactBridge(createVideoProviderRaw(config, uploadDir));
+}
+
+function createVideoProviderRaw(config: ProviderConfig, uploadDir?: string): VideoProvider {
   switch (config.protocol) {
     case "seedance":
       // 火山方舟 Seedance 视频生成（Bearer Token 认证）
@@ -135,19 +150,19 @@ export function resolveAIProvider(modelConfig?: ModelConfigPayload): AIProvider 
   if (modelConfig?.text) {
     return createAIProvider(modelConfig.text);
   }
-  return getAIProvider();
+  return withArtifactBridge(getAIProvider());
 }
 
 export function resolveImageProvider(modelConfig?: ModelConfigPayload, uploadDir?: string): AIProvider {
   if (modelConfig?.image) {
     return createAIProvider(modelConfig.image, uploadDir);
   }
-  return getAIProvider(uploadDir);
+  return withArtifactBridge(getAIProvider(uploadDir));
 }
 
 export function resolveVideoProvider(modelConfig?: ModelConfigPayload, uploadDir?: string): VideoProvider {
   if (modelConfig?.video) {
     return createVideoProvider(modelConfig.video, uploadDir);
   }
-  return getVideoProvider(uploadDir);
+  return withVideoArtifactBridge(getVideoProvider(uploadDir));
 }

@@ -4,7 +4,7 @@ import { and, desc, eq } from "drizzle-orm";
 import type { FrameReferenceType } from "@/lib/storyboard/frame-reference";
 import {
   resolveChainFramePath,
-  shotFrameFileOnDisk,
+  shotFrameUsable,
 } from "@/lib/storyboard/frame-reference.server";
 
 /** D2: 上一集最后一镜的 cut_point（或 AI 尾帧）路径 */
@@ -50,9 +50,9 @@ export async function resolvePreviousEpisodeTailFrame(params: {
   if (!lastShot) return {};
 
   const path = resolveChainFramePath(lastShot);
-  if (!path || !shotFrameFileOnDisk(path)) return {};
+  if (!path || !shotFrameUsable(path)) return {};
 
-  const sourceType: FrameReferenceType = lastShot.cutPoint && shotFrameFileOnDisk(lastShot.cutPoint)
+  const sourceType: FrameReferenceType = lastShot.cutPoint && shotFrameUsable(lastShot.cutPoint)
     ? "cut_point"
     : "anchor_last_ai";
 
