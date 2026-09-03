@@ -4,11 +4,16 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { applyPose, buildBlock, buildFigure, type FigureHandle } from "./build-figure";
 import { POSES, lerpPose } from "@/lib/previz/humanoid";
+import { uploadUrl } from "@/lib/utils/upload-url";
+import { fetchArtifact } from "../video-editor/utils/mediaCache";
 import {
+  DEFAULT_SKY_COLOR,
+  defaultBackdrop,
   resolveCameraPose,
   sampleBlocking,
   type PrevizBlocking,
   type PrevizScene,
+  type StageBackdrop,
 } from "@/lib/previz/stage-types";
 
 /**
@@ -64,6 +69,8 @@ interface Params {
   blocking: PrevizBlocking;
   aspect: number;
   selectedFigureId: string | null;
+  /** 已解析好的背景板配置（url 已回落到本镜首帧） */
+  backdrop: StageBackdrop | null;
 }
 
 export function useStageRenderer(
@@ -85,6 +92,10 @@ export function useStageRenderer(
     frustum?: THREE.CameraHelper;
     figureGroup?: THREE.Group;
     blockGroup?: THREE.Group;
+    backdrop?: THREE.Mesh;
+    backdropTexture?: THREE.Texture;
+    /** 已加载的背景图引用，避免同一张图反复取 */
+    backdropSrc?: string | null;
     /** 编辑视角的球坐标 */
     orbit: { theta: number; phi: number; radius: number; target: THREE.Vector3 };
     figureMeshes: Map<string, FigureHandle>;
@@ -106,7 +117,8 @@ export function useStageRenderer(
     const scene = new THREE.Scene();
     // 中性灰而不是深色：导出的构图图是要给人和模型看的「布局」，
     // 深背景会被读成"夜景/黑天"，把本该只表达空间关系的图带上了不存在的氛围。
-    scene.background = new THREE.Color(0xd6d7db);
+    // 贴了背景图之后由用户的天空颜色接管。
+    scene.background = new THREE.Color(DEFAULT_SKY_COLOR);
 
     // 光只为了让盒子有体积感，不表达任何叙事布光 —— 布光是 Seedance 的活
     scene.add(new THREE.AmbientLight(0xffffff, 0.75));
@@ -130,6 +142,8 @@ export function useStageRenderer(
 
     const editorCam = new THREE.PerspectiveCamera(45, 1, 0.1, 200);
     const shotCam = new THREE.PerspectiveCamera(40, params.aspect, 0.05, 200);
+    // 机位相机同时看 layer 0（场景）与 layer 1（背景板）；编辑相机只看 layer 0
+    shotCam.layers.enable(1);
     const frustum = new THREE.CameraHelper(shotCam);
     scene.add(frustum);
 
@@ -323,6 +337,118 @@ export function useStageRenderer(
     // 只建一次：场景内容的变化走下面的 diff effect
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── 背景板 ──────────────────────────────────────────────────────────────
+  //
+  // ⚠️ 纹理必须走 fetch + createImageBitmap，**不能**用 TextureLoader 直接吃 URL。
+  // 背景图在 OSS 上，`/api/uploads/_oss/...` 会 302 到跨域的签名 URL；用 <img> 加载
+  // 跨域图片会**污染 canvas**，之后 toDataURL 直接抛 SecurityError —— 而那正是导出
+  // 运镜视频和构图图的唯一出口，等于背景一贴上导出就全废，且报错跟背景毫无关系。
+  // fetch 拿不到就是明确的 CORS 报错，失败得干脆。
+  useEffect(() => {
+    const scene = refs.current.scene;
+    if (!scene) return;
+    const backdrop = params.backdrop;
+    const src = backdrop?.url ?? null;
+
+    // 天空色随时生效，与有没有背景图无关
+    scene.background = new THREE.Color(params.scene.skyColor || DEFAULT_SKY_COLOR);
+
+    if (!src) {
+      if (refs.current.backdrop) { scene.remove(refs.current.backdrop); refs.current.backdrop = undefined; }
+      refs.current.backdropTexture?.dispose();
+      refs.current.backdropTexture = undefined;
+      refs.current.backdropSrc = null;
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      let texture = refs.current.backdropTexture;
+      if (refs.current.backdropSrc !== src || !texture) {
+        try {
+          const res = await fetchArtifact(uploadUrl(src));
+          if (!res.ok) throw new Error(String(res.status));
+          const bitmap = await createImageBitmap(await res.blob());
+          if (cancelled) { bitmap.close(); return; }
+          refs.current.backdropTexture?.dispose();
+          texture = new THREE.Texture(bitmap as unknown as HTMLImageElement);
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.needsUpdate = true;
+          refs.current.backdropTexture = texture;
+          refs.current.backdropSrc = src;
+        } catch (err) {
+          console.warn(`[PrevizStage] 背景图取不到（${src}）：`, err);
+          return;
+        }
+      }
+      if (cancelled || !texture) return;
+
+      const cfg = { ...defaultBackdrop(), ...backdrop };
+      if (cfg.mode === "panorama") {
+        // 环绕天空：任何角度都填满，但没有视差
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = texture;
+        if (refs.current.backdrop) { scene.remove(refs.current.backdrop); refs.current.backdrop = undefined; }
+        return;
+      }
+
+      // 平面：正对**起始机位**的一块板。随机位移动会产生视差 —— 那正是它比天空球有用的地方
+      const img = texture.image as ImageBitmap;
+      const imgAspect = img.width / img.height;
+      const cam = params.blocking.camera;
+      const halfV = (cam.fov * Math.PI) / 180 / 2;
+      // 板子放在主体后方 distance 处，尺寸取"刚好填满起始机位在该距离上的取景框"
+      const frameH = 2 * (cam.distance + cfg.distance) * Math.tan(halfV);
+      const frameW = frameH * params.aspect;
+      // contain：整张图进框（留边）；cover：填满框（裁掉溢出的部分）
+      const k = cfg.fit === "cover"
+        ? Math.max(frameW / imgAspect, frameH)
+        : Math.min(frameW / imgAspect, frameH);
+      const h = k * cfg.scale;
+      const w = h * imgAspect;
+
+      let mesh = refs.current.backdrop;
+      if (!mesh) {
+        mesh = new THREE.Mesh(
+          new THREE.PlaneGeometry(1, 1),
+          // 双面：编辑视角常会绕到板子背后，单面材质会让它整块消失，
+          // 看起来像"背景没加载"，很误导
+          new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide })
+        );
+        // 背景板不该参与拾取，否则点它会被当成"点了空白处"以外的东西
+        mesh.userData.isBackdrop = true;
+        // ⚠️ 只在机位视图里出现（layer 1）。它是一块十几米宽的板，
+        // 编辑视角环绕时会整个把画面糊住，摆位就没法做了 ——
+        // 而编辑视角要看的本来就是空间关系，不是背景。
+        mesh.layers.set(1);
+        refs.current.backdrop = mesh;
+        scene.add(mesh);
+      }
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+      mat.map = texture;
+      mat.opacity = cfg.opacity;
+      mat.needsUpdate = true;
+      mesh.scale.set(w, h, 1);
+
+      // 位置：从主体沿"起始机位的反方向"退 distance 米
+      const subj = params.blocking.placements.find((p) => p.figureId === cam.subjectFigureId);
+      const sx = subj?.x ?? 0, sz = subj?.z ?? 0;
+      const a = (subj?.rotY ?? 0) + (cam.azimuthDeg * Math.PI) / 180;
+      const dirX = -Math.sin(a), dirZ = -Math.cos(a);
+      mesh.position.set(
+        sx - dirX * cfg.distance + cfg.offsetX * w * 0.5,
+        Math.max(h / 2, cam.targetHeight) + cfg.offsetY * h * 0.5,
+        sz - dirZ * cfg.distance
+      );
+      // ⚠️ +π：PlaneGeometry 的法线是 +Z，绕 Y 转 a 之后法线指向 (sin a, cos a)，
+      // 而相机在 (-sin a, -cos a) 方向 —— 正好背对。少了这个 π，从机位看过去
+      // 背景板是完全看不见的（单面时直接消失，双面时法线反了光照也不对）。
+      mesh.rotation.set(0, a + Math.PI, 0);
+    })();
+
+    return () => { cancelled = true; };
+  }, [params.backdrop, params.scene.skyColor, params.blocking.camera, params.blocking.placements, params.aspect]);
 
   // ── 场景内容同步（方块） ────────────────────────────────────────────────
   useEffect(() => {

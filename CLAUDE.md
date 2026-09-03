@@ -606,8 +606,16 @@ seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、k
 `shot_previz → previz_selected_id → decidePrevizReference → @视频N` 这条链路
 不关心视频是谁生成的。意义：运镜验证从"调一次 Seedance"变成"本地渲染几秒"。
 
-**当前进度**：P1（摆位 + 导出构图图）、P3（运镜时间线 + 本地渲染运镜视频）已完成。
-P2（确定性回写 startFrameDesc 第一要素与 cameraDirection 起落幅）尚未开始。
+**背景板**（`StageBackdrop`，挂在**每镜**的 blocking 上，不是一集共用的 scene）：
+把本镜 anchorFirst 贴成一块正对起始机位的板，摆位时能对着真环境的透视放人。
+挂在镜上而不是集上，是因为每个镜头的环境就是它自己的首帧 —— 挂在集上的话，
+摆第 12 镜看到的是第 1 镜的背景，错的次数远多于对的。天空色则确实属于「景」，留在集上。
+板子走 **three 的 layer 1，只在机位视图出现**：它有十几米宽，编辑视角环绕时会整个把画面
+糊住，而编辑视角要看的本来就是空间关系。与「从画面反推 3D 场景」是两回事 ——
+那个是单目深度估计，对动漫画面尤其不可靠，明确不做。
+
+**当前进度**：P1（摆位 + 导出构图图）、P3（运镜时间线 + 本地渲染运镜视频）、
+背景板均已完成。P2（确定性回写 startFrameDesc 第一要素与 cameraDirection 起落幅）尚未开始。
 
 ### 9. Drizzle null 比较
 
@@ -1087,6 +1095,7 @@ src/lib/evals/
 | 参考生视频传 `service_tier: flex` 被同步拒绝 | `InvalidParameter: the specified parameter service_tier is not supported for model doubao-seedance-2-0 in r2v, must be empty`。这个参数**按模式**开放而不是按模型，而 `resolveServiceTier` 对所有模式一视同仁（`SEEDANCE_SERVICE_TIER` 环境变量一直是这么用的，只是从没人在 r2v 下设过它，所以一直没暴露）| 能力表 `features.serviceTierModes` 声明哪些模式接受该参数（Seedance 系列为 `["initialImage","keyframe"]`）；`resolveServiceTier(mode, requested)` 对不接受的模式直接吞掉。`video-capability-consistency.test.ts` 断言任何 capability 都不得在 `multimodal` 上声明它 |
 | 编辑器首次加载要等一分多钟，且每打开一次吃掉 125MB OSS 下行流量 | 两处叠加：① `initFromShots` 与存量时间线快照里 `clip.url` 存的是**源片**而不是 480p 代理（`MediaLibrary` 用了代理，时间线初始化没用），实测一集 15 条 = 源片 125.5MB vs 代理 12.5MB；② `syncSprites` 里十几个 clip 完全串行 `await buildSprite`，而 `MP4Clip.ready`（av-cliper 1.2.8）要等**整个流下载并解析完**才 resolve | ① `Clip` 拆成 `url`（导出源，永远是源片）+ `previewUrl`（浏览器解码源），存量快照在 `loadFromSnapshot` 前经 `healSnapshotMediaRefs` 自愈（顺带修掉「从素材库拖进来的 clip 导出会降级成 480p」）；② 改为 4 路并发 + 按离播放头距离排序 + 渐进可播（门只等播放头附近的素材）；③ 新增 `mediaCache.ts` 用 Cache Storage 按**稳定的存储引用**（不是签名 URL）缓存。实测：可播 70s → 2.5s（缓存命中 142ms），单次流量 125MB → 12.5MB → 0 |
 | 「首次点播放会跳回 0」的真正成因（此前靠 loading 门掩盖）| `syncSprites` 结尾 `if (!abort.signal.aborted && !isPlaying) previewFrame(playhead)` 用的是**这一轮 sync 开始时捕获的闭包值**。`previewFrame` 内部先 `pause()`（emit paused）再把时间强设为传入值 —— sync 期间用户点了播放，sync 结束时却以为自己还处在暂停态、还停在 0 秒 | 改读 `isPlayingRef.current` 与 `useEditorStore.getState().playhead`。这个修复是渐进可播的前提：门放开后 sync 必然在播放中结束 |
+| 取 OSS 产物偶发 `TypeError: Failed to fetch`，同一个 URL 一会儿好一会儿坏 | `/api/uploads/_oss/<key>` 是 302 跳到签名 URL，这一跳带 `Cache-Control: private, max-age=1800`。浏览器缓存的是**重定向本身**，于是会出现「缓存里的 302 还在、它指向的签名已经过期」—— OSS 对过期签名返回 403，而 **403 没有 CORS 头**，浏览器就把它报成一个毫无线索的 `Failed to fetch`（看起来像 CORS 没配，实际 CORS 是好的）。实测：默认 fetch 必失败，加 `cache:"reload"` 立刻 200，之后默认 fetch 又好了。另一类同样报这个错的情况是页面正忙的瞬间（打开 3D 导演台要同时创建两个 WebGL 上下文）请求直接挂掉 | 统一收进 `mediaCache.ts` 的 `fetchArtifact()`：最多 3 次、重试一律 `cache:"reload"`（这样才能拿到新的 302 和新签名）、带退避；403 与 5xx 才重试，404/401 不重试。**凡是取 OSS 产物一律走它，不要裸 fetch** |
 | 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)，`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
 
 ---

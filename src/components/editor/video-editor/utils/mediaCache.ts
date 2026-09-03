@@ -23,6 +23,45 @@
  * 所有分支都 try/catch 并退回普通 fetch：缓存是加速手段，不是正确性依赖。
  */
 
+/**
+ * 取产物。**一定要用它，不要裸 fetch。**
+ *
+ * `/api/uploads/_oss/<key>` 是 302 跳到 OSS 签名 URL，而这一跳带
+ * `Cache-Control: private, max-age=1800`。浏览器缓存的是**重定向本身**，于是会出现
+ * 「缓存里的 302 还在，它指向的签名却已经过期」—— OSS 对过期签名返回 403，
+ * 而 403 没有 CORS 头，浏览器于是把它报成一个毫无线索的 `TypeError: Failed to fetch`。
+ *
+ * 实测就是这样：同一个 URL 默认 fetch 必失败，加 `cache: "reload"` 立刻 200，
+ * 之后默认 fetch 又好了（缓存被刷新）。
+ *
+ * 另一类失败是页面正忙的瞬间（打开 3D 导演台要同时创建两个 WebGL 上下文）请求直接挂掉。
+ * 两类都靠"重试 + 绕过缓存 + 退避"兜住 —— 它们的共同点是**都会报成一个毫无线索的
+ * `TypeError: Failed to fetch`**，与其在调用处逐个猜，不如在这里统一重试。
+ */
+export async function fetchArtifact(url: string, signal?: AbortSignal): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    try {
+      // 第一次走正常缓存；重试一律绕过缓存，这样才可能拿到新的 302 和新的签名
+      const init: RequestInit = attempt === 0 ? {} : { cache: "reload" };
+      if (signal) init.signal = signal;
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+      // 4xx 里只有 403（签名过期）值得重试；404/401 重试多少次都一样
+      if (res.status !== 403 && res.status < 500) return res;
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      lastErr = err;
+    }
+    // 退避：失败常发生在页面正忙的瞬间（打开导演台时要同时建两个 WebGL 上下文），
+    // 隔一小会儿再来一次基本就成了
+    await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
 const CACHE_NAME = "editor-media-v1";
 /** 缓存总量上限。一集约 12.5MB，200MB 够放十几集。 */
 const MAX_TOTAL_BYTES = 200 * 1024 * 1024;
@@ -118,7 +157,7 @@ export async function fetchMedia(
     }
   }
 
-  const res = await fetch(url, { signal });
+  const res = await fetchArtifact(url, signal);
   if (!res.ok || !cache) return res;
 
   const declared = Number(res.headers.get("content-length") ?? 0);
@@ -138,6 +177,6 @@ export async function fetchMedia(
     return new Response(buffer);
   } catch {
     // 写缓存失败（配额/无痕窗口）→ 退回一次普通下载，功能不受影响
-    return fetch(url, { signal });
+    return fetchArtifact(url, signal);
   }
 }

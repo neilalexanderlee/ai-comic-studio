@@ -12,6 +12,8 @@ import {
   distanceForShotSize,
   fovToFocal,
   focalToFov,
+  DEFAULT_SKY_COLOR,
+  defaultBackdrop,
   defaultCamera,
   keyframeTrack,
   parseBlocking,
@@ -49,6 +51,10 @@ interface PrevizStageProps {
   videoRatio: string;
   /** 镜头时长（秒）—— 运镜时间线的长度 */
   duration: number;
+  /** 本镜首帧，作为背景板的默认来源（绝大多数情况不用手动选） */
+  anchorFirst?: string | null;
+  /** 本集其他分镜的帧，供换背景用 */
+  backdropCandidates?: { id: string; sequence: number; url: string }[];
   onClose: () => void;
   onUpdate: () => void;
 }
@@ -65,6 +71,8 @@ export function PrevizStage({
   shotCharacters,
   videoRatio,
   duration,
+  anchorFirst,
+  backdropCandidates = [],
   onClose,
   onUpdate,
 }: PrevizStageProps) {
@@ -121,14 +129,22 @@ export function PrevizStage({
     return () => { cancelled = true; };
   }, [projectId, episodeId, shotId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /** 背景板的实际配置：url 留空时回落到本镜首帧 —— 常见情况下用户什么都不用选 */
+  const resolvedBackdrop = useMemo(() => {
+    if (!blocking?.backdrop) return null;
+    const url = blocking.backdrop.url || anchorFirst || null;
+    return url ? { ...blocking.backdrop, url } : null;
+  }, [blocking?.backdrop, anchorFirst]);
+
   const rendererParams = useMemo(
     () => ({
       scene: scene ?? { version: 1 as const, blocks: [], figures: [] },
       blocking: blocking ?? parseBlocking(null, []),
       aspect,
       selectedFigureId,
+      backdrop: resolvedBackdrop,
     }),
-    [scene, blocking, aspect, selectedFigureId]
+    [scene, blocking, aspect, selectedFigureId, resolvedBackdrop]
   );
   const { handle, orbit } = useStageRenderer(editorRef, cameraRef, rendererParams);
 
@@ -730,6 +746,142 @@ export function PrevizStage({
                   </button>
                 </div>
               )}
+            </section>
+
+            {/* 背景板 */}
+            <section>
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white/40">
+                背景板
+              </p>
+              <div className="space-y-2 text-[11px]">
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() =>
+                      patchBlocking((b) => ({
+                        ...b,
+                        backdrop: b.backdrop ? undefined : { ...defaultBackdrop(), url: null },
+                      }))
+                    }
+                    className={`rounded px-1.5 py-0.5 ${
+                      blocking?.backdrop ? "bg-primary text-white" : "bg-white/10 text-white/60 hover:bg-white/20"
+                    }`}
+                  >
+                    {blocking?.backdrop ? "已开启" : "贴上背景"}
+                  </button>
+                  {!anchorFirst && !blocking?.backdrop?.url && (
+                    <span className="self-center text-white/35">本镜还没有首帧，需要手动选一张</span>
+                  )}
+                </div>
+
+                {blocking?.backdrop && (
+                  <>
+                    <label className="flex items-center gap-2 text-white/50">
+                      来源
+                      <select
+                        value={blocking.backdrop.url ?? ""}
+                        onChange={(e) =>
+                          patchBlocking((b) => ({
+                            ...b,
+                            backdrop: { ...defaultBackdrop(), ...b.backdrop, url: e.target.value || null },
+                          }))
+                        }
+                        className="min-w-0 flex-1 rounded bg-white/10 px-1.5 py-0.5 text-white"
+                      >
+                        <option value="">本镜首帧{anchorFirst ? "" : "（暂无）"}</option>
+                        {backdropCandidates.map((c) => (
+                          <option key={c.id} value={c.url}>分镜 {c.sequence} 的首帧</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="flex gap-3">
+                      <div className="flex items-center gap-1">
+                        <span className="text-white/50">模式</span>
+                        {([["平面", "plane"], ["全景", "panorama"]] as const).map(([label, mode]) => (
+                          <button
+                            key={mode}
+                            onClick={() =>
+                              patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, mode } }))
+                            }
+                            className={`rounded px-1.5 py-0.5 ${
+                              blocking.backdrop!.mode === mode
+                                ? "bg-primary text-white"
+                                : "bg-white/10 text-white/60 hover:bg-white/20"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {blocking.backdrop.mode === "plane" && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-white/50">适配</span>
+                          {([["完整", "contain"], ["铺满", "cover"]] as const).map(([label, fit]) => (
+                            <button
+                              key={fit}
+                              onClick={() =>
+                                patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, fit } }))
+                              }
+                              className={`rounded px-1.5 py-0.5 ${
+                                blocking.backdrop!.fit === fit
+                                  ? "bg-primary text-white"
+                                  : "bg-white/10 text-white/60 hover:bg-white/20"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {blocking.backdrop.mode === "plane" && (
+                      <>
+                        <Slider
+                          label="景深距离" unit="m" min={1} max={30} step={0.5}
+                          value={blocking.backdrop.distance}
+                          onChange={(v) => patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, distance: v } }))}
+                          hint="板子离主体多远，决定运镜时的视差强弱"
+                        />
+                        <Slider
+                          label="缩放" unit="×" min={0.3} max={3} step={0.05}
+                          value={blocking.backdrop.scale}
+                          onChange={(v) => patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, scale: v } }))}
+                        />
+                        <Slider
+                          label="水平偏移" unit="" min={-1} max={1} step={0.02}
+                          value={blocking.backdrop.offsetX}
+                          onChange={(v) => patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, offsetX: v } }))}
+                        />
+                        <Slider
+                          label="垂直偏移" unit="" min={-1} max={1} step={0.02}
+                          value={blocking.backdrop.offsetY}
+                          onChange={(v) => patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, offsetY: v } }))}
+                        />
+                        <Slider
+                          label="不透明度" unit="" min={0.1} max={1} step={0.05}
+                          value={blocking.backdrop.opacity}
+                          onChange={(v) => patchBlocking((b) => ({ ...b, backdrop: { ...defaultBackdrop(), ...b.backdrop, opacity: v } }))}
+                          hint="压暗一点，人偶更容易看清"
+                        />
+                      </>
+                    )}
+                  </>
+                )}
+
+                <label className="flex items-center gap-2 text-white/50">
+                  天空颜色
+                  <input
+                    type="color"
+                    value={scene?.skyColor || DEFAULT_SKY_COLOR}
+                    onChange={(e) =>
+                      setScene((prev) => (prev ? { ...prev, skyColor: e.target.value } : prev))
+                    }
+                    className="h-5 w-10 cursor-pointer rounded border border-white/20 bg-transparent"
+                  />
+                  <span className="text-white/35">属于「景」，本集共用</span>
+                </label>
+              </div>
             </section>
 
             {/* 场景 */}

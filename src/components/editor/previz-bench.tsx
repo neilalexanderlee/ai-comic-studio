@@ -40,6 +40,10 @@ interface PrevizBenchProps {
   layoutUrl?: string | null;
   /** 镜头时长（秒），决定运镜时间线的长度 */
   shotDuration?: number;
+  /** 本镜首帧 —— 3D 导演台的背景板默认贴它 */
+  anchorFirst?: string | null;
+  /** 本集其他分镜的首帧，供换背景 */
+  backdropCandidates?: { id: string; sequence: number; url: string }[];
   onPreview: (src: string) => void;
   onUpdate: () => void;
 }
@@ -62,6 +66,8 @@ export function PrevizBench({
   shotCharacters = [],
   layoutUrl,
   shotDuration = 5,
+  anchorFirst,
+  backdropCandidates,
   onPreview,
   onUpdate,
 }: PrevizBenchProps) {
@@ -290,6 +296,8 @@ export function PrevizBench({
           shotCharacters={shotCharacters}
           videoRatio={videoRatio}
           duration={shotDuration}
+          anchorFirst={anchorFirst}
+          backdropCandidates={backdropCandidates}
           onClose={() => setStageOpen(false)}
           onUpdate={onUpdate}
         />

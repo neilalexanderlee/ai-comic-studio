@@ -35,12 +35,48 @@ export interface StageFigure {
   color: string;
 }
 
+/**
+ * 背景板：把一张真实画面贴进 3D 场景，摆位时能对着真环境的透视关系放人。
+ *
+ * ⚠️ 这是**摆位时的参照**，不是场景的一部分 —— 所以它挂在每镜的 blocking 上而不是
+ * 一集共用的 scene 上。理由：每个镜头的环境画面就是它自己的 anchorFirst；挂在集上的话，
+ * 摆第 12 镜时看到的是第 1 镜的背景，错的次数远多于对的次数。
+ *
+ * 与「从画面反推 3D 场景」是两回事：那个是单目深度估计，对动漫画面尤其不可靠，
+ * 明确不做。这里只是把图当一块板/一张天空贴上去。
+ */
+export interface StageBackdrop {
+  /** 存储引用。留空 = 用本镜的 anchorFirst（绝大多数情况不用选） */
+  url?: string | null;
+  /**
+   * plane：贴一块正对起始机位的板，会随机位移动产生视差（能看出前后关系）
+   * panorama：贴成环绕天空，任何角度都填满，但没有视差
+   */
+  mode: "plane" | "panorama";
+  /** contain=完整（留边）/ cover=铺满（裁切） */
+  fit: "contain" | "cover";
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+  /** plane 模式下背景板离主体多远（米） */
+  distance: number;
+  opacity: number;
+}
+
+export function defaultBackdrop(): StageBackdrop {
+  return { url: null, mode: "plane", fit: "cover", scale: 1, offsetX: 0, offsetY: 0, distance: 6, opacity: 1 };
+}
+
 /** 一集共用的场景 */
 export interface PrevizScene {
   version: 1;
   blocks: StageBlock[];
   figures: StageFigure[];
+  /** 天空/环境底色。这个确实属于「景」，所以留在集上。 */
+  skyColor?: string;
 }
+
+export const DEFAULT_SKY_COLOR = "#d6d7db";
 
 // 姿态的定义（关节角度）住在 humanoid.ts；这里只转出去，避免两处各写一份枚举
 export type { FigurePose } from "./humanoid";
@@ -104,6 +140,8 @@ export interface PrevizBlocking {
   placements: FigurePlacement[];
   /** t>0 的关键帧。为空 = 静止镜头。 */
   keyframes?: PrevizKeyframe[];
+  /** 摆位参照用的背景板。不参与关键帧插值 —— 它是参照物，不是被导演的对象。 */
+  backdrop?: StageBackdrop;
 }
 
 // ── 关键帧插值 ────────────────────────────────────────────────────────────
@@ -293,7 +331,7 @@ export function focalToFov(focalMm: number): number {
 export const DEFAULT_FIGURE_HEIGHT = 1.7;
 
 export function emptyScene(): PrevizScene {
-  return { version: 1, blocks: [], figures: [] };
+  return { version: 1, blocks: [], figures: [], skyColor: DEFAULT_SKY_COLOR };
 }
 
 export function defaultCamera(subjectFigureId: string | null = null): CameraRig {
@@ -332,7 +370,12 @@ export function parseScene(raw: string | null | undefined): PrevizScene {
   try {
     const parsed = JSON.parse(raw) as PrevizScene;
     if (!Array.isArray(parsed.blocks) || !Array.isArray(parsed.figures)) return emptyScene();
-    return { version: 1, blocks: parsed.blocks, figures: parsed.figures };
+    return {
+      version: 1,
+      blocks: parsed.blocks,
+      figures: parsed.figures,
+      skyColor: parsed.skyColor || DEFAULT_SKY_COLOR,
+    };
   } catch {
     return emptyScene();
   }
@@ -365,6 +408,8 @@ export function parseBlocking(
       camera: subjectAlive
         ? parsed.camera
         : { ...parsed.camera, subjectFigureId: figures[0]?.id ?? null },
+      // 新字段一律记得透传：keyframes 漏过一次，运镜每重开一次导演台就丢一次
+      backdrop: parsed.backdrop ? { ...defaultBackdrop(), ...parsed.backdrop } : undefined,
       // 关键帧必须透传 —— 漏了它，运镜每次重开导演台就丢一次
       keyframes: (parsed.keyframes ?? [])
         .filter((k) => typeof k?.t === "number" && k.t > 0 && k.camera && Array.isArray(k.placements))
