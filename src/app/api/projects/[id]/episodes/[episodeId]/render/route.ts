@@ -28,6 +28,13 @@ interface SubtitleStyle {
 
 interface VideoClip {
   type: "video";
+  /**
+   * 导出源 —— 必须是全分辨率源片。
+   *
+   * ⚠️ 客户端 clip 上还有一个 `previewUrl`（480p 代理，供浏览器 WebCodecs 解码），
+   * 这里**刻意不声明**它：导出只认 url。要是哪天有人把代理写进 url，
+   * 成片会静默降级成 480p，而界面上完全看不出来。
+   */
   url: string;
   startTime: number;
   endTime: number;

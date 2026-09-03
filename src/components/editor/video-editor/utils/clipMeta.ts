@@ -30,7 +30,21 @@ export interface Clip {
   duration: number;    // seconds (= endTime - startTime)
 
   // 视频 clip
+  /**
+   * 素材源地址 —— **导出的唯一依据**。
+   *
+   * 服务端 ffmpeg 导出（`render/route.ts`）直接读这个字段，所以它必须始终是全分辨率源片。
+   * 想让浏览器解码更轻，改 `previewUrl`，不要动这里 —— 把代理写进 url 等于让导出降级成 480p。
+   */
   url?: string;
+  /**
+   * 低码率预览代理（480p），**仅供浏览器实时解码**（VideoPreview / 时长探测）。
+   *
+   * 编辑器在浏览器里用 WebCodecs 解码源片，一个 clip 动辄几十 MB：既拖慢首次可播，
+   * 也把 OSS 下行流量吃穿（实测一集 15 个 clip：源片 125MB vs 代理 12.5MB）。
+   * 导出路径不看这个字段。
+   */
+  previewUrl?: string;
   shotId?: string;
   thumbnailUrl?: string;
   bgmNote?: string;       // 来自分镜的 bgmNote，用于多选后自动填 BGM prompt

@@ -64,6 +64,8 @@ interface EditorState {
     sequence: number;
     prompt: string;
     videoUrl: string | null;
+    /** 低码率预览代理；只进 clip.previewUrl，导出仍用 videoUrl */
+    previewUrl?: string | null;
     duration: number;
     bgmNote?: string | null;
     dialogues?: Array<{ characterName: string; text: string; type?: string }>;
@@ -371,7 +373,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         trackId: videoTrack.id,
         type: "video",
         name: `分镜 ${shot.sequence}`,
+        // url 永远是源片（导出依据），代理只放 previewUrl（浏览器解码用）
         url: shot.videoUrl,
+        previewUrl: shot.previewUrl ?? undefined,
         shotId: shot.id,
         bgmNote: shot.bgmNote ?? undefined,
         startTime: cursor,

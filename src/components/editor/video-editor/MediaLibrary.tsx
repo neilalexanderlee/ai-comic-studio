@@ -69,9 +69,11 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
     addClip(track.id, {
       type: "video",
       name: `分镜 ${shot.sequence}`,
-      // 预览优先用低码率代理：直接解码 1080p 源片会把音频解码线程饿死并严重卡顿。
-      // 导出时 render 路由用的是 shots.videoUrl 原片，画质不受影响。
-      url: shot.previewUrl || shot.videoUrl,
+      // url 必须是源片：render 路由是按 clip.url 去 ffmpeg concat 的，
+      // 把代理写进 url 会让这条 clip 的导出画质降级成 480p。
+      // 浏览器解码走 previewUrl（直接解 1080p 源片会把音频解码线程饿死并严重卡顿）。
+      url: shot.videoUrl,
+      previewUrl: shot.previewUrl ?? undefined,
       shotId: shot.id,
       thumbnailUrl: shot.anchorFirst ?? shot.posterUrl ?? undefined,
       startTime,
@@ -99,6 +101,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
         type: "video",
         name: `分镜 ${shot.sequence}`,
         url: shot.videoUrl!,
+        previewUrl: shot.previewUrl ?? undefined,
         shotId: shot.id,
         thumbnailUrl: shot.anchorFirst ?? shot.posterUrl ?? undefined,
         startTime: cursor,

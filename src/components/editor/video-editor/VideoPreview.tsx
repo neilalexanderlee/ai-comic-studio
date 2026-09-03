@@ -22,6 +22,7 @@ import {
   Download, Loader2, Volume2, VolumeX,
 } from "lucide-react";
 import { uploadUrl } from "@/lib/utils/upload-url";
+import { fetchMedia } from "./utils/mediaCache";
 import { apiFetch } from "@/lib/api-fetch";
 
 const TRIM_MARGIN = 0.1; // 安全边界（秒），避免 split 边界报错
@@ -69,15 +70,42 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   const avCanvasTimeRef = useRef(0);
   const isPlayingRef = useRef(false);
   /**
-   * 当前这轮 syncSprites 的 promise。
+   * 当前这轮 syncSprites 的 promise —— **整轮**素材就绪。
    *
-   * syncSprites 是异步的：每个 clip 都要 fetch + 构建 MP4Clip（迁到 OSS 后还要走网络）。
-   * 素材尚未全部 addSprite 就调 avCanvas.play()，播放器会播到「已加载内容的末尾」
-   * 就触发 ended —— 表现为「第一次点播放，播一会儿进度归零并停止，第二次才正常」。
-   * 所以 handlePlay 必须先 await 这个 promise。
+   * 播放不再等它（见 readyGateRef）：导出、以及需要"全部素材都在场"的操作才 await 它。
    */
   const syncPromiseRef = useRef<Promise<void> | null>(null);
-  const [spritesLoading, setSpritesLoading] = useState(false);
+  /**
+   * 渐进可播的门：只等**播放头附近**的素材就绪，其余在后台继续加载。
+   *
+   * 为什么需要一道门（而不是直接放开播放）：素材还没 addSprite 就 play()，
+   * 那几秒会是黑屏/无声；更早还出现过"第一次点播放，播一会儿进度归零并停止"——
+   * 那个是 syncSprites 结尾用 stale 闭包值调 previewFrame 造成的（见该处注释），
+   * 已单独修掉，不再靠"整轮加载完才准播"来掩盖。
+   */
+  const readyGateRef = useRef<Promise<void> | null>(null);
+  /** clipId → 该 clip 的构建 promise（供 stall guard 精确等待某一条） */
+  const clipLoadPromisesRef = useRef<Map<string, Promise<void>>>(new Map());
+  /** 播放追上加载时的兜底：正在等待缓冲，避免重入 */
+  const stallGuardRef = useRef(false);
+  /** 播放头前瞻窗口（秒）：门只等这个窗口内的素材 */
+  const READY_LOOKAHEAD_SECONDS = 8;
+  /** 用户每次 play / pause / seek 自增；stall guard 用它判断"缓冲期间用户是否已另有动作" */
+  const userActionRef = useRef(0);
+  const [buffering, setBuffering] = useState(false);
+  /**
+   * 并发构建数。
+   *
+   * 开销是「网络下载 + mp4box 解析」，解析在主线程上本来就串行，加大并发只增加内存驻留
+   * （MP4Clip 会把整段素材的 sample 全留在内存），不增加吞吐。4 条并行下载足以喂饱
+   * 主线程解析，又低于浏览器单域连接上限；万一某集没有预览代理、回落到源片，
+   * 4 × 几十 MB 的驻留也还安全。
+   */
+  const BUILD_CONCURRENCY = 4;
+  /** 播放按钮的门：false = 播放头附近素材尚未就绪 */
+  const [playable, setPlayable] = useState(true);
+  /** 后台加载进度，仅用于提示文案（done/total），不阻塞任何操作 */
+  const [loadProgress, setLoadProgress] = useState<{ done: number; total: number } | null>(null);
 
   const tracks = useEditorStore((s) => s.tracks);
   const playhead = useEditorStore((s) => s.playhead);
@@ -115,6 +143,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     const unsubTime = avCanvas.on("timeupdate", (t) => {
       avCanvasTimeRef.current = t / 1e6;
       setPlayhead(t / 1e6);
+      guardAgainstStall(t / 1e6);
     });
     const unsubPaused = avCanvas.on("paused", () => {
       isPlayingRef.current = false;
@@ -383,6 +412,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       [
         c.id, c.type, c.startTime, c.duration,
         "url" in c ? c.url : "",
+        "previewUrl" in c ? c.previewUrl : "",
         "audioUrl" in c ? c.audioUrl : "",
         c.volume ?? "",
         c.trimStart ?? "",
@@ -397,6 +427,23 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     syncPromiseRef.current = syncSprites();
   }, [tracksKey]);
 
+  /**
+   * 把 tracks 的当前状态同步成 AVCanvas 上的 sprite 集合。
+   *
+   * ## 为什么是有限并发 + 渐进可播
+   *
+   * 每个 clip 的构建都是「fetch → new MP4Clip(stream) → await ready」，而 `MP4Clip.ready`
+   * 要等**整个流下载并解析完**才 resolve（av-cliper 1.2.8）。原先这些构建是串行的，
+   * 一集十几条素材串起来要一分多钟，期间播放按钮全程禁用。
+   *
+   * 现在分两步：
+   *  1. **diff 是同步的**（删除、纯 timing/volume 更新就地完成），只有真需要重建的进队列；
+   *  2. 队列按「离播放头的距离」排序，由 BUILD_CONCURRENCY 个 worker 并发消费。
+   *
+   * 播放的门只等**播放头附近**那几条（readyGateRef），其余边播边补。加载速度
+   * （代理约 0.8MB/条）远快于实时播放（5~10s/条），正常情况下加载始终跑在播放头前面；
+   * 万一被追上，timeupdate 里的 stall guard 会暂停等待而不是放任黑屏。
+   */
   async function syncSprites() {
     const avCanvas = avCanvasRef.current;
     if (!avCanvas) return;
@@ -404,9 +451,9 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     syncAbortRef.current?.abort();
     const abort = new AbortController();
     syncAbortRef.current = abort;
+    clipLoadPromisesRef.current = new Map();
 
-    setSpritesLoading(true);
-    try {
+    const startedAt = performance.now();
     const spriteMap = spriteMapRef.current;
     const snapshotMap = clipSnapshotRef.current;
 
@@ -435,13 +482,13 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       }
     }
 
-    // 新增或更新 clip
+    // ── 第一遍（全同步）：diff。能就地更新的当场更新，剩下的进构建队列 ──────────
+    const queue: { clip: Clip; snapKey: string }[] = [];
     for (const clip of renderableClips) {
-      if (abort.signal.aborted) return;
-
       const snapKey = [
         clip.startTime, clip.duration,
-        "url" in clip ? clip.url : "",
+        // 解码源是 previewUrl || url，两者任一变化都要重建 sprite
+        "url" in clip ? (clip.previewUrl || clip.url) : "",
         "audioUrl" in clip ? clip.audioUrl : "",
         clip.volume ?? "",
         clip.trimStart ?? "",
@@ -481,21 +528,103 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         }
       }
 
-      if (abort.signal.aborted) return;
-      const sprite = await buildSprite(clip, abort.signal);
-      if (!sprite || abort.signal.aborted) continue;
-
-      await avCanvas.addSprite(sprite);
-      spriteMap.set(clip.id, sprite);
-      snapshotMap.set(clip.id, snapKey);
+      queue.push({ clip, snapKey });
     }
 
-    if (!abort.signal.aborted && !isPlaying) {
-      await avCanvas.previewFrame(playhead * 1e6).catch(() => {});
-    }
+    // ── 第二遍：排序 + 开门条件 ────────────────────────────────────────────────
+    // 播放头位置读 store 的**当前**值，不用组件闭包里的 playhead（这轮 sync 可能是
+    // 上一次渲染排队过来的，闭包值已经过期）。
+    const headAt = useEditorStore.getState().playhead;
+    const priority = (c: Clip): number => {
+      if (c.startTime <= headAt && headAt < c.endTime) return -1;   // 正压在播放头上
+      if (c.startTime >= headAt) return c.startTime - headAt;       // 播放头之后，越近越先
+      return 1e6 + (headAt - c.endTime);                            // 播放头之前，最后补
+    };
+    queue.sort((a, b) => priority(a.clip) - priority(b.clip));
+
+    // 门只等「与 [播放头, 播放头+前瞻] 有交集」的 clip
+    const gateIds = new Set(
+      queue
+        .filter((q) => q.clip.startTime < headAt + READY_LOOKAHEAD_SECONDS && q.clip.endTime > headAt)
+        .map((q) => q.clip.id)
+    );
+    let gateRemaining = gateIds.size;
+    let releaseGate!: () => void;
+    const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+    readyGateRef.current = gate;
+    if (gateRemaining === 0) releaseGate();
+    setPlayable(gateRemaining === 0);
+    setLoadProgress(queue.length > 0 ? { done: 0, total: queue.length } : null);
+
+    let done = 0;
+    const isCurrentRound = () => syncAbortRef.current === abort;
+    /** 门打开时：解禁播放按钮，并（若未在播放）立刻画出播放头那一帧 */
+    const openGate = () => {
+      releaseGate();
+      if (!isCurrentRound()) return;
+      setPlayable(true);
+      console.log(
+        `[VideoPreview] playable in ${Math.round(performance.now() - startedAt)}ms ` +
+          `(${gateIds.size}/${queue.length} clips)`
+      );
+      if (!isPlayingRef.current && !abort.signal.aborted) {
+        avCanvas.previewFrame(useEditorStore.getState().playhead * 1e6).catch(() => {});
+      }
+    };
+
+    const runTask = async (task: { clip: Clip; snapKey: string }) => {
+      const work = (async () => {
+        const sprite = await buildSprite(task.clip, abort.signal);
+        if (!sprite) return;
+        if (abort.signal.aborted) { sprite.destroy(); return; }
+        await avCanvas.addSprite(sprite);
+        if (abort.signal.aborted) { avCanvas.removeSprite(sprite); return; }
+        spriteMap.set(task.clip.id, sprite);
+        snapshotMap.set(task.clip.id, task.snapKey);
+      })();
+      // 留在 map 里不删：stall guard 会 await 它，已完成的 promise await 是零成本
+      clipLoadPromisesRef.current.set(task.clip.id, work);
+      try {
+        await work;
+      } finally {
+        done++;
+        if (isCurrentRound()) setLoadProgress({ done, total: queue.length });
+        if (gateIds.has(task.clip.id) && --gateRemaining === 0) openGate();
+      }
+    };
+
+    try {
+      let cursor = 0;
+      await Promise.all(
+        Array.from({ length: Math.min(BUILD_CONCURRENCY, queue.length) }, async () => {
+          while (!abort.signal.aborted) {
+            const index = cursor++;
+            if (index >= queue.length) break;
+            await runTask(queue[index]);
+          }
+        })
+      );
+
+      // 结尾补一帧。⚠️ 这里必须读 isPlayingRef / store 的**当前**值：
+      // previewFrame 内部会先 pause() 再把时间强设为传入值，用 stale 的闭包值调用
+      // 就是老 bug「第一次点播放，播一会儿进度归零并停止」的真正成因 ——
+      // sync 期间用户点了播放，sync 结束时却以为自己还处在暂停态、还停在 0 秒。
+      if (!abort.signal.aborted && !isPlayingRef.current) {
+        await avCanvas.previewFrame(useEditorStore.getState().playhead * 1e6).catch(() => {});
+      }
+      if (queue.length > 0 && isCurrentRound()) {
+        console.log(
+          `[VideoPreview] all sprites ready in ${Math.round(performance.now() - startedAt)}ms ` +
+            `(${queue.length} clips)`
+        );
+      }
     } finally {
-      // 只有仍是当前这轮才收起 loading（被后一轮 abort 时不要误清）
-      if (syncAbortRef.current === abort) setSpritesLoading(false);
+      // 被 abort 时也要开门，否则 await 这个 gate 的 handlePlay 会永远挂着
+      releaseGate();
+      if (isCurrentRound()) {
+        setPlayable(true);
+        setLoadProgress(null);
+      }
     }
   }
 
@@ -504,7 +633,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   async function buildSprite(clip: Clip, signal: AbortSignal): Promise<VisibleSprite | null> {
     try {
       if (clip.type === "video" && clip.url) {
-        const res = await fetch(uploadUrl(clip.url));
+        // 浏览器解码一律走低码率代理；clip.url（源片）只留给服务端导出。
+        // 直接解 1080p 源片会把音频解码线程饿死（MP4Clip.tick audio timeout），
+        // 且每次打开编辑器都要从 OSS 拉几十 MB。
+        const videoRef = clip.previewUrl || clip.url;
+        const res = await fetchMedia(videoRef, uploadUrl(videoRef), signal);
         if (!res.ok || !res.body || signal.aborted) return null;
 
         let mp4Clip = new MP4Clip(res.body);
@@ -573,7 +706,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         return sprite;
 
       } else if ((clip.type === "bgm" || clip.type === "audio") && clip.audioUrl) {
-        const res = await fetch(uploadUrl(clip.audioUrl));
+        const res = await fetchMedia(clip.audioUrl, uploadUrl(clip.audioUrl), signal);
         if (!res.ok || !res.body || signal.aborted) return null;
 
         const volume = muted ? 0 : (clip.volume ?? 0.5);
@@ -612,19 +745,77 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     avCanvasTimeRef.current = playhead;
   }, [playhead]);
 
+  /**
+   * 播放追上加载时的兜底。
+   *
+   * 渐进可播只保证播放头附近就绪，理论上播放头可能跑到还没构建的 clip 上。
+   * 正常情况下不会发生（一条 480p 代理约 0.2~0.5s 就绪，而一个镜头要播 5~10s，
+   * 加载始终跑在前面），但真发生时，"黑屏若干秒"是最糟的表现形式 ——
+   * 这里改成像普通播放器那样暂停缓冲、就绪后从原处续播。
+   */
+  function guardAgainstStall(currentSec: number) {
+    if (!isPlayingRef.current || stallGuardRef.current) return;
+    const avCanvas = avCanvasRef.current;
+    if (!avCanvas) return;
+
+    const lookAt = currentSec + 0.5;
+    const pending = useEditorStore
+      .getState()
+      .tracks.flatMap((t) => t.clips)
+      .filter(
+        (c) =>
+          (c.type === "video" || c.type === "bgm" || c.type === "audio") &&
+          c.startTime <= lookAt &&
+          lookAt < c.endTime &&
+          !spriteMapRef.current.has(c.id) &&
+          clipLoadPromisesRef.current.has(c.id)
+      );
+    if (pending.length === 0) return;
+
+    stallGuardRef.current = true;
+    setBuffering(true);
+    const token = userActionRef.current;
+    const resumeAt = currentSec;
+    avCanvas.pause();
+    isPlayingRef.current = false;
+
+    Promise.all(pending.map((c) => clipLoadPromisesRef.current.get(c.id)))
+      .catch(() => {})
+      .then(() => {
+        stallGuardRef.current = false;
+        setBuffering(false);
+        // 缓冲期间用户自己按了播放/暂停/拖了进度条 → 尊重用户的操作，不抢回控制权
+        if (userActionRef.current !== token) return;
+        const cvs = avCanvasRef.current;
+        if (!cvs) return;
+        const end = totalDuration();
+        if (resumeAt >= end) return;
+        cvs.play({ start: resumeAt * 1e6, end: end * 1e6 });
+        isPlayingRef.current = true;
+        setPlaying(true);
+      });
+  }
+
   // ── 播放控制 ────────────────────────────────────────────────────────────────
   async function handlePlay() {
     const avCanvas = avCanvasRef.current;
     if (!avCanvas || total === 0) return;
+    userActionRef.current++;
 
     if (isPlaying) {
       avCanvas.pause();
       isPlayingRef.current = false;
       setPlaying(false);
     } else {
-      // 必须等素材全部就绪再播 —— 否则会播到「已加载部分的末尾」就触发 ended，
-      // 进度归零并停止（用户看到的是「第一次点播放会中途停下」）
-      await syncPromiseRef.current;
+      // 只等播放头附近的素材（渐进可播），不等整轮加载完。
+      // 循环是为了处理"等门的过程中又开了新一轮 sync"——那时旧门已被 finally 释放，
+      // 但真正该等的是新门。
+      for (let i = 0; i < 3; i++) {
+        const gate = readyGateRef.current;
+        if (!gate) break;
+        await gate;
+        if (readyGateRef.current === gate) break;
+      }
       if (!avCanvasRef.current) return;
 
       const start = playhead >= total ? 0 : playhead;
@@ -641,6 +832,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   function handleSeek(time: number) {
     const avCanvas = avCanvasRef.current;
     if (!avCanvas) return;
+    userActionRef.current++;
     avCanvas.pause();
     isPlayingRef.current = false;
     setPlaying(false);
@@ -659,7 +851,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         clipSnapshotRef.current.delete(id);
       }
     }
-    syncSprites();
+    syncPromiseRef.current = syncSprites();
   }, [muted]);
 
   // ── 导出（服务端 ffmpeg：concat libx264 归零 PTS → BGM adelay 精确对齐）────────
@@ -783,11 +975,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           </button>
           <button
             onClick={handlePlay}
-            disabled={total === 0 || spritesLoading}
-            title={spritesLoading ? "素材加载中…" : undefined}
+            disabled={total === 0 || !playable}
+            title={!playable ? "播放头附近的素材加载中…" : undefined}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black hover:bg-white/90 disabled:opacity-40"
           >
-            {spritesLoading ? (
+            {!playable ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : isPlaying ? (
               <Pause className="h-4 w-4" />
@@ -810,6 +1002,19 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           >
             {muted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
           </button>
+          {buffering && (
+            <span className="flex items-center gap-1 text-[10px] text-white/70">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              缓冲中
+            </span>
+          )}
+          {/* 后台加载进度：已可播放，只是还有素材在补 —— 纯提示，不挡任何操作 */}
+          {!buffering && loadProgress && loadProgress.done < loadProgress.total && (
+            <span className="flex items-center gap-1 text-[10px] tabular-nums text-white/50">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {loadProgress.done}/{loadProgress.total}
+            </span>
+          )}
           <div className="mx-1 h-4 w-px bg-white/20" />
           <button
             onClick={handleExport}

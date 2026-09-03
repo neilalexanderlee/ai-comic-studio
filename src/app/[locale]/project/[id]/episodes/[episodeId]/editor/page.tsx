@@ -25,6 +25,49 @@ function probeVideoDuration(url: string): Promise<number> {
 }
 
 /**
+ * 修复存量时间线快照里的素材引用，让 `url`（导出源）与 `previewUrl`（浏览器解码源）各归各位。
+ *
+ * 两类历史遗留：
+ *  1. 快照建立时还没有预览代理这个概念，视频 clip 只有 `url` 指向源片 —— 编辑器每次打开
+ *     都在下载几十 MB 的原片（实测一集 15 条 = 125MB，而代理只要 12.5MB）。
+ *  2. 从素材库拖进时间线的 clip，`url` 曾被写成代理路径 —— 那条 clip 的**导出**会降级成 480p。
+ *
+ * 只在 clip.url 与该分镜当前的 videoUrl / previewUrl 之一精确相等时才动它：
+ * 分镜重新生成过视频后，快照里可能留着上一版的文件路径，此时新代理对应的不是同一个文件，
+ * 张冠李戴地挂上去会让预览和导出画面对不上。
+ */
+function healSnapshotMediaRefs(tracks: Track[], shots: Shot[]): Track[] {
+  if (shots.length === 0) return tracks;
+  const byVideoUrl = new Map<string, Shot>();
+  const byPreviewUrl = new Map<string, Shot>();
+  for (const shot of shots) {
+    if (shot.videoUrl) byVideoUrl.set(shot.videoUrl, shot);
+    if (shot.previewUrl) byPreviewUrl.set(shot.previewUrl, shot);
+  }
+
+  return tracks.map((track) => ({
+    ...track,
+    clips: track.clips.map((clip) => {
+      if (clip.type !== "video" || !clip.url) return clip;
+
+      // 情况 2：url 是代理 → 换回源片，代理挪到 previewUrl
+      const shotByPreview = byPreviewUrl.get(clip.url);
+      if (shotByPreview?.videoUrl) {
+        return { ...clip, url: shotByPreview.videoUrl, previewUrl: shotByPreview.previewUrl ?? undefined };
+      }
+
+      // 情况 1：url 是源片且仍是该分镜的当前视频 → 补上代理
+      if (clip.previewUrl) return clip;
+      const shotByVideo = byVideoUrl.get(clip.url);
+      if (shotByVideo?.previewUrl) {
+        return { ...clip, previewUrl: shotByVideo.previewUrl };
+      }
+      return clip;
+    }),
+  }));
+}
+
+/**
  * 探测所有 video clip 的真实时长，做 ripple edit：
  * - 每个 video clip duration 修正为真实值
  * - 后续所有 clip（BGM/字幕）按累积偏移量平移，相对关系不变
@@ -41,9 +84,10 @@ async function fixVideoClipDurations(
     .sort((a, b) => a.startTime - b.startTime);
   if (vClips.length === 0) return;
 
-  // 并发探测
+  // 并发探测。优先探代理：preload="metadata" 在 moov 不在文件头时会把整个文件拉下来，
+  // 对几十 MB 的源片就是一次白烧的下行流量，而代理与源片时长一致。
   const actualDurations = await Promise.all(
-    vClips.map((c) => probeVideoDuration(uploadUrl(c.url!))),
+    vClips.map((c) => probeVideoDuration(uploadUrl(c.previewUrl || c.url!))),
   );
 
   // 检查是否有任何偏差 > 0.05s（降低阈值，避免 0.1s 边界情况被跳过）
@@ -161,7 +205,7 @@ export default function EditorPage({
             | Track[]                                                       // 旧格式（兼容）
             | { tracks: Track[]; globalSubtitleStyle?: unknown };           // 新格式
           const savedTracks = Array.isArray(parsed) ? parsed : parsed.tracks;
-          loadFromSnapshot(savedTracks);
+          loadFromSnapshot(healSnapshotMediaRefs(savedTracks, projectData.shots ?? []));
           // 恢复全局字幕样式（新格式才有）
           if (!Array.isArray(parsed) && parsed.globalSubtitleStyle) {
             setGlobalSubtitleStyle(parsed.globalSubtitleStyle as Parameters<typeof setGlobalSubtitleStyle>[0]);
@@ -174,6 +218,7 @@ export default function EditorPage({
               sequence: s.sequence,
               prompt: s.prompt,
               videoUrl: s.videoUrl,
+              previewUrl: s.previewUrl,
               duration: s.duration,
               bgmNote: s.bgmNote,
               dialogues: s.dialogues,
