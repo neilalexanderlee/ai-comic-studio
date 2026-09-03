@@ -179,6 +179,33 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
   {
     ...SEEDANCE_MULTIMODAL,
     protocol: "seedance",
+    label: "Doubao Seedance 2.0 Mini",
+    modelIds: ["doubao-seedance-2-0-mini-260615"],
+    // 必须比 "seedance-2-0" 更长更具体，家族匹配才会优先命中这一条（FAMILY_ORDER 取更长者）
+    families: ["seedance-2-0-mini"],
+    // ⚠️ 时长与分辨率**沿用 2.0**，未经官方文档确认。
+    // 方舟的参数校验错误只说"not valid"、不枚举合法值，实测同一取值两次结论相反，
+    // 反推不可靠 —— 与其写一组猜出来的数字（能力表是唯一事实来源，写错会造成静默 clamp），
+    // 不如按同代 2.0 保守取值。拿到官方文档后改这两行即可。
+    duration: { min: 4, max: 15, auto: true },
+    resolutions: ["480p", "720p"],
+    outputFormats: ["mp4"],
+    features: {
+      ...SEEDANCE_MULTIMODAL.features,
+      // 实测明确拒绝：`the specified parameter service_tier is not supported for
+      // model doubao-seedance-2-0-mini in t2v, must be empty`
+      serviceTierModes: [],
+      // 模型元数据里 input_modalities 含 video、task_type 含 MultimodalToVideo，
+      // 说明它大概率能吃参考视频；但请求体形状没有实测过，先按 0 声明 ——
+      // 白模预演会如实告知"当前模型不支持参考视频"，而不是提交上去等异步报错。
+      // 验证通过后把这里改成 SEEDANCE_MULTIMODAL 的默认值即可。
+    },
+    refs: { ...SEEDANCE_MULTIMODAL.refs, video: 0 },
+    refTransport: { ...SEEDANCE_MULTIMODAL.refTransport, video: [] },
+  },
+  {
+    ...SEEDANCE_MULTIMODAL,
+    protocol: "seedance",
     label: "Doubao Seedance 2.0 Fast",
     modelIds: ["doubao-seedance-2-0-fast-260128"],
     families: ["seedance-2-0-fast"],

@@ -133,6 +133,20 @@ export class SeedanceProvider implements VideoProvider {
   }
 
   /**
+   * 是否需要显式声明 `omni_reference_task_type`。
+   *
+   * 2.5 和 2.0 mini 的模型元数据里 `task_type` 都同时含 `MultimodalToVideo` /
+   * `VideoEditing` / `VideoExtension` —— 不显式声明子任务类型时，模型会按提示词意图
+   * 自行判定，判成 edit/extend 后会因 ratio/duration 不符合那两类任务的限制而**异步**报错。
+   * 实测 mini 接受这个参数（同一请求的报错落在别的参数上，说明它本身没被拒）。
+   * 传了无害、不传有风险，所以两者都传。
+   */
+  private needsOmniReferenceTaskType(): boolean {
+    const m = this.model.toLowerCase();
+    return m.includes("seedance-2-5") || m.includes("seedance-2-0-mini");
+  }
+
+  /**
    * 获取服务层级：优先使用调用方传入的值，其次读取环境变量 SEEDANCE_SERVICE_TIER，默认不传（即 auto）。
    * 'flex' 模式成本降低约 50%，但生成时间更长，适合非实时批量任务。
    *
@@ -414,7 +428,7 @@ export class SeedanceProvider implements VideoProvider {
     // 2.5：显式声明这是「参考生视频」子任务。不传或传 auto 时，模型会自行按提示词意图
     // 判定任务类型，可能误判为视频编辑/延长并在任务启动后异步报错
     // InvalidParameter.TaskTypeConstraint；显式指定可把校验前置到提交时同步返回。
-    if (this.isSeedance25()) {
+    if (this.needsOmniReferenceTaskType()) {
       body.omni_reference_task_type = "reference";
     }
     return body;

@@ -4,6 +4,7 @@ import {
   type ModelCapability,
 } from "@/lib/ai/model-capabilities";
 import { requireUser } from "@/lib/api-guard";
+import { ensureArkApiV3BaseUrl } from "@/lib/ai/ark-base-url";
 
 interface ListRequest {
   protocol: string;
@@ -15,6 +16,19 @@ interface ListRequest {
 interface ModelItem {
   id: string;
   name: string;
+}
+
+/**
+ * 方舟 `/models` 的 base。
+ *
+ * ⚠️ 用户在设置页存的 baseUrl 常常是 `https://ark.cn-beijing.volces.com`（不带 `/api/v3`），
+ * 直接拼 `/models` 会 404 —— 而调用处的 catch 是降级到兜底列表，**于是模型列表长期显示的
+ * 是硬编码兜底、而不是账号真实开通的模型**（新开通的 seedance 2.0 mini 因此一直不出现，
+ * 兜底列表里没有它就等于用不了）。`ensureArkApiV3BaseUrl` 是 provider 侧一直在用的归一化，
+ * 这里必须复用同一个，别再各拼各的。
+ */
+function arkModelsBase(baseUrl: string): string {
+  return ensureArkApiV3BaseUrl(baseUrl).replace(/\/+$/, "");
 }
 
 function buildModelsUrl(baseUrl: string): string {
@@ -195,7 +209,7 @@ export async function POST(request: Request) {
       // 尝试从方舟 API 动态拉取，过滤图片生成模型（ID 含 seedream）
       if (body.baseUrl && body.apiKey) {
         try {
-          const base = body.baseUrl.replace(/\/+$/, "");
+          const base = arkModelsBase(body.baseUrl);
           const modelsUrl = `${base}/models`;
           const res = await fetch(modelsUrl, {
             headers: { Authorization: `Bearer ${body.apiKey}` },
@@ -213,8 +227,8 @@ export async function POST(request: Request) {
               });
             }
           }
-        } catch {
-          // 静默降级
+        } catch (err) {
+          console.warn("[models/list] 方舟图片模型动态拉取失败，回退兜底列表：", err);
         }
       }
 
@@ -231,6 +245,7 @@ export async function POST(request: Request) {
         { id: "doubao-seedance-2-5-260628",      name: "Doubao Seedance 2.5 (30s, up to 1080p, 30图+10视频+10音频)" },
         { id: "doubao-seedance-2-0-260128",      name: "Doubao Seedance 2.0 (15s, up to 1080p)" },
         { id: "doubao-seedance-2-0-fast-260128", name: "Doubao Seedance 2.0 Fast (15s, up to 720p)" },
+        { id: "doubao-seedance-2-0-mini-260615",  name: "Doubao Seedance 2.0 Mini (性价比档)" },
         { id: "doubao-seedance-1-5-pro-251215",  name: "Doubao Seedance 1.5 Pro (12s, up to 1080p)" },
         { id: "doubao-seedance-1-5-lite-250601", name: "Doubao Seedance 1.5 Lite (10s, 480p only)" },
       ];
@@ -238,8 +253,7 @@ export async function POST(request: Request) {
       // 尝试从方舟 API 动态拉取，过滤出视频生成模型（ID 含 seedance/dreamina）
       if (body.baseUrl && body.apiKey) {
         try {
-          // 方舟 baseUrl 格式为 .../api/v3，直接追加 /models（非 OpenAI 的 /v1/models）
-          const base = body.baseUrl.replace(/\/+$/, "");
+          const base = arkModelsBase(body.baseUrl);
           const modelsUrl = `${base}/models`;
           const res = await fetch(modelsUrl, {
             headers: { Authorization: `Bearer ${body.apiKey}` },
@@ -258,8 +272,9 @@ export async function POST(request: Request) {
               });
             }
           }
-        } catch {
-          // 网络错误或超时：静默降级到兜底列表
+        } catch (err) {
+          console.warn("[models/list] 方舟视频模型动态拉取失败，回退兜底列表：", err);
+          // 网络错误或超时：降级到兜底列表
         }
       }
 
