@@ -8,6 +8,8 @@ import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { addImportLog } from "@/lib/import-utils";
 import { validateWholeDramaSourceLength } from "@/lib/whole-drama/limits";
 import { VISUAL_STYLE_PRESETS } from "@/lib/ai/prompts/visual-style-presets";
+import { checkProjectQuota, planLimitResponse } from "@/lib/billing/plan-limits";
+import { resolveFeatures } from "@/lib/billing/subscription";
 
 export async function GET(request: Request) {
   const userId = getUserIdFromRequest(request);
@@ -33,6 +35,11 @@ export async function POST(request: Request) {
   if (!body.title?.trim()) {
     return NextResponse.json({ error: "Title is required" }, { status: 400 });
   }
+
+  // 套餐的项目数量上限。放在参数校验之后、写库之前 ——
+  // 未启用计费时 checkProjectQuota 直接短路返回 null，连库都不查。
+  const quota = await checkProjectQuota(userId, await resolveFeatures(userId));
+  if (quota) return planLimitResponse(quota);
 
   // 画风必须在项目创建时就落地——整剧模式创建后会立即触发角色提取，
   // 若此时 visualStyle 仍是 schema default("anime_2d")，角色描述会被错误地打上

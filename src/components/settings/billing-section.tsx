@@ -185,6 +185,13 @@ export function BillingSection() {
                 {plan.creditsPerPeriod.toLocaleString()} 积分 / 月
               </p>
               <p className="mt-1 text-[10px] leading-snug text-[--text-muted]">{plan.tagline}</p>
+              {/* 功能位要在**撞上之前**看得见 —— 否则用户只会在生成时收到一条
+                  "当前套餐最高支持 480p"的报错，却不知道该升到哪一档 */}
+              <p className="mt-1 text-[10px] leading-snug text-[--text-secondary]">
+                最高 {plan.features.maxResolution} · 同时 {plan.features.maxConcurrentJobs} 个任务 ·{" "}
+                {plan.features.maxProjects === null ? "项目不限" : `${plan.features.maxProjects} 个项目`}
+                {plan.features.allowedVideoFamilies.length > 0 && " · 仅入门档模型"}
+              </p>
               {plan.priceCents > 0 && !isCurrent && (
                 <Button
                   size="xs"

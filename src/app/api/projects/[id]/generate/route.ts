@@ -45,6 +45,7 @@ import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library
 import { uploadUrl } from "@/lib/utils/upload-url";
 import { shouldResolveMultimodalCharacterRefs } from "@/lib/ai/multimodal-refs";
 import { openBillingGate } from "@/lib/billing/gate";
+import { checkVideoGenerationAllowed, planLimitResponse } from "@/lib/billing/plan-limits";
 import { tryBuildPreviewProxy, tryBuildPoster } from "@/lib/video/preview-proxy";
 import { wrapAsPrevizPrompt } from "@/lib/ai/prompts/previz";
 import { decidePrevizReference } from "@/lib/storyboard/previz-reference";
@@ -2579,6 +2580,14 @@ async function handlePrevizGenerate(
   const ratio =
     resolveRatioForMode(capability, "multimodal") ?? (payload?.ratio as string) ?? "16:9";
 
+  // 套餐功能位：预演虽然便宜，但用的是同一个视频模型、占的是同一份并发额度。
+  // 分辨率固定 480p，任何档位都过得去，这里实际拦的是模型档位与并发。
+  const previzLimit = await checkVideoGenerationAllowed(userId, {
+    modelId: modelConfig.video.modelId,
+    resolution: "480p",
+  });
+  if (previzLimit) return planLimitResponse(previzLimit);
+
   // 预演也走计费闸门：它同样消耗上游算力。480p + flex 的报价本来就低。
   const billing = await openBillingGate(
     userId,
@@ -2790,6 +2799,15 @@ async function handleSingleVideoGenerate(
 
   // 提示词方言由能力描述符决定（原先是 `protocol === "seedance" || "doubao"` 的硬编码判断）
   const usesSeedanceDialect = videoCapability.promptDialect === "seedance-multi-param";
+
+  // ── 套餐功能位（必须在预扣之前）─────────────────────────────────────────
+  // 顺序不能反：先预扣再发现套餐不允许，就得再退一次款、多两条流水，
+  // 而且用户会在流水里看到一笔莫名其妙的预扣与退还。
+  const planLimit = await checkVideoGenerationAllowed(userId, {
+    modelId: modelConfig?.video?.modelId,
+    resolution: (payload?.resolution as string) ?? "480p",
+  });
+  if (planLimit) return planLimitResponse(planLimit);
 
   // ── 计费闸门（BILLING_ENABLED=1 时生效，否则完全空操作）──────────────────
   // 必须在调用上游之前预扣：视频生成是数分钟的长任务，生成完再扣费时，
