@@ -38,6 +38,8 @@ interface PrevizBenchProps {
   shotCharacters?: { id: string; name: string }[];
   /** 已存在的构图参考图（3D 导演台导出的相机视图） */
   layoutUrl?: string | null;
+  /** 镜头时长（秒），决定运镜时间线的长度 */
+  shotDuration?: number;
   onPreview: (src: string) => void;
   onUpdate: () => void;
 }
@@ -59,6 +61,7 @@ export function PrevizBench({
   anyGenerating,
   shotCharacters = [],
   layoutUrl,
+  shotDuration = 5,
   onPreview,
   onUpdate,
 }: PrevizBenchProps) {
@@ -286,6 +289,7 @@ export function PrevizBench({
           shotId={shotId}
           shotCharacters={shotCharacters}
           videoRatio={videoRatio}
+          duration={shotDuration}
           onClose={() => setStageOpen(false)}
           onUpdate={onUpdate}
         />

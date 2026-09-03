@@ -583,9 +583,31 @@ seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、k
 **导出的构图图写进 `shots.previz_layout_url`，刻意不写 `anchor_first`**：
 后者是真要送去生成视频的首帧，被一张灰盒渲染图覆盖是不可逆的。
 
-**当前进度**：P1（摆位 + 存取 + 导出构图图）已完成。P2（确定性回写 startFrameDesc
-第一要素与 cameraDirection 起落幅）、P3（相机关键帧 → 本地渲染灰模视频 → 写 `shot_previz`，
-复用预演台已有的「选用 → @视频N → 正式生成」链路）尚未开始。
+**人形代理是骨骼层级，不是一堆盒子**（`src/lib/previz/humanoid.ts`）：姿态 = 一组关节角度，
+所以**两个姿态之间可以插值** —— 这是运镜视频里「站起来 / 蹲下去」能平滑演出来的前提。
+第一版用互不相干的盒子摆位，「站」和「蹲」是两组毫无关系的坐标，根本没法过渡。
+造型用胶囊体拼，仍然零外部模型资源。
+
+**运镜时间线（P3）**：关键帧把**相机与走位放在一起**（`PrevizKeyframe`），不是两条轨道 ——
+预演要验的是「镜头这么动的同时人这么走」，分开对齐纯属手工负担，而且分开之后
+「这一刻画面长什么样」就不再是一个能直接截图的状态。
+
+⚠️ **编辑态必须绑定到"当前选中的那一帧"**（`editingT` + `patchFrame`）。
+最初编辑态就等于 t=0，于是"拖到 3.5s、改机位、加关键帧"会把 0s 一起改掉，
+首尾同机位、运镜视频等于静止画面 —— 实测踩过。
+
+**导出走逐帧渲染 + 服务端 ffmpeg 拼帧**，不用 `captureStream` + MediaRecorder：
+后者在 WebGL canvas 上实测一帧都抓不到（只产出 110 字节空 webm）。逐帧的好处是
+**帧数严格等于 fps × 时长**，渲染慢只是导出久一点，不会丢帧或时长漂移。
+截图用同步的 `toDataURL` 而不是 `toBlob`：标签页被遮挡时浏览器把合成节流到 1Hz，
+`toBlob` 每帧要等一秒（实测 1021ms → 48ms）。
+
+产物写进 `shot_previz`（`model_id = "local-3d"`），**后端零新增** ——
+`shot_previz → previz_selected_id → decidePrevizReference → @视频N` 这条链路
+不关心视频是谁生成的。意义：运镜验证从"调一次 Seedance"变成"本地渲染几秒"。
+
+**当前进度**：P1（摆位 + 导出构图图）、P3（运镜时间线 + 本地渲染运镜视频）已完成。
+P2（确定性回写 startFrameDesc 第一要素与 cameraDirection 起落幅）尚未开始。
 
 ### 9. Drizzle null 比较
 

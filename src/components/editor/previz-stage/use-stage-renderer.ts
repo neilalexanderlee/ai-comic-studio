@@ -2,9 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import { buildBlock, buildFigure } from "./build-figure";
+import { applyPose, buildBlock, buildFigure, type FigureHandle } from "./build-figure";
+import { POSES, lerpPose } from "@/lib/previz/humanoid";
 import {
   resolveCameraPose,
+  sampleBlocking,
   type PrevizBlocking,
   type PrevizScene,
 } from "@/lib/previz/stage-types";
@@ -19,6 +21,16 @@ import {
  * 走 React 的 reconciler 反而绕远，而且能少一个依赖。
  */
 
+/** base64 data URL → Blob。toDataURL 是同步的，这一步也就不用等任何回调。 */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [head, b64] = dataUrl.split(",");
+  const mime = /:(.*?);/.exec(head)?.[1] ?? "image/jpeg";
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 export interface StageRendererHandle {
   /** 把相机视图渲染成 PNG blob（导出构图参考图用） */
   captureCameraView: (width: number, height: number) => Promise<Blob | null>;
@@ -26,6 +38,25 @@ export interface StageRendererHandle {
   pickFigure: (clientX: number, clientY: number) => string | null;
   /** 把屏幕坐标投影到地面 y=0 上，返回世界坐标（拖动走位用） */
   projectToGround: (clientX: number, clientY: number) => { x: number; z: number } | null;
+  /**
+   * 按关键帧走一遍时间线，逐帧渲染相机视图，返回 JPEG 序列。
+   *
+   * ⚠️ 一开始用的是 `canvas.captureStream()` + MediaRecorder，实测在 WebGL canvas 上
+   * 只录出 110 字节的空 webm —— 一帧都没抓到。与其去猜浏览器什么时候认为 canvas
+   * "脏了"，不如逐帧渲染再截图：
+   *  - **帧数严格等于 fps × 时长**，不依赖实时渲染跟不跟得上
+   *  - 渲染慢一点也只是导出久一点，不会丢帧或时长漂移
+   *  - 编码交给服务端 ffmpeg（那条路径本来就在），顺带继承「禁 B 帧」那条教训
+   */
+  renderFrames: (
+    durationSec: number,
+    fps: number,
+    width: number,
+    height: number,
+    onProgress?: (done: number, total: number) => void
+  ) => Promise<Blob[]>;
+  /** 预览播放：把场面推到某个时刻（不录制） */
+  seek: (t: number | null) => void;
 }
 
 interface Params {
@@ -56,9 +87,12 @@ export function useStageRenderer(
     blockGroup?: THREE.Group;
     /** 编辑视角的球坐标 */
     orbit: { theta: number; phi: number; radius: number; target: THREE.Vector3 };
-    figureMeshes: Map<string, THREE.Group>;
+    figureMeshes: Map<string, FigureHandle>;
     raf?: number;
+    /** 非 null 时，渲染循环按这个时刻采样关键帧，而不是用编辑态 */
+    playTime: number | null;
   }>({
+    playTime: null,
     orbit: { theta: Math.PI * 0.25, phi: Math.PI * 0.35, radius: 9, target: new THREE.Vector3(0, 1, 0) },
     figureMeshes: new Map(),
   });
@@ -149,6 +183,43 @@ export function useStageRenderer(
         if (!raycaster.ray.intersectPlane(groundPlane, point)) return null;
         return { x: point.x, z: point.z };
       },
+      seek(t) {
+        refs.current.playTime = t;
+      },
+      async renderFrames(durationSec, fps, width, height, onProgress) {
+        const total = Math.max(1, Math.round(durationSec * fps));
+        const prevSize = camRenderer.getSize(new THREE.Vector2());
+        const prevRatio = camRenderer.getPixelRatio();
+        // 导出时把像素比钉成 1：否则在 2x 屏上会渲成 1708×960，
+        // 和我们写进 DB 的「480p」对不上，文件也白白大一倍
+        camRenderer.setPixelRatio(1);
+        camRenderer.setSize(width, height, false);
+        shotCam.aspect = width / height;
+        frustum.visible = false;
+        const frames: Blob[] = [];
+        try {
+          for (let i = 0; i < total; i++) {
+            const t = (i / fps);
+            updateScene(paramsRef.current, Math.min(t, durationSec));
+            shotCam.aspect = width / height;
+            shotCam.updateProjectionMatrix();
+            camRenderer.render(scene, shotCam);
+            // ⚠️ 用同步的 toDataURL 而不是 toBlob：toBlob 要等一个合成帧才回调，
+            // 而标签页被遮挡时浏览器会把合成/定时器节流到 1Hz —— 实测每帧要 1 秒，
+            // 84 帧就是一分半。toDataURL 是同步的，完全不受这个调度影响。
+            frames.push(dataUrlToBlob(camRenderer.domElement.toDataURL("image/jpeg", 0.85)));
+            onProgress?.(i + 1, total);
+            // 每隔一批让出主线程，否则长镜头导出期间界面完全僵住
+            if (i % 12 === 11) await new Promise((r) => setTimeout(r, 0));
+          }
+        } finally {
+          camRenderer.setPixelRatio(prevRatio);
+          camRenderer.setSize(prevSize.x, prevSize.y, false);
+          frustum.visible = true;
+          refs.current.playTime = null;
+        }
+        return frames;
+      },
       async captureCameraView(width, height) {
         // 用离屏尺寸重渲一帧再截图，导出分辨率就不受面板大小影响
         const prev = camRenderer.getSize(new THREE.Vector2());
@@ -165,6 +236,32 @@ export function useStageRenderer(
         return blob;
       },
     };
+
+    /**
+     * 把场面推到某个时刻（t=null 表示用编辑态）。
+     * 抽出来是因为逐帧导出要在 rAF 之外同步调用它。
+     */
+    function updateScene(p: Params, t: number | null) {
+      const sampled = t === null ? null : sampleBlocking(p.blocking, t);
+      if (sampled) {
+        for (const pl of sampled.placements) {
+          const handle = refs.current.figureMeshes.get(pl.figureId);
+          const figure = p.scene.figures.find((f) => f.id === pl.figureId);
+          if (!handle || !figure) continue;
+          handle.root.position.set(pl.x, 0, pl.z);
+          handle.root.rotation.y = pl.rotY;
+          const blended = lerpPose(pl.pose, pl.poseTo, pl.poseBlend);
+          applyPose(handle, blended.pose, blended.rootY, blended.rootPitch, figure.height);
+        }
+      }
+      const activeCam = sampled ? sampled.camera : p.blocking.camera;
+      const activePlacements = sampled ? sampled.placements : p.blocking.placements;
+      const pose = resolveCameraPose(activeCam, activePlacements);
+      shotCam.position.set(...pose.pos);
+      shotCam.lookAt(...pose.target);
+      shotCam.fov = activeCam.fov;
+      shotCam.updateProjectionMatrix();
+    }
 
     let disposed = false;
     // effect 顶部已经判过非空；提成常量是为了让 TS 在渲染循环的闭包里也能保住收窄
@@ -184,11 +281,8 @@ export function useStageRenderer(
       );
       editorCam.lookAt(o.target);
 
-      // 正式机位：由参数化 rig 解算
-      const pose = resolveCameraPose(p.blocking.camera, p.blocking.placements);
-      shotCam.position.set(...pose.pos);
-      shotCam.lookAt(...pose.target);
-      shotCam.fov = p.blocking.camera.fov;
+      // 播放/录制时按时间线采样，否则用编辑态
+      updateScene(p, refs.current.playTime);
       shotCam.aspect = p.aspect;
       shotCam.updateProjectionMatrix();
       frustum.update();
@@ -251,10 +345,10 @@ export function useStageRenderer(
     refs.current.figureMeshes.clear();
     for (const f of params.scene.figures) {
       const pl = params.blocking.placements.find((p) => p.figureId === f.id);
-      const mesh = buildFigure(f, pl?.pose ?? "stand");
-      mesh.userData.figureId = f.id;
-      g.add(mesh);
-      refs.current.figureMeshes.set(f.id, mesh);
+      const handle = buildFigure(f, pl?.pose ?? "stand");
+      handle.root.userData.figureId = f.id;
+      g.add(handle.root);
+      refs.current.figureMeshes.set(f.id, handle);
     }
   }, [params.scene.figures, params.blocking.placements]);
 
@@ -262,18 +356,22 @@ export function useStageRenderer(
   // 所以这里统一在 placements 变化时同步一次 transform
   useEffect(() => {
     for (const pl of params.blocking.placements) {
-      const mesh = refs.current.figureMeshes.get(pl.figureId);
-      if (!mesh) continue;
-      mesh.position.set(pl.x, 0, pl.z);
-      mesh.rotation.y = pl.rotY;
+      const handle = refs.current.figureMeshes.get(pl.figureId);
+      if (!handle) continue;
+      handle.root.position.set(pl.x, 0, pl.z);
+      handle.root.rotation.y = pl.rotY;
+      // 姿态改成调关节角度，不重建 mesh —— 重建几十个 mesh 会让拖滑杆变卡
+      const figure = params.scene.figures.find((f) => f.id === pl.figureId);
+      const p = POSES[pl.pose];
+      if (figure) applyPose(handle, p.pose, p.rootY, p.rootPitch, figure.height);
     }
   }, [params.blocking.placements]);
 
   // 选中高亮：给选中的人偶加一圈地面指示环
   useEffect(() => {
-    for (const [id, mesh] of refs.current.figureMeshes) {
-      const existing = mesh.getObjectByName("__sel");
-      if (existing) mesh.remove(existing);
+    for (const [id, handle] of refs.current.figureMeshes) {
+      const existing = handle.root.getObjectByName("__sel");
+      if (existing) handle.root.remove(existing);
       if (id !== params.selectedFigureId) continue;
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(0.28, 0.36, 32),
@@ -282,7 +380,7 @@ export function useStageRenderer(
       ring.name = "__sel";
       ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.01;
-      mesh.add(ring);
+      handle.root.add(ring);
     }
   }, [params.selectedFigureId, params.scene.figures, params.blocking.placements]);
 

@@ -9,6 +9,7 @@ import {
   emptyScene,
   resolveCameraPose,
   defaultCamera,
+  sampleBlocking,
   type StageFigure,
 } from "@/lib/previz/stage-types";
 
@@ -126,5 +127,100 @@ describe("参数化机位 → 绝对位姿", () => {
     const { pos, target } = resolveCameraPose({ ...defaultCamera("ghost"), distance: 3 }, P(0));
     expect(pos.every(Number.isFinite)).toBe(true);
     expect(target.every(Number.isFinite)).toBe(true);
+  });
+});
+
+describe("关键帧插值", () => {
+  const fig = (id: string) => ({ figureId: id, x: 0, z: 0, rotY: 0, pose: "stand" as const });
+  const base = {
+    version: 1 as const,
+    camera: { subjectFigureId: "a", azimuthDeg: 0, distance: 3, height: 1.6, targetHeight: 1.2, fov: 40 },
+    placements: [fig("a")],
+  };
+
+  it("没有关键帧 = 静止镜头，任何时刻都是 t=0 的状态", () => {
+    for (const t of [0, 1, 5, 100]) {
+      expect(sampleBlocking(base, t).camera.distance).toBe(3);
+    }
+  });
+
+  it("中点采样落在两端之间", () => {
+    const b = {
+      ...base,
+      keyframes: [{ t: 4, camera: { ...base.camera, distance: 7 }, placements: [{ ...fig("a"), x: 2 }] }],
+    };
+    const s = sampleBlocking(b, 2);
+    expect(s.camera.distance).toBeCloseTo(5, 5);
+    expect(s.placements[0].x).toBeCloseTo(1, 5);
+  });
+
+  it("超出末帧后保持末帧，不外推", () => {
+    const b = { ...base, keyframes: [{ t: 4, camera: { ...base.camera, distance: 7 }, placements: [fig("a")] }] };
+    expect(sampleBlocking(b, 99).camera.distance).toBe(7);
+  });
+
+  it("方位角走最短弧：170° → -170° 只转 20°，不横穿 340°", () => {
+    const b = {
+      ...base,
+      camera: { ...base.camera, azimuthDeg: 170 },
+      keyframes: [{ t: 2, camera: { ...base.camera, azimuthDeg: -170 }, placements: [fig("a")] }],
+    };
+    const mid = sampleBlocking(b, 1).camera.azimuthDeg;
+    // 最短弧的中点是 180（或等价的 -180），绝不该落在 0 附近
+    expect(Math.min(Math.abs(mid - 180), Math.abs(mid + 180))).toBeLessThan(1);
+  });
+
+  it("姿态不插数值，而是给出两端 + 混合系数（关节角度由渲染层去插）", () => {
+    const b = {
+      ...base,
+      keyframes: [{ t: 4, camera: base.camera, placements: [{ ...fig("a"), pose: "crouch" as const }] }],
+    };
+    const s = sampleBlocking(b, 1);
+    expect(s.placements[0].pose).toBe("stand");
+    expect(s.placements[0].poseTo).toBe("crouch");
+    expect(s.placements[0].poseBlend).toBeCloseTo(0.25, 5);
+  });
+
+  it("多段关键帧按区间取值，不会串段", () => {
+    const b = {
+      ...base,
+      keyframes: [
+        { t: 2, camera: { ...base.camera, distance: 5 }, placements: [fig("a")] },
+        { t: 6, camera: { ...base.camera, distance: 9 }, placements: [fig("a")] },
+      ],
+    };
+    expect(sampleBlocking(b, 1).camera.distance).toBeCloseTo(4, 5);
+    expect(sampleBlocking(b, 4).camera.distance).toBeCloseTo(7, 5);
+  });
+});
+
+describe("关键帧的读回", () => {
+  const figures: StageFigure[] = [{ id: "a", name: "角色甲", height: 1.7, color: "#888" }];
+  const cam = { subjectFigureId: "a", azimuthDeg: 0, distance: 3, height: 1.6, targetHeight: 1.2, fov: 40 };
+
+  it("关键帧必须被透传 —— 漏了它，运镜每次重开导演台就丢一次", () => {
+    const raw = JSON.stringify({
+      version: 1,
+      camera: cam,
+      placements: [{ figureId: "a", x: 0, z: 0, rotY: 0, pose: "stand" }],
+      keyframes: [{ t: 3.5, camera: { ...cam, distance: 1.2 }, placements: [{ figureId: "a", x: 1, z: 0, rotY: 0, pose: "sit" }] }],
+    });
+    const b = parseBlocking(raw, figures);
+    expect(b.keyframes).toHaveLength(1);
+    expect(b.keyframes![0].t).toBe(3.5);
+    expect(b.keyframes![0].camera.distance).toBe(1.2);
+  });
+
+  it("坏的关键帧被丢弃，好的保留", () => {
+    const raw = JSON.stringify({
+      version: 1, camera: cam, placements: [{ figureId: "a", x: 0, z: 0, rotY: 0, pose: "stand" }],
+      keyframes: [
+        { t: 2, camera: cam, placements: [{ figureId: "a", x: 0, z: 0, rotY: 0, pose: "stand" }] },
+        { t: -1, camera: cam, placements: [] },
+        { t: 5 },
+        null,
+      ],
+    });
+    expect(parseBlocking(raw, figures).keyframes).toHaveLength(1);
   });
 });

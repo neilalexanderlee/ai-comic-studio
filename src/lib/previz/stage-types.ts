@@ -42,8 +42,9 @@ export interface PrevizScene {
   figures: StageFigure[];
 }
 
-/** 演员在某一镜里的姿态。只做粗分类 —— 预演要的是"站着还是坐着"，不是骨骼动画。 */
-export type FigurePose = "stand" | "sit" | "crouch" | "lie" | "run";
+// 姿态的定义（关节角度）住在 humanoid.ts；这里只转出去，避免两处各写一份枚举
+export type { FigurePose } from "./humanoid";
+import type { FigurePose } from "./humanoid";
 
 export interface FigurePlacement {
   figureId: string;
@@ -80,11 +81,109 @@ export interface CameraRig {
   fov: number;
 }
 
+/**
+ * 一个时间点上的完整场面状态。
+ *
+ * 刻意把相机和走位放进**同一个**关键帧，而不是各走各的轨道：预演要验的是
+ * 「镜头这么动的同时人这么走」，两条轨道分开对齐是纯粹的手工负担，
+ * 而且分开之后"这一刻画面长什么样"就不再是一个可以直接截图的状态了。
+ */
+export interface PrevizKeyframe {
+  /** 距镜头开始的秒数 */
+  t: number;
+  camera: CameraRig;
+  placements: FigurePlacement[];
+}
+
 /** 一个镜头的走位与机位 */
 export interface PrevizBlocking {
   version: 1;
+  /** t=0 时的机位（也是导出构图图时用的那一帧） */
   camera: CameraRig;
+  /** t=0 时的走位 */
   placements: FigurePlacement[];
+  /** t>0 的关键帧。为空 = 静止镜头。 */
+  keyframes?: PrevizKeyframe[];
+}
+
+// ── 关键帧插值 ────────────────────────────────────────────────────────────
+
+/** 最短弧插值：绕一圈的角度直接线性插会走远路（例如 170° → -170° 会横穿 340°） */
+function lerpAngleDeg(a: number, b: number, k: number): number {
+  let d = ((b - a + 180) % 360 + 360) % 360 - 180;
+  return a + d * k;
+}
+function lerpAngleRad(a: number, b: number, k: number): number {
+  const TAU = Math.PI * 2;
+  let d = ((b - a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  return a + d * k;
+}
+const lerp = (a: number, b: number, k: number) => a + (b - a) * k;
+
+/** 把 blocking 展开成按时间排序的完整关键帧序列（含 t=0 那一帧） */
+export function keyframeTrack(b: PrevizBlocking): PrevizKeyframe[] {
+  const base: PrevizKeyframe = { t: 0, camera: b.camera, placements: b.placements };
+  const rest = (b.keyframes ?? []).filter((k) => k.t > 0).sort((x, y) => x.t - y.t);
+  return [base, ...rest];
+}
+
+/**
+ * 采样某个时刻的场面状态。
+ *
+ * 姿态（pose）是离散的，这里只返回两端的姿态与混合系数，由渲染层去插关节角度
+ * （见 humanoid.ts 的 lerpPose）—— 这正是"站起来/蹲下去"能平滑演出来的地方。
+ */
+export function sampleBlocking(
+  b: PrevizBlocking,
+  t: number
+): {
+  camera: CameraRig;
+  placements: (FigurePlacement & { poseTo: FigurePose; poseBlend: number })[];
+} {
+  const track = keyframeTrack(b);
+  if (track.length === 1 || t <= 0) {
+    return {
+      camera: track[0].camera,
+      placements: track[0].placements.map((p) => ({ ...p, poseTo: p.pose, poseBlend: 0 })),
+    };
+  }
+  const last = track[track.length - 1];
+  if (t >= last.t) {
+    return {
+      camera: last.camera,
+      placements: last.placements.map((p) => ({ ...p, poseTo: p.pose, poseBlend: 0 })),
+    };
+  }
+
+  let i = 0;
+  while (i < track.length - 2 && track[i + 1].t <= t) i++;
+  const A = track[i], B = track[i + 1];
+  const span = B.t - A.t;
+  const k = span > 0 ? (t - A.t) / span : 0;
+
+  return {
+    camera: {
+      // 主体不插值：它是个 id。取左端的，切换发生在关键帧上。
+      subjectFigureId: A.camera.subjectFigureId,
+      azimuthDeg: lerpAngleDeg(A.camera.azimuthDeg, B.camera.azimuthDeg, k),
+      distance: lerp(A.camera.distance, B.camera.distance, k),
+      height: lerp(A.camera.height, B.camera.height, k),
+      targetHeight: lerp(A.camera.targetHeight, B.camera.targetHeight, k),
+      fov: lerp(A.camera.fov, B.camera.fov, k),
+    },
+    placements: A.placements.map((pa) => {
+      const pb = B.placements.find((p) => p.figureId === pa.figureId) ?? pa;
+      return {
+        figureId: pa.figureId,
+        x: lerp(pa.x, pb.x, k),
+        z: lerp(pa.z, pb.z, k),
+        rotY: lerpAngleRad(pa.rotY, pb.rotY, k),
+        pose: pa.pose,
+        poseTo: pb.pose,
+        poseBlend: k,
+      };
+    }),
+  };
 }
 
 /**
@@ -252,11 +351,25 @@ export function parseBlocking(
     const missing = figures.filter((f) => !known.has(f.id));
     // 主体被删掉时机位会失去参照，回落到第一个演员而不是让相机指向虚空
     const subjectAlive = figures.some((f) => f.id === parsed.camera.subjectFigureId);
+    /** 关键帧里的走位要和场景里的演员对齐，规则与 t=0 那帧一致 */
+    const alignPlacements = (list: FigurePlacement[]): FigurePlacement[] => {
+      const seen = new Set(list.map((p) => p.figureId));
+      return [
+        ...list.filter((p) => figures.some((f) => f.id === p.figureId)),
+        ...defaultBlocking(figures.filter((f) => !seen.has(f.id))).placements,
+      ];
+    };
+
     return {
       version: 1,
       camera: subjectAlive
         ? parsed.camera
         : { ...parsed.camera, subjectFigureId: figures[0]?.id ?? null },
+      // 关键帧必须透传 —— 漏了它，运镜每次重开导演台就丢一次
+      keyframes: (parsed.keyframes ?? [])
+        .filter((k) => typeof k?.t === "number" && k.t > 0 && k.camera && Array.isArray(k.placements))
+        .map((k) => ({ ...k, placements: alignPlacements(k.placements) }))
+        .sort((a, b) => a.t - b.t),
       placements: [
         ...parsed.placements.filter((p) => figures.some((f) => f.id === p.figureId)),
         ...defaultBlocking(missing).placements,

@@ -613,6 +613,7 @@ export function ShotDrawer({
             episodeId={episodeId}
             shotCharacters={shotCharacters}
             layoutUrl={shot.previzLayoutUrl}
+            shotDuration={shot.duration}
             shotId={shot.id}
             videoRatio={videoRatio}
             versionId={selectedVersionId ?? undefined}
