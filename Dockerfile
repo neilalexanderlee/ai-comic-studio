@@ -1,12 +1,16 @@
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 
 # If apk fetch fails (e.g. exit 46) due to slow/unstable link to dl-cdn, build with:
 #   docker compose build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com
 ARG ALPINE_MIRROR=https://dl-cdn.alpinelinux.org
 RUN sed -i "s#https://dl-cdn.alpinelinux.org#${ALPINE_MIRROR}#g" /etc/apk/repositories
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install pnpm —— **必须锁版本**。
+# 原先写的是 pnpm@latest：pnpm 10.33 起依赖 node:sqlite（Node 22.5+ 才有的内置模块），
+# 于是 base 还停在 node:20 时，某天 pnpm 发新版，构建就毫无预兆地断在
+# `ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`——而代码一行没改。
+# 版本跟着 package.json 的 packageManager 走，两处要一起改。
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Install ffmpeg with libass for subtitle burn-in, and fonts for CJK subtitles
 RUN apk add --no-cache ffmpeg font-noto-cjk
