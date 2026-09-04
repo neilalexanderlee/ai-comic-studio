@@ -5,3 +5,9 @@ data
 uploads
 *.md
 docs
+# 绝不把密钥打进镜像 —— worker 阶段是 `COPY . .`，不排除的话 .env 会留在镜像层里，
+# 谁拿到镜像谁就拿到了 OSS AK/SK 和所有 provider 的 API Key。
+# 运行时的环境变量由 docker-compose 的 env_file 从宿主机注入。
+.env
+.env.*
+!.env.example

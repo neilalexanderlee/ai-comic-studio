@@ -10,6 +10,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
+    # 密钥与配置从宿主机的 .env 注入，**不打进镜像**。
+    # 没有 .env 时不报错：自部署用户可以只靠下面的 environment 跑起来。
+    env_file:
+      - path: .env
+        required: false
     environment:
       # 代理（可选）：让容器内的 fetch 走宿主机的 VPN 客户端（如 Clash Verge）。
       # host.docker.internal 在 Docker Desktop for Mac/Windows 上自动解析为宿主机。
@@ -36,6 +41,9 @@ services:
       # 素材与产物在 uploads 里，两边看到的必须是同一个文件系统。
       - ./data:/app/data
       - ./uploads:/app/uploads
+    env_file:
+      - path: .env
+        required: false
     environment:
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
