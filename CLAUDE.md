@@ -758,6 +758,56 @@ APP_BIND=0.0.0.0:3007       # 默认 127.0.0.1:3007
 见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
 
 
+### 8l. 全新安装必须能建起库 —— 迁移基线 + 迁移锁
+
+**每加一条迁移，都要问一句「空库跑一遍这条链还能建起来吗」。**
+2026-09-04 部署到服务器时发现：**迁移链根本无法从零建库**，`0001` 之后某处就断了，
+症状是 worker 反复重启报 `no such table: character_assets`。
+这不只影响这次部署 —— **每一个自部署用户、每一次 CI 建库都撞得上**，
+只是本地库是历史演进来的，从来没人从零跑过，所以一直没暴露。
+
+修法是**基线压缩**（`drizzle/baseline/`）：
+
+| 文件 | 内容 |
+|---|---|
+| `baseline/schema.sql` | 从健康库导出的完整 DDL（32 条语句） |
+| `baseline/meta.json` | `throughTag` —— 这份基线覆盖到哪条迁移（含） |
+
+`applyBaselineIfFresh()` 在**确认是空库**时应用基线，并把 `throughTag` 及之前的迁移
+标记为已应用；之后新增的迁移照常增量执行。存量库完全不受影响。
+
+⚠️ **判空库的 SQL 里 `_` 是通配符。** 初版写的是
+`name NOT LIKE '__%'` —— 本意是排除 `__drizzle_migrations`，实际把**每一张表**都排除了，
+于是任何库都被判成空库，**基线会盖到生产库上**。必须写
+`NOT LIKE '\_\_%' ESCAPE '\'`。这条有专门的回归测试。
+
+**迁移必须串行**：web 与 worker 两个容器同时启动会同时跑迁移。
+`acquireMigrationLock()` 用 `__migration_lock` 表串行化，等锁上限由
+`MIGRATION_LOCK_WAIT_MS` 控制（测试用；`Atomics.wait` 会阻塞事件循环，
+所以不能用 `setTimeout` 做超时）。
+
+**新增迁移后自检**：`rm -rf /tmp/fresh && DATABASE_URL=file:/tmp/fresh/x.db pnpm tsx -e "..."`
+起一次，或直接跑 `baseline-schema.test.ts`。基线过期时用 `pnpm baseline:dump` 重导。
+
+### 8m. 数据库是唯一不可再生的东西 —— 备份与同步
+
+帧图、视频、BGM 全都能重新生成（花钱花时间而已）；**剧本、分镜、角色设定、
+剪辑状态只有一份**。所以 DB 的处置规则与产物完全不同。
+
+**备份**（`scripts/backup-db.ts`，`pnpm db:backup`）：
+
+- 用 better-sqlite3 的 `.backup()`，**不是 `cp`** —— 开着 WAL 时直接拷文件会漏掉
+  尚未合并的写入，拷出来的库看着正常、实际少数据，且当场发现不了
+- 走 `saveArtifactFromFile`，配了 OSS 就传 OSS（服务器上还走内网端点不计流量），
+  没配的自部署用户落在 `uploads/backups/`
+- **只上传 / 只列举 / 只删除，从不下载** —— 下行流量包只有 2 GB/月且打穿过一次
+- 实测 6.1 MB → 1.09 MB，默认保留 30 份
+
+**同步**：本地与服务器各有一份 SQLite，**服务器是权威副本**（它读写 OSS 走内网
+不吃流量包，worker 也在那边）。两边只单向流动：服务器 → 本地。
+`pnpm dev` 启动前会比一次指纹并提示，但**默认永远不自动覆盖本地库**。
+操作细节与服务器停用手册在 `docs/DEPLOYMENT.md`（本地文档，未随仓库分发）。
+
 ### 9. Drizzle null 比较
 
 ```typescript
@@ -1238,6 +1288,12 @@ src/lib/evals/
 | 「首次点播放会跳回 0」的真正成因（此前靠 loading 门掩盖）| `syncSprites` 结尾 `if (!abort.signal.aborted && !isPlaying) previewFrame(playhead)` 用的是**这一轮 sync 开始时捕获的闭包值**。`previewFrame` 内部先 `pause()`（emit paused）再把时间强设为传入值 —— sync 期间用户点了播放，sync 结束时却以为自己还处在暂停态、还停在 0 秒 | 改读 `isPlayingRef.current` 与 `useEditorStore.getState().playhead`。这个修复是渐进可播的前提：门放开后 sync 必然在播放中结束 |
 | 取 OSS 产物偶发 `TypeError: Failed to fetch`，同一个 URL 一会儿好一会儿坏 | `/api/uploads/_oss/<key>` 是 302 跳到签名 URL，这一跳带 `Cache-Control: private, max-age=1800`。浏览器缓存的是**重定向本身**，于是会出现「缓存里的 302 还在、它指向的签名已经过期」—— OSS 对过期签名返回 403，而 **403 没有 CORS 头**，浏览器就把它报成一个毫无线索的 `Failed to fetch`（看起来像 CORS 没配，实际 CORS 是好的）。实测：默认 fetch 必失败，加 `cache:"reload"` 立刻 200，之后默认 fetch 又好了。另一类同样报这个错的情况是页面正忙的瞬间（打开 3D 导演台要同时创建两个 WebGL 上下文）请求直接挂掉 | 统一收进 `mediaCache.ts` 的 `fetchArtifact()`：最多 3 次、重试一律 `cache:"reload"`（这样才能拿到新的 302 和新签名）、带退避；403 与 5xx 才重试，404/401 不重试。**凡是取 OSS 产物一律走它，不要裸 fetch** |
 | 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)，`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
+| 迁移链**根本无法从零建库**，全新安装/CI 全都撞得上 | `0001` 之后某处断链。本地库是历史演进来的，从来没人从零跑过，所以一直没暴露；部署到服务器跑空库时才炸出来（worker 反复重启报 `no such table: character_assets`）。我一开始误判成「两个容器并发跑迁移的竞态」并跟用户这么说了，单进程复现后已更正 | 基线压缩：`drizzle/baseline/schema.sql` + `meta.json`（`throughTag`），`applyBaselineIfFresh()` 只在空库时应用并把该 tag 及之前标记为已应用。并发是另一个真实隐患，单独用 `__migration_lock` 修掉。见约定 8l |
+| 判「是不是空库」的 SQL 把**每一张表**都排除了，基线差点盖到生产库上 | `name NOT LIKE '__%'` —— SQL 的 `LIKE` 里 `_` 是单字符通配符，本意排除 `__drizzle_migrations`，实际匹配任意两字符开头的表名，于是任何库都被判成空库 | 改 `NOT LIKE '\_\_%' ESCAPE '\'`，加专门的回归测试。发现契机是对比脚本报「健康库 0 张表」这个明显不可能的数字 |
+| 公网暴露后**只加一个请求头就能读到别人全部项目** | `getUserIdFromRequest` 的回退链认未签名身份（`x-user-id` 请求头 / 裸 `ai_comic_uid` cookie）。这对单机单用户是合理便利，对公网等于完全没有认证 | `REQUIRE_AUTH=1` 关掉未签名回退；`ALLOW_REGISTRATION=0` 关自助注册；`AUTH_SECRET` 必设（默认值在公开仓库里）；登录加双维度限速。默认全部保持改造前行为，见约定 8k |
+| 云控制台放行了端口，公网仍然连不上 | compose 里写死 `127.0.0.1:3007:3007`，**只绑回环**。安全组和监听地址是两道独立的闸 | `${APP_BIND:-127.0.0.1:3007}`，默认仍只绑回环 —— 暴露必须是显式选择 |
+| `db-sync.sh` 在服务器侧静默失败 | 服务器上**没装 sqlite3 CLI**，而脚本靠它取 `.backup` 一致性快照 | 装上；比较用的指纹脚本改成不依赖两端工具一致（见下条） |
+| 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
 ---
 
@@ -1300,3 +1356,5 @@ pnpm dev
 - [ ] 持久化偏好存 DB，非 localStorage
 - [ ] `npx tsc --noEmit` 无报错
 - [ ] 关键函数有对应单测
+- [ ] **空库能建起来**：加了迁移之后跑一次 `baseline-schema.test.ts`（约定 8l）
+- [ ] 新 API 路由接了 `api-guard`，或在 `route-auth-guard.test.ts` 白名单里登记了理由（约定 8b）
