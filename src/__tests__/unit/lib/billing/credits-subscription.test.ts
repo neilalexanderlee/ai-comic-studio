@@ -13,42 +13,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-const DDL = `
-CREATE TABLE credit_accounts (
-  user_id TEXT PRIMARY KEY,
-  balance INTEGER NOT NULL DEFAULT 0,
-  frozen INTEGER NOT NULL DEFAULT 0,
-  subscription_balance INTEGER NOT NULL DEFAULT 0,
-  subscription_expires_at INTEGER,
-  updated_at INTEGER NOT NULL
-);
-CREATE TABLE credit_ledger (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, type TEXT NOT NULL,
-  amount INTEGER NOT NULL, balance_after INTEGER NOT NULL,
-  ref_type TEXT, ref_id TEXT, note TEXT, created_at INTEGER NOT NULL
-);
-CREATE TABLE usage_records (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, project_id TEXT, shot_id TEXT,
-  kind TEXT NOT NULL, protocol TEXT, model_id TEXT, params TEXT,
-  credits_reserved INTEGER NOT NULL DEFAULT 0, credits_charged INTEGER NOT NULL DEFAULT 0,
-  upstream_usage INTEGER, reserved_from_subscription INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'reserved', created_at INTEGER NOT NULL
-);
-CREATE TABLE subscriptions (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, plan_code TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active', period_start INTEGER NOT NULL,
-  period_end INTEGER NOT NULL, auto_renew INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
-);
-CREATE TABLE orders (
-  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, plan_code TEXT NOT NULL,
-  amount_cents INTEGER NOT NULL, credits_granted INTEGER NOT NULL,
-  channel TEXT NOT NULL DEFAULT 'mock', status TEXT NOT NULL DEFAULT 'pending',
-  out_trade_no TEXT NOT NULL UNIQUE, channel_trade_no TEXT,
-  expires_at INTEGER NOT NULL, paid_at INTEGER, raw_callback TEXT, created_at INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX orders_channel_trade_uq ON orders(channel, channel_trade_no);
-`;
+
 
 // 单例：模块图里只有一个 db，测试之间靠 TRUNCATE 复位
 const holder: { sqlite?: import("better-sqlite3").Database } = {};
@@ -56,8 +21,9 @@ const holder: { sqlite?: import("better-sqlite3").Database } = {};
 vi.mock("@/lib/db", async () => {
   const Database = (await import("better-sqlite3")).default;
   const { drizzle } = await import("drizzle-orm/better-sqlite3");
+  const { BILLING_DDL } = await import("@/__tests__/helpers/billing-schema");
   const sqlite = new Database(":memory:");
-  sqlite.exec(DDL);
+  sqlite.exec(BILLING_DDL);
   holder.sqlite = sqlite;
   return { db: drizzle(sqlite) };
 });

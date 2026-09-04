@@ -131,6 +131,20 @@ export function startPeriodSync(
     const stale = acc?.subscription_balance ?? 0;
 
     // ── 1. 旧周期残留清零 ─────────────────────────────────────────────────
+    /**
+     * 流水里的 `balance_after` 一律是**两个桶之和**（与 credits.ts 的 getBalance 同义），
+     * 且必须在改完账户之后重新读 —— 用事务开始时那份 `acc` 会记成改动前的数字。
+     * 同一列在不同路径下含义不同的话，流水就没法用来对账。
+     */
+    const availableNow = (): number =>
+      (
+        raw
+          .prepare(
+            `SELECT balance + subscription_balance AS available FROM credit_accounts WHERE user_id = ?`
+          )
+          .get(userId) as { available: number } | undefined
+      )?.available ?? 0;
+
     if (stale > 0) {
       raw
         .prepare(`UPDATE credit_accounts SET subscription_balance = 0, updated_at = ? WHERE user_id = ?`)
@@ -144,7 +158,7 @@ export function startPeriodSync(
           ulid(),
           userId,
           -stale,
-          acc?.balance ?? 0,
+          availableNow(),
           plan.code,
           `上一订阅周期结束，未用完的 ${stale} 积分作废`,
           toDbTime(now)
@@ -169,7 +183,7 @@ export function startPeriodSync(
           ulid(),
           userId,
           plan.creditsPerPeriod,
-          acc?.balance ?? 0,
+          availableNow(),
           plan.code,
           opts?.reason ?? `${plan.name} 周期积分发放`,
           toDbTime(now)

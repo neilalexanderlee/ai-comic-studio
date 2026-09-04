@@ -189,16 +189,20 @@ export async function markOrderPaid(params: {
       raw
         .prepare(`UPDATE credit_accounts SET balance = balance + ?, updated_at = ? WHERE user_id = ?`)
         .run(order.credits_granted, toDbTime(now), order.user_id);
+      // balance_after 记的是**两个桶之和**（与 credits.ts 的 getBalance 同义）——
+      // 只记永久桶的话，同一列在不同代码路径下含义不同，流水就没法用来对账了
       const acc = raw
-        .prepare(`SELECT balance FROM credit_accounts WHERE user_id = ?`)
-        .get(order.user_id) as { balance: number };
+        .prepare(
+          `SELECT balance + subscription_balance AS available FROM credit_accounts WHERE user_id = ?`
+        )
+        .get(order.user_id) as { available: number };
       raw
         .prepare(
           `INSERT INTO credit_ledger (id, user_id, type, amount, balance_after, ref_type, ref_id, note, created_at)
            VALUES (?, ?, 'purchase', ?, ?, 'order', ?, ?, ?)`
         )
         .run(
-          ulid(), order.user_id, order.credits_granted, acc.balance,
+          ulid(), order.user_id, order.credits_granted, acc.available,
           order.id, `购买${order.plan_code}，积分永不过期`, toDbTime(now)
         );
     }
