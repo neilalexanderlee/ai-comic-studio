@@ -19,8 +19,24 @@ RUN apk add --no-cache ffmpeg font-noto-cjk
 FROM base AS deps
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
+
+# 依赖下载镜像。默认走官方源 —— 境外构建不受影响；
+# 中国内地构建务必传镜像，否则 npm 直连只有几十 KiB/s：
+#   docker compose build \
+#     --build-arg NPM_REGISTRY=https://registry.npmmirror.com \
+#     --build-arg BETTER_SQLITE3_BINARY_HOST=https://cdn.npmmirror.com/binaries/better-sqlite3
+#
+# better-sqlite3 单独列出来，是因为它的预编译包托管在 GitHub Releases 而不是 npm，
+# registry 镜像救不了它。下载超时后会回落到 node-gyp 从源码编译，
+# 而 node-gyp 又要去 unofficial-builds.nodejs.org 拉 musl 版头文件 —— 同样拉不动。
+# 于是失败点看起来像"编译环境有问题"，实际只是网络。
+ARG NPM_REGISTRY=https://registry.npmjs.org
+ARG BETTER_SQLITE3_BINARY_HOST=
+ENV npm_config_better_sqlite3_binary_host=$BETTER_SQLITE3_BINARY_HOST
+
 COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN pnpm config set registry "$NPM_REGISTRY" \
+ && pnpm install --frozen-lockfile
 
 # --- Build ---
 FROM deps AS builder

@@ -5,6 +5,8 @@ services:
       target: runner
       args:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        BETTER_SQLITE3_BINARY_HOST: ${BETTER_SQLITE3_BINARY_HOST:-}
     ports:
       - "127.0.0.1:3007:3007"
     volumes:
@@ -36,6 +38,8 @@ services:
       target: worker
       args:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+        BETTER_SQLITE3_BINARY_HOST: ${BETTER_SQLITE3_BINARY_HOST:-}
     volumes:
       # 必须和 web 挂同一份 data 与 uploads：任务表在 SQLite 里，
       # 素材与产物在 uploads 里，两边看到的必须是同一个文件系统。
