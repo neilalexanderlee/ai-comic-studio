@@ -107,6 +107,61 @@ export function runParameterizedUpdate(
  * Hash computation matches drizzle-orm's own migrator (SHA-256 of raw file
  * content), so the __drizzle_migrations table stays compatible.
  */
+/**
+ * 空库直接建基线，而不是重放 62 个历史迁移。
+ *
+ * 迁移历史是**不完整**的：早期用 `drizzle-kit push` 直接改库，
+ * `character_assets` 整张表、`shots.first_frame_remote_url` / `scene_title` 等列
+ * 都没有任何创建它们的迁移，只有后来重命名/删除它们的迁移。
+ * 所以现有库能用只是因为它从没被从零建过 —— 全新安装跑到 0017 就连环失败。
+ *
+ * 返回 true 表示已经建好基线，调用方应把 throughTag 及之前的迁移标记为已应用。
+ */
+function applyBaselineIfFresh(sqlite: SqliteHandle): string | null {
+  const hasBusinessTable = (
+    sqlite
+      .prepare(
+        // ⚠️ LIKE 里的 `_` 是单字符通配符，必须 ESCAPE ——
+        // 写成 '__%' 会匹配几乎所有表名，于是任何库都被判成空库。
+        `SELECT COUNT(*) AS c FROM sqlite_master
+         WHERE type='table'
+           AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+           AND name NOT LIKE '\\_\\_%' ESCAPE '\\'`
+      )
+      .get() as { c: number }
+  ).c;
+  // 只要有任何一张业务表，就说明这是既有库 —— 走原来的增量路径，绝不碰它
+  if (hasBusinessTable > 0) return null;
+
+  const dir = path.resolve("drizzle", "baseline");
+  const sqlFile = path.join(dir, "schema.sql");
+  const metaFile = path.join(dir, "meta.json");
+  if (!fs.existsSync(sqlFile) || !fs.existsSync(metaFile)) {
+    console.warn("[DB] 未找到基线文件，回退到逐条重放历史迁移");
+    return null;
+  }
+
+  const { throughTag } = JSON.parse(fs.readFileSync(metaFile, "utf8")) as {
+    throughTag: string;
+  };
+  console.log(`[DB] 空库 —— 应用基线 schema（覆盖到 ${throughTag}）`);
+
+  // 与普通迁移一样整体事务包裹：要么全建好，要么什么都不留
+  sqlite.exec("BEGIN");
+  try {
+    sqlite.exec(fs.readFileSync(sqlFile, "utf8"));
+    sqlite.exec("COMMIT");
+  } catch (err) {
+    try {
+      sqlite.exec("ROLLBACK");
+    } catch {
+      /* 没有活跃事务时忽略 */
+    }
+    throw err;
+  }
+  return throughTag;
+}
+
 function applyMigrations() {
   const sqlite = getSqliteHandle();
   const migrationsFolder = path.resolve("drizzle");
@@ -137,6 +192,24 @@ function applyMigrations() {
         .all() as Array<{ hash: string }>
     ).map((r) => r.hash)
   );
+
+  // 空库：先建基线，并把它覆盖到的那些迁移直接记为已应用。
+  // 基线之后新增的迁移仍会在下面的循环里正常执行。
+  const baselineThrough = applyBaselineIfFresh(sqlite);
+  if (baselineThrough) {
+    for (const entry of journal.entries) {
+      const f = path.join(migrationsFolder, `${entry.tag}.sql`);
+      if (!fs.existsSync(f)) continue;
+      const h = crypto.createHash("sha256").update(fs.readFileSync(f, "utf8")).digest("hex");
+      if (!applied.has(h)) {
+        sqlite
+          .prepare("INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)")
+          .run(h, Date.now());
+        applied.add(h);
+      }
+      if (entry.tag === baselineThrough) break;
+    }
+  }
 
   for (const entry of journal.entries) {
     const sqlFile = path.join(migrationsFolder, `${entry.tag}.sql`);

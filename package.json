@@ -10,6 +10,7 @@
     "build": "next build",
     "start": "next start -p 3007",
     "worker": "tsx --conditions=react-server scripts/worker.ts",
+    "baseline:dump": "tsx scripts/dump-baseline.ts",
     "lint": "eslint",
     "pdf:intro": "node scripts/print-intro-pdf.cjs",
     "test": "vitest run",
