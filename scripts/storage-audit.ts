@@ -19,7 +19,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 
 /** 所有存放产物引用的 (表, 列) */
-const REF_COLUMNS: [table: string, column: string][] = [
+export const REF_COLUMNS: [table: string, column: string][] = [
   ["projects", "final_video_url"],
   ["episodes", "final_video_url"],
   ["characters", "reference_image"],
@@ -37,6 +37,14 @@ const REF_COLUMNS: [table: string, column: string][] = [
   ["shots", "poster_url"],
   ["shot_video_history", "video_url"],
   ["track_videos", "video_url"],
+  // migration 0059/0060 加的白模预演与 3D 导演台产物。**又漏了一次** ——
+  // 上面那条关于 preview_url/poster_url 的注释就是上一次漏列时写的。
+  // 后果不只是审计看不见：prune-orphan-files 用同一份清单判定「没人引用」，
+  // 漏列 = 把正在用的预演视频当成孤儿删掉（editor_state 那次差点删掉在用的 BGM，
+  // 是同一类事故）。现在有 storage-audit-columns.test.ts 结构性地盯着这份清单。
+  ["shots", "previz_layout_url"],
+  ["shot_previz", "video_url"],
+  ["shot_previz", "poster_url"],
 ];
 
 export interface AuditRow {

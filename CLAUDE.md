@@ -826,6 +826,15 @@ APP_BIND=0.0.0.0:3007       # 默认 127.0.0.1:3007
 - **只上传 / 只列举 / 只删除，从不下载** —— 下行流量包只有 2 GB/月且打穿过一次
 - 实测 6.1 MB → 1.09 MB，默认保留 30 份
 
+⚠️ **产物引用列清单（`scripts/storage-audit.ts` 的 `REF_COLUMNS`）必须随 schema 同步。**
+它不只给审计用，`storage-migrate` / `prune-orphan-files` / `verify-editor-state-refs`
+都读它。漏一列的后果按严重度递增：审计看不见 → 存量迁移不迁它 →
+**孤儿清理把正在用的文件当成没人引用删掉**。最后这条真实发生过
+（`episodes.editor_state` 内嵌路径没被扫，差点删掉在用的 6 个 BGM），
+而 migration 0059/0060 的三列又漏了一次。现已由
+`storage-audit-columns.test.ts` 结构性盯着：schema 里带 url/path/image 的列，
+要么在清单里，要么在测试的 `NOT_OUR_ARTIFACTS` 里登记理由。
+
 **同步**：本地与服务器各有一份 SQLite，**服务器是权威副本**（它读写 OSS 走内网
 不吃流量包，worker 也在那边）。两边只单向流动：服务器 → 本地。
 `pnpm dev` 启动前会比一次指纹并提示，但**默认永远不自动覆盖本地库**。
