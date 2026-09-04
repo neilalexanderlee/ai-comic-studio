@@ -4,6 +4,7 @@ import { promptTemplates, promptVersions } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 
 // PUT: save global override (slots mode or full mode)
 export async function PUT(
@@ -11,7 +12,9 @@ export async function PUT(
   { params }: { params: Promise<{ promptKey: string }> }
 ) {
   const { promptKey } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const body = (await request.json()) as {
     mode: "slots" | "full";
     slots?: Record<string, string>;
@@ -143,7 +146,9 @@ export async function DELETE(
   { params }: { params: Promise<{ promptKey: string }> }
 ) {
   const { promptKey } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const slotKey = new URL(request.url).searchParams.get("slotKey");
 
   const conditions = [

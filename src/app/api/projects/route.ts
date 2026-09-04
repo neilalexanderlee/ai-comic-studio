@@ -4,6 +4,7 @@ import { projects } from "@/lib/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
 import { addImportLog } from "@/lib/import-utils";
 import { validateWholeDramaSourceLength } from "@/lib/whole-drama/limits";
@@ -12,7 +13,9 @@ import { checkProjectQuota, planLimitResponse } from "@/lib/billing/plan-limits"
 import { resolveFeatures } from "@/lib/billing/subscription";
 
 export async function GET(request: Request) {
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const allProjects = await db
     .select()
     .from(projects)
@@ -22,7 +25,9 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const body = (await request.json()) as {
     title: string;
     script?: string;

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { projects, episodes, shots, storyboardVersions } from "@/lib/db/schema";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { ulid } from "ulid";
 
 function buildVersionLabel(versionNum: number): string {
@@ -30,7 +31,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string; episodeId: string }> }
 ) {
   const { id: projectId, episodeId } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Auth check
   const [project] = await db

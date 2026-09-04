@@ -4,6 +4,7 @@ import { promptTemplates, promptVersions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 
 // POST: Restore a specific version
 export async function POST(
@@ -11,7 +12,9 @@ export async function POST(
   { params }: { params: Promise<{ promptKey: string; vid: string }> }
 ) {
   const { vid } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Find the version record
   const [version] = await db

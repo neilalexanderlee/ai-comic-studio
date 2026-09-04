@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { shots } from "@/lib/db/schema";
 import { eq, and, gte } from "drizzle-orm";
 import { ulid } from "ulid";
-import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
 
 /**
  * POST /api/projects/[id]/shots/[shotId]/split
@@ -20,7 +20,13 @@ export async function POST(
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
   const { id: projectId, shotId } = await params;
-  getUserIdFromRequest(request); // auth check (throws if missing)
+  // 这里原本只写了一句 `getUserIdFromRequest(request); // auth check (throws if missing)` ——
+  // 那个注释是错的，该函数从不抛异常、只返回空串，返回值又被丢弃。
+  // 结果是：知道 projectId + shotId 就能把**别人的**分镜拆掉（约定 8b 的两级校验一级都没做）。
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const shotGuard = await requireShotInProject(shotId, projectId);
+  if (!shotGuard.ok) return shotGuard.response;
 
   const body = (await request.json()) as { maxDuration?: number };
   const maxDuration = Math.max(5, body.maxDuration ?? 15);

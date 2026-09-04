@@ -4,6 +4,7 @@ import { projects, episodes, characters, episodeCharacters } from "@/lib/db/sche
 import { eq, and, max, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { addImportLog, canonicalCharacterNameKey } from "@/lib/import-utils";
 import { parseTargetDurationSeconds } from "@/lib/utils/parse-duration";
 
@@ -33,7 +34,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   const [project] = await db
     .select()

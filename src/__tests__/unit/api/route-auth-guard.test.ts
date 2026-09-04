@@ -89,6 +89,34 @@ describe("API 路由鉴权守卫", () => {
     }
   );
 
+  /**
+   * 光"提到"鉴权助手不算数 —— 返回值必须真的被用上。
+   *
+   * 起因是一条真实漏洞：`projects/[id]/shots/[shotId]/split/route.ts` 里写着
+   *     getUserIdFromRequest(request); // auth check (throws if missing)
+   * 注释是错的（该函数从不抛异常，只返回空串），返回值又被丢弃 ——
+   * 于是知道 projectId + shotId 就能把别人的分镜拆掉，而上面那条按标志词扫描的
+   * 测试**照样是绿的**。所以这里补一条：不允许把鉴权函数当成裸语句调用。
+   */
+  it.each(routeFiles.map((r) => [r.rel, r.abs] as const))(
+    "%s 没有把鉴权函数的返回值丢掉",
+    (rel, abs) => {
+      const src = fs.readFileSync(abs, "utf-8");
+      if (!HTTP_HANDLER.test(src)) return;
+      // 只认「整句就是一次调用、紧跟分号」这种形态 —— 即返回值确实被丢掉了。
+      // 作为参数或表达式一部分出现在行首的（多行调用的续行）不算。
+      const discarded = AUTH_MARKERS.flatMap((m) => {
+        const re = new RegExp(`^[ \\t]*(?:await\\s+)?${m}\\s*\\([^)]*\\)\\s*;`, "gm");
+        return src.match(re) ?? [];
+      });
+      expect(
+        discarded,
+        `路由 ${rel} 把鉴权函数当成裸语句调用了，返回值没被使用。` +
+          `请改成 const guard = await requireProjectOwner(...); if (!guard.ok) return guard.response;`
+      ).toEqual([]);
+    }
+  );
+
   it("白名单里的每一条都必须仍然存在（防止豁免项变成僵尸配置）", () => {
     const all = new Set(routeFiles.map((r) => r.rel));
     for (const rel of Object.keys(NO_AUTH_ALLOWLIST)) {

@@ -10,6 +10,7 @@ import { groupShotsIntoTracks, buildShotTrackMap } from "@/lib/storyboard/track-
 import { buildSeedanceMultiParamVideoPrompt, type SeedanceAsset, type SeedanceShot } from "@/lib/ai/prompts/seedance-multi-param";
 import { superviseShots, checkBeatDensity } from "@/lib/storyboard/shot-supervision";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import fs from "node:fs";
 import path from "path";
 import { ulid } from "ulid";
@@ -280,7 +281,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Verify project ownership
   const [ownerCheck] = await db

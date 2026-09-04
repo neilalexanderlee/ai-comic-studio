@@ -446,6 +446,23 @@ characterId 依然打得穿。凡是路径里带子资源 id 的，都要再过�
 
 **一律返回 404，不返回 403**：403 等于告诉对方「这个 id 存在但不属于你」，可以用来枚举。
 
+⚠️ **`getUserIdFromRequest` 从不抛异常，只返回空串。** 所以下面这行是**没有鉴权**的，
+只是看起来像：
+
+```ts
+getUserIdFromRequest(request); // ❌ 注释写着 auth check，实际返回值被丢弃
+```
+
+真实案例：`shots/[shotId]/split` 就是这么写的，于是知道 projectId + shotId
+就能把别人的分镜拆掉，而按标志词扫描的守卫测试**照样是绿的**。
+测试已补一条：不允许把鉴权函数当成裸语句调用。
+
+⚠️ **空 userId 会变成一个共用租户。** 路由普遍用 `eq(x.userId, userId)` 圈定归属，
+`userId` 为空串时读到的是空集（安全），但**写入会落成 `user_id = ''` 的行**——
+`REQUIRE_AUTH=1` 之下任何未认证访客都能建项目、写提示词覆盖。
+所以凡是会 `insert` 的路由都必须先过 `requireUser`（它对空串返回 401），
+不能只靠「按 userId 过滤」。
+
 **注意 `getUserIdFromRequest` 包含匿名指纹用户**（`src/proxy.ts` 下发的 `ai_comic_uid`），
 所以本地匿名使用不受影响，被挡住的只有跨租户访问。
 

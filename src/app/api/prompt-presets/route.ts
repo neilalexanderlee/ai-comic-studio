@@ -4,11 +4,14 @@ import { promptPresets } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { BUILT_IN_PRESETS } from "@/lib/ai/prompts/presets";
 
 // GET: List built-in + user presets
 export async function GET(request: Request) {
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   const userPresets = await db
     .select()
@@ -23,7 +26,9 @@ export async function GET(request: Request) {
 
 // POST: Save current config as preset
 export async function POST(request: Request) {
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const body = (await request.json()) as {
     name: string;
     promptKey: string;

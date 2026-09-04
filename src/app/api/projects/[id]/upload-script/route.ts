@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { projects, episodes } from "@/lib/db/schema";
 import { eq, and, max } from "drizzle-orm";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { ulid } from "ulid";
 import {
   chunkText,
@@ -68,7 +69,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Verify project ownership
   const [project] = await db

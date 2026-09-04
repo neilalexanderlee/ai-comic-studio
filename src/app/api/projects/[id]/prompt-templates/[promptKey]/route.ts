@@ -4,6 +4,7 @@ import { promptTemplates, promptVersions, projects } from "@/lib/db/schema";
 import { and, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 
 // PUT: save project-level override (slots mode or full mode)
 export async function PUT(
@@ -11,7 +12,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; promptKey: string }> }
 ) {
   const { id, promptKey } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Verify project ownership
   const [project] = await db
@@ -154,7 +157,9 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; promptKey: string }> }
 ) {
   const { id, promptKey } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
 
   // Verify project ownership
   const [project] = await db

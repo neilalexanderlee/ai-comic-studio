@@ -4,6 +4,7 @@ import { promptTemplates, promptVersions, promptPresets } from "@/lib/db/schema"
 import { and, eq, isNull } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { BUILT_IN_PRESETS, type BuiltInPreset } from "@/lib/ai/prompts/presets";
 
 // POST: Apply a preset's slots as overrides
@@ -12,7 +13,9 @@ export async function POST(
   { params }: { params: Promise<{ presetId: string }> }
 ) {
   const { presetId } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const body = (await request.json()) as {
     scope?: "global" | "project";
     projectId?: string;

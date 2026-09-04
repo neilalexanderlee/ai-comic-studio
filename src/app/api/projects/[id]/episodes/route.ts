@@ -4,6 +4,7 @@ import { projects, episodes, shots, characters, episodeCharacters, characterAsse
 import { eq, asc, and, max, isNotNull, inArray } from "drizzle-orm";
 import { ulid } from "ulid";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
 import { getAuthUserIdFromRequest } from "@/lib/auth";
 
 async function resolveProject(id: string, userId: string, isAuthenticated: boolean) {
@@ -19,7 +20,9 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const project = await resolveProject(id, userId, getAuthUserIdFromRequest(request) !== null);
 
   if (!project) {
@@ -89,7 +92,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const userId = getUserIdFromRequest(request);
+  const guard = requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
   const project = await resolveProject(id, userId, getAuthUserIdFromRequest(request) !== null);
 
   if (!project) {
