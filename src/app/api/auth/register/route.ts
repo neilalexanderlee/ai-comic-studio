@@ -16,7 +16,23 @@ import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { hashPassword, makeSetCookieHeader } from "@/lib/auth";
 
+/**
+ * 是否允许自助注册。**默认允许**，与改造前一致 ——
+ * 自部署用户第一次打开就该能建号。
+ *
+ * 公网部署且只给自己用时设 `ALLOW_REGISTRATION=0`：否则任何人都能在你的
+ * 服务器上开账号。他们碰不到你的数据（归属校验在），也没有你的 provider 密钥
+ * （密钥是按用户存的），但那仍是一扇本不必开着的门。
+ */
+function isRegistrationAllowed(): boolean {
+  return process.env.ALLOW_REGISTRATION !== "0";
+}
+
 export async function POST(req: NextRequest) {
+  if (!isRegistrationAllowed()) {
+    return NextResponse.json({ error: "本站未开放注册" }, { status: 403 });
+  }
+
   const body = (await req.json()) as {
     username?: string;
     password?: string;
