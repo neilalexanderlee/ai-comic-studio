@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { episodes } from "@/lib/db/schema";
-import { materializeArtifacts } from "@/lib/storage/artifact-store";
+import { materializeArtifacts, saveArtifactFromFile } from "@/lib/storage/artifact-store";
 import type { ProgressReporter, Task } from "@/lib/task-queue/types";
 
 /**
@@ -438,16 +438,25 @@ export async function renderEpisodeTimeline(params: {
       ]);
     }
 
-    // ── Step 5：写入 DB ────────────────────────────────────────────────
-    const relativeOutput = `./uploads/renders/${path.basename(outputPath)}`;
+    // ── Step 5：产物入库 ──────────────────────────────────────────────
+    //
+    // 配了 OSS 就把成片传上去并**删掉本地文件**。渲染产物过去只写本地且没有任何
+    // 清理逻辑，每导出一次留一个全分辨率 mp4 —— 40GB 的系统盘导十几次就满，
+    // 而磁盘写满的表现是各种毫不相干的报错。没配 OSS 时行为不变（文件留在本地）。
+    await report("upload", "保存成片…");
+    const stored = await saveArtifactFromFile(
+      `renders/${path.basename(outputPath)}`,
+      outputPath
+    );
+
     await db
       .update(episodes)
-      .set({ finalVideoUrl: relativeOutput })
+      .set({ finalVideoUrl: stored })
       .where(eq(episodes.id, episodeId));
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
 
-return { outputUrl: relativeOutput };
+    return { outputUrl: stored };
   } catch (err) {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     console.error("[render] ffmpeg error:", err);

@@ -880,9 +880,13 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       const outputUrl = await pollRenderTask(taskId, (stage) => setExportStage(stage));
 
       setExportStage("完成！");
+      // 成片可能在 OSS 上：那时 uploadUrl 会 302 到跨域签名地址，`<a download>`
+      // 的 download 属性会被浏览器忽略（变成直接播放）。所以文件名交给服务端，
+      // 由它签进 content-disposition。
+      const filename = `export-${Date.now()}.mp4`;
       const a = document.createElement("a");
-      a.href = uploadUrl(outputUrl);
-      a.download = `export-${Date.now()}.mp4`;
+      a.href = `${uploadUrl(outputUrl)}?download=${encodeURIComponent(filename)}`;
+      a.download = filename;
       a.click();
     } catch (e) {
       alert("导出失败：" + (e instanceof Error ? e.message : String(e)));

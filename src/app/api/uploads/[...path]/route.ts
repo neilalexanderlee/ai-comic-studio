@@ -47,6 +47,11 @@ export async function GET(
 
   const { path: segments } = await params;
 
+  // `?download=<文件名>` → 强制「另存为」而不是在浏览器里直接播放。
+  // 成片迁到 OSS 之后前端的 `<a download>` 不再生效（302 之后是跨域地址，
+  // download 属性会被忽略），所以必须由服务端把 content-disposition 定下来。
+  const downloadFilename = new URL(request.url).searchParams.get("download") || undefined;
+
   // OSS 引用：鉴权通过后 302 到临时签名 URL。
   // 不在这里代理下载 —— 那会让所有流量绕经我们的服务器，白白吃掉带宽，
   // 而 OSS 直传是免费的（上传免费、下行走用户就近节点）。
@@ -54,11 +59,18 @@ export async function GET(
     const key = segments.slice(1).join("/");
     if (!key) return NextResponse.json({ error: "Missing object key" }, { status: 400 });
     try {
-      const res = NextResponse.redirect(resolveArtifactUrl(`oss://${key}`), 302);
+      const res = NextResponse.redirect(
+        resolveArtifactUrl(`oss://${key}`, { downloadFilename }),
+        302
+      );
       // 让浏览器缓存这一跳。没有它，每次播放都要重新走一遍 302 并重新下载文件——
       // 签名 URL 已按窗口对齐（见 SIGNED_URL_WINDOW_SECONDS），窗口内 URL 逐字节相同，
       // 所以缓存住的重定向目标一定还在有效期内。private：签名 URL 因人而异，不得进共享缓存。
-      res.headers.set("Cache-Control", `private, max-age=${SIGNED_URL_WINDOW_SECONDS}`);
+      res.headers.set(
+        "Cache-Control",
+        // 下载那一跳是一次性的，签名里带了 content-disposition，缓存它没有意义
+        downloadFilename ? "private, no-store" : `private, max-age=${SIGNED_URL_WINDOW_SECONDS}`
+      );
       return res;
     } catch (err) {
       console.error("[uploads] 签发 OSS 签名 URL 失败:", err);
@@ -84,6 +96,13 @@ export async function GET(
   const buffer = fs.readFileSync(resolved);
 
   return new NextResponse(buffer, {
-    headers: { "Content-Type": contentType },
+    headers: {
+      "Content-Type": contentType,
+      // 本地分支同样认 ?download= —— 两条路径的行为必须一致，
+      // 否则「配没配 OSS」会变成用户看得见的差异
+      ...(downloadFilename
+        ? { "Content-Disposition": `attachment; filename="${encodeURIComponent(downloadFilename)}"` }
+        : {}),
+    },
   });
 }

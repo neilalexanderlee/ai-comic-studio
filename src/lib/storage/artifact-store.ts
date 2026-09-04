@@ -30,7 +30,7 @@ import os from "node:os";
  * 症状是「文件明明生成了但界面显示缺失」，极难排查。
  */
 
-import { getOssClient, isOssEnabled, OSS_REF_PREFIX } from "./oss-client";
+import { getOssClient, getOssSigningClient, isOssEnabled, OSS_REF_PREFIX } from "./oss-client";
 
 /**
  * 本地存储根。**惰性读取**而非模块加载时求值 —— 模块级 const 会把测试和
@@ -113,6 +113,50 @@ export async function saveArtifactAt(
   }
 
   return saveArtifact(rel ? `${rel}/${filename}` : filename, data);
+}
+
+/** 超过这个大小改用分片上传：成片动辄上百 MB，单次 put 中断就要整个重来。 */
+const MULTIPART_THRESHOLD_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 把一个**已经在磁盘上**的文件存成产物，返回存储引用。
+ *
+ * 与 `saveArtifact` 的区别是不经过 Buffer：ffmpeg 的产物只能先落地成真实文件，
+ * 而一集成片上百 MB —— 读进内存再上传，在 4GiB 的机器上是实打实的压力。
+ * ali-oss 的 `put` / `multipartUpload` 都直接接受文件路径，内部走流。
+ *
+ * `keepLocal=false`（默认）时上传成功即删除本地文件。这正是**磁盘不再涨**的关键：
+ * 渲染产物过去只写本地且没有任何清理，40GB 的盘导十几次就满。
+ */
+export async function saveArtifactFromFile(
+  relPath: string,
+  localFilePath: string,
+  opts?: { keepLocal?: boolean }
+): Promise<string> {
+  const normalized = relPath.replace(/\\/g, "/").replace(/^\/+/, "");
+
+  if (!isOssEnabled()) {
+    // 没配 OSS：保持既有行为，文件留在本地，返回实际路径
+    return localFilePath;
+  }
+
+  const client = getOssClient();
+  const size = fs.statSync(localFilePath).size;
+  if (size >= MULTIPART_THRESHOLD_BYTES) {
+    // @types/ali-oss 把 options 标成必填，实际可为空对象
+    await client.multipartUpload(normalized, localFilePath, {});
+  } else {
+    await client.put(normalized, localFilePath);
+  }
+
+  if (!opts?.keepLocal) {
+    try {
+      fs.unlinkSync(localFilePath);
+    } catch {
+      /* 删不掉不算失败：文件已经安全落在 OSS 上了 */
+    }
+  }
+  return `${OSS_REF_PREFIX}${normalized}`;
 }
 
 /** 读取一个产物。同时支持本地路径与 `oss://` 引用。 */
@@ -252,14 +296,28 @@ export const SIGNED_URL_WINDOW_SECONDS = 1800;
  * - OSS  → **签名 URL**（bucket 是私有的，裸 URL 会 403，已实测验证）
  * - 本地 → 走 `/api/uploads/[...path]`，与改造前一致（该路由有鉴权）
  */
-export function resolveArtifactUrl(ref: string): string {
+export function resolveArtifactUrl(
+  ref: string,
+  opts?: { downloadFilename?: string }
+): string {
   if (isOssRef(ref)) {
     const nowSec = Math.floor(Date.now() / 1000);
     // 先算出对齐后的**绝对**过期时刻，再换算回 ali-oss 要的相对秒数
     const alignedExpiry =
       Math.ceil((nowSec + SIGNED_URL_TTL_SECONDS) / SIGNED_URL_WINDOW_SECONDS) *
       SIGNED_URL_WINDOW_SECONDS;
-    return getOssClient().signatureUrl(ossKeyOf(ref), { expires: alignedExpiry - nowSec });
+    // 需要「另存为」时把 content-disposition 签进 URL。
+    // 不能靠前端的 `<a download>`：302 之后是跨域地址，download 属性会被浏览器忽略，
+    // 结果是直接把 mp4 播出来而不是下载 —— 成片迁到 OSS 之后这是必然发生的。
+    const response = opts?.downloadFilename
+      ? {
+          "content-disposition": `attachment; filename="${encodeURIComponent(opts.downloadFilename)}"`,
+        }
+      : undefined;
+    return getOssSigningClient().signatureUrl(ossKeyOf(ref), {
+      expires: alignedExpiry - nowSec,
+      ...(response ? { response } : {}),
+    });
   }
   const normalized = ref.replace(/\\/g, "/");
   return `/api/uploads/${normalized.replace(/^.*uploads\//, "")}`;
@@ -291,5 +349,5 @@ export function resolveArtifactUrlForUpstream(
       `需要公网可访问的地址，但 ${ref} 是本地引用。请先配置对象存储（OSS_* 四个环境变量）。`
     );
   }
-  return getOssClient().signatureUrl(ossKeyOf(ref), { expires: ttlSeconds });
+  return getOssSigningClient().signatureUrl(ossKeyOf(ref), { expires: ttlSeconds });
 }
