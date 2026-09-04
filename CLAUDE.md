@@ -487,6 +487,13 @@ refund   冻结 → 余额（失败/超时全额退回）
 
 **任何余额变动都必须写 `credit_ledger` 流水**，不允许只改 `credit_accounts`。
 
+⚠️ **流水里的 `balance_after` 一律是「两个桶之和」，且必须在改完账户之后重新读。**
+`credits.ts` 用 `getBalance()`（含订阅桶），而 `subscription.ts` / `orders.ts` 一度记的是
+**永久桶**、还用的是事务开始时读到的旧值 —— 同一列两种含义，账面不会错（
+`credit_accounts` 始终是对的），但**流水就没法用来对账**：用户问「我积分怎么少了」，
+翻出来那条 grant 写着余额 11000，而他当时实际有 65973。
+`order-lifecycle.test.ts` 会逐条重放全部流水来锁这条。
+
 接入点只有三处（`generateVideo()` 全项目仅一个 handler 调用）：
 `generate/route.ts` 的单镜视频与图片生成、`bgm/generate/route.ts`。
 定价在 `src/lib/billing/pricing.ts`（纯函数，前后端共用），时长按能力表 clamp，
@@ -1325,6 +1332,13 @@ src/lib/evals/
 | 公网暴露后**只加一个请求头就能读到别人全部项目** | `getUserIdFromRequest` 的回退链认未签名身份（`x-user-id` 请求头 / 裸 `ai_comic_uid` cookie）。这对单机单用户是合理便利，对公网等于完全没有认证 | `REQUIRE_AUTH=1` 关掉未签名回退；`ALLOW_REGISTRATION=0` 关自助注册；`AUTH_SECRET` 必设（默认值在公开仓库里）；登录加双维度限速。默认全部保持改造前行为，见约定 8k |
 | 云控制台放行了端口，公网仍然连不上 | compose 里写死 `127.0.0.1:3007:3007`，**只绑回环**。安全组和监听地址是两道独立的闸 | `${APP_BIND:-127.0.0.1:3007}`，默认仍只绑回环 —— 暴露必须是显式选择 |
 | `db-sync.sh` 在服务器侧静默失败 | 服务器上**没装 sqlite3 CLI**，而脚本靠它取 `.backup` 一致性快照 | 装上；比较用的指纹脚本改成不依赖两端工具一致（见下条） |
+| `credit_ledger.balance_after` 同一列两种含义，流水无法对账 | `credits.ts` 记的是两个桶之和，`subscription.ts` / `orders.ts` 记的是永久桶且用事务开始时的旧值。账面余额一直是对的（`credit_accounts` 无误），坏的是审计追溯能力 —— 而写流水的全部意义就是审计 | 三处统一改为「改完账户后重读 `balance + subscription_balance`」。发现方式是新增 `order-lifecycle.test.ts` 按真实时间顺序跑完整闭环并逐条重放流水 —— **单点不变量各自成立不代表串起来成立**，那些单测早就全绿了 |
+| Docker 构建某天毫无征兆地失败：`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite` | Dockerfile 里写的是 `corepack prepare pnpm@latest` —— pnpm 10.33 起依赖 `node:sqlite`（Node 22.5+ 才有的内置模块）。代码一行没改，**上游发了个新版本就崩**，这是日历触发型故障，最难联想到根因 | 钉死 `pnpm@10.33.0` + `node:22-alpine`，并在 `package.json` 写 `packageManager` 让本地与镜像用同一个版本。**凡是构建期拉取的东西都要钉版本**，`@latest` 等于把构建的可重复性交给别人的发版节奏 |
+| 部署"成功"了，跑的却是旧代码 | 部署脚本先 `git pull` 再 `docker compose build`。GitHub 的 TLS 握手在境内失败，`git pull` 报错，但脚本没有 `set -e` 的保护，`build` 照常成功 —— 于是构建出来的是**上一次的代码**，容器起来了、页面能开，**完全没有任何异常迹象** | 改用 rsync 走已有的 SSH 通道（不依赖第三方网络），并在构建前**显式校验关键文件确实到了服务器**、构建后校验两个容器都 running 且 HTTP 200。**"前一步失败、后一步照常成功"是部署脚本最典型的坑，每一步都要能证明自己真的生效了** |
+| 境内构建拉依赖 19 KiB/s，`better-sqlite3` 预编译包超时后回落 node-gyp 再失败 | npm 官方源与 `unofficial-builds`（better-sqlite3 预编译产物的托管地）在境内都不可达 | `NPM_REGISTRY` / `BETTER_SQLITE3_BINARY_HOST` 做成 build arg，**默认值保持官方源不变**（自部署用户与 CI 不受影响），只在服务器 `.env` 里指向境内镜像 |
+| `docker compose config` 把 OSS AccessKey Secret 打到了终端 | 该命令的作用就是把 `env_file` 与变量全部展开后打印，密钥自然也在里面 | 排查带密钥的 compose 用 `docker compose config --no-interpolate`，或只看具体 service。已泄漏到终端/日志的密钥按泄漏处理（轮换） |
+| 迁移锁的单测在换了连接之后仍读到旧库 | `globalForDb` 挂在 `globalThis` 上做单例，而 `vi.resetModules()` **只重置模块注册表，不动 globalThis** —— 于是新一轮 import 拿回的还是上一轮那个 sqlite 连接 | 测试的 `beforeEach` 里显式删掉 `globalThis` 上的那几个键。**凡是把单例挂在 globalThis 上的模块，`vi.resetModules()` 都不足以隔离测试** |
+| 改写 git 历史抹掉服务器 IP 之后，GitHub 上旧提交**仍能按 SHA 访问** | force-push 只是让旧提交不可达，不等于删除；GitHub 在 GC 之前照常按 SHA 提供网页访问（实测 HTTP 200），fork 里也会留存 | 需要彻底清除得开工单请 GitHub 跑 GC。**改写历史能降低暴露面，但不能当成"已经删掉了"** —— 真正泄漏了凭据时必须轮换，而不是指望改历史 |
 | 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
 ---
