@@ -2942,7 +2942,7 @@ async function handleSingleVideoGenerate(
     const selectedPreviz = shot.previzSelectedId
       ? (
           await db
-            .select({ videoUrl: shotPreviz.videoUrl })
+            .select({ videoUrl: shotPreviz.videoUrl, duration: shotPreviz.duration })
             .from(shotPreviz)
             .where(eq(shotPreviz.id, shot.previzSelectedId))
         )[0]
@@ -2953,6 +2953,7 @@ async function handleSingleVideoGenerate(
       selectedId: shot.previzSelectedId,
       previzVideoUrl: selectedPreviz?.videoUrl,
       isRemoteRef: !!selectedPreviz?.videoUrl && isOssRef(selectedPreviz.videoUrl),
+      durationSec: selectedPreviz?.duration ?? null,
     });
     if (!previzDecision.use && previzDecision.note) {
       capabilityNotes.push(previzDecision.note);

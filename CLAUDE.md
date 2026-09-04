@@ -582,6 +582,12 @@ seedance 的 `toDataUrl`/`toAudioDataUrl`、openai 的 `fileToBase64DataUri`、k
 **盒体人偶，不引外部模型资源**：零授权问题，且场景 JSON 里不会出现素材路径 ——
 `editor_state` 正是因为内嵌路径给存储脚本留下了扫描盲区（见 `verify-editor-state-refs.ts`）。
 
+**参考视频的时长限制在提交前挡下**（能力表 `refVideoLimits` → `decidePrevizReference`）：
+这类限制是**异步**校验的 —— 任务照常创建、几十秒后才报错，用户看到的只是「又失败了一次」，
+失败信息里根本不会出现「运镜预演」四个字。本地 3D 渲染的时长等于镜头时长，
+而镜头时长是用户填的，所以 <2s 的快切镜头是真实可达的。
+**不确定的模型就不声明限制** —— 编一个数字会把本来能用的预演挡掉，比让上游报一次错更糟。
+
 **导出的构图图写进 `shots.previz_layout_url`，刻意不写 `anchor_first`**：
 后者是真要送去生成视频的首帧，被一张灰盒渲染图覆盖是不可逆的。
 

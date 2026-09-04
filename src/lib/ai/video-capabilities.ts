@@ -58,6 +58,16 @@ export interface VideoModelCapability {
   refs: { image: number; audio: number; video: number };
   /** 各类参考素材可用的传输方式。空数组 = 不支持该类型。 */
   refTransport: { image: RefTransport[]; audio: RefTransport[]; video: RefTransport[] };
+  /**
+   * 参考**视频**素材的硬限制。只在 `refs.video > 0` 且官方文档写明时声明；
+   * 不确定就不写 —— 读取方遇到 undefined 一律放行，宁可让上游报错也不误挡。
+   *
+   * 为什么在表里而不是「上传校验处」：这个项目**没有**参考视频的上传入口，
+   * 唯一的生产者是我们自己的白模预演（Seedance 生成或本地 3D 渲染），
+   * 时长等于镜头时长。所以校验只能发生在**使用时**（`decidePrevizReference`），
+   * 而那里按约定 7a 不允许写「如果是 seedance 就……」这类协议判断。
+   */
+  refVideoLimits?: { minDurationSec: number; maxDurationSec: number };
 
   features: {
     /** 是否支持同步生成音频（人声/音效/BGM） */
@@ -154,8 +164,10 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
     resolutions: ["480p", "720p", "1080p"],
     outputFormats: ["mp4", "mov"],
     // 官方：单次参考素材上限 50 个 = 30 张图 + 10 段视频 + 10 段音频。
-    // 另有约束：参考音/视频单个 [2,30]s、总时长 ≤ 30s（在上传校验处把关，不在此表表达）。
     refs: { image: 30, audio: 10, video: 10 },
+    // 官方「使用限制 › 视频要求」：参考音/视频单个 [2,30]s（总时长 ≤ 30s 这条
+    // 目前用不上 —— 白模预演每次只传 1 段）
+    refVideoLimits: { minDurationSec: 2, maxDurationSec: 30 },
     refTransport: {
       image: ["local", "assetId"],
       audio: ["local"],
@@ -204,6 +216,8 @@ export const VIDEO_CAPABILITIES: VideoModelCapability[] = [
     refs: { ...SEEDANCE_MULTIMODAL.refs, video: 1 },
     // 只验证过公网 URL；asset:// 形式没试过，不声明。
     refTransport: { ...SEEDANCE_MULTIMODAL.refTransport, video: ["url"] },
+    // 参考视频的时长上下限官方文档没写、也没实测过，**故意不声明** ——
+    // 编一个数字会把本来能用的预演挡掉，比让上游报一次错更糟。
   },
   {
     ...SEEDANCE_MULTIMODAL,

@@ -234,6 +234,17 @@ describe("downgradeVideoMode", () => {
     }
   });
 
+  it("声明了 refVideoLimits 的，必须真的支持参考视频，且区间自洽", () => {
+    for (const cap of VIDEO_CAPABILITIES) {
+      if (!cap.refVideoLimits) continue;
+      const { minDurationSec, maxDurationSec } = cap.refVideoLimits;
+      expect(cap.refs.video, `${cap.label} 声明了参考视频时长限制却不支持参考视频`)
+        .toBeGreaterThan(0);
+      expect(minDurationSec).toBeGreaterThan(0);
+      expect(maxDurationSec).toBeGreaterThan(minDurationSec);
+    }
+  });
+
   it("keyframe / initialImage 在 Kling 上不降级", () => {
     expect(downgradeVideoMode("keyframe", kling).downgraded).toBe(false);
     expect(downgradeVideoMode("initialImage", kling).downgraded).toBe(false);

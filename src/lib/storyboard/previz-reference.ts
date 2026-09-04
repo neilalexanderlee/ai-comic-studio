@@ -22,8 +22,13 @@ export function decidePrevizReference(params: {
   previzVideoUrl: string | null | undefined;
   /** 该引用是否是对象存储引用（参考视频必须是公网 URL，本地路径走不通） */
   isRemoteRef: boolean;
+  /**
+   * 这条预演的时长（秒）。**取不到就传 null** —— 历史记录可能没写这一列，
+   * 拿不到时一律放行，不能因为「不知道」就把能用的预演挡掉。
+   */
+  durationSec?: number | null;
 }): PrevizReferenceDecision {
-  const { mode, capability, selectedId, previzVideoUrl, isRemoteRef } = params;
+  const { mode, capability, selectedId, previzVideoUrl, isRemoteRef, durationSec } = params;
 
   if (!selectedId) return { use: false };
 
@@ -50,6 +55,21 @@ export function decidePrevizReference(params: {
       use: false,
       note: "运镜预演存在本地，而参考视频必须是公网地址；配置对象存储后即可生效",
     };
+  }
+
+  // 时长越界必须在**提交前**挡下：参考视频的限制是异步校验的 ——
+  // 任务照常创建，几十秒后才报错，那时候用户早就切走了，回来只看到一次失败。
+  // 限制来自能力表（约定 7a），没声明就不检查。
+  const limits = capability.refVideoLimits;
+  if (limits && typeof durationSec === "number" && Number.isFinite(durationSec)) {
+    if (durationSec < limits.minDurationSec || durationSec > limits.maxDurationSec) {
+      return {
+        use: false,
+        note:
+          `运镜预演时长 ${durationSec}s 超出 ${capability.label} 对参考视频的限制` +
+          `（${limits.minDurationSec}–${limits.maxDurationSec}s），本次未使用`,
+      };
+    }
   }
 
   return { use: true, ref: previzVideoUrl };
