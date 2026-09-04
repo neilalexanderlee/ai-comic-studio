@@ -7,8 +7,18 @@ services:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         BETTER_SQLITE3_BINARY_HOST: ${BETTER_SQLITE3_BINARY_HOST:-}
+    # ⚠️ 监听地址决定这个服务能不能被公网访问，安全组只是第二道闸。
+    #   "127.0.0.1:3007:3007" —— 只绑回环，**外网连不上**，必须走 SSH 隧道：
+    #        ssh -L 3007:localhost:3007 root@<服务器>
+    #        （隧道还顺带给明文 HTTP 套了一层加密，没有域名/证书时这是唯一的加密方式）
+    #   "3007:3007"           —— 绑所有网卡，公网可直接访问。
+    #
+    # 改成公网可访问之前，这三样必须先到位（否则等于把数据裸放在公网）：
+    #   REQUIRE_AUTH=1        只认签名 cookie，不再信 x-user-id 请求头
+    #   ALLOW_REGISTRATION=0  关掉自助注册
+    #   AUTH_SECRET=<随机值>   否则回落到代码里的默认值，而本仓库是公开的
     ports:
-      - "127.0.0.1:3007:3007"
+      - "${APP_BIND:-127.0.0.1:3007}:3007"
     volumes:
       - ./data:/app/data
       - ./uploads:/app/uploads
