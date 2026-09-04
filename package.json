@@ -5,7 +5,11 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "dev": "next dev -p 3007",
+    "dev": "bash scripts/db-dev-sync.sh; next dev -p 3007",
+    "dev:solo": "next dev -p 3007",
+    "db:pull": "bash scripts/db-sync.sh pull",
+    "db:push": "bash scripts/db-sync.sh push",
+    "db:fingerprint": "bash scripts/db-fingerprint.sh data/aicomic.db",
     "dev:clean": "lsof -ti:3007 | xargs kill -9 2>/dev/null || true; rm -rf .next && next dev -p 3007",
     "build": "next build",
     "start": "next start -p 3007",

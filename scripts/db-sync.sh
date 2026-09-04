@@ -2,8 +2,9 @@
 #
 # 在本地与服务器之间**单向**同步数据库。
 #
-#   ./scripts/db-sync.sh pull    # 服务器 → 本地（服务器为准时用这个）
-#   ./scripts/db-sync.sh push    # 本地 → 服务器
+#   ./scripts/db-sync.sh pull            # 服务器 → 本地（常规操作）
+#   ./scripts/db-sync.sh push            # 本地 → 服务器（破坏性，见下）
+#   ./scripts/db-sync.sh pull --yes      # 跳过确认（给 db-dev-sync.sh 的自动拉取用）
 #
 # ## 方向已经定了：**以服务器为准**
 #
@@ -36,7 +37,20 @@ REMOTE_DIR="${ECS_DIR:-/opt/ai-comic-studio}"
 LOCAL_DB="${DATABASE_URL:-./data/aicomic.db}"
 LOCAL_DB="${LOCAL_DB#file:}"
 REMOTE_DB="$REMOTE_DIR/data/aicomic.db"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MARKER="$(dirname "$LOCAL_DB")/.db-sync.json"
 DIR="${1:-}"
+ASSUME_YES=0
+for a in "$@"; do [[ "$a" == "--yes" ]] && ASSUME_YES=1; done
+
+# 记下「本次同步完成时本地库长什么样」。db-dev-sync.sh 靠它判断
+# 本地自上次同步以来有没有被改过 —— 有改动就不允许自动覆盖。
+write_marker() {
+  local sum
+  sum=$("$HERE/db-fingerprint.sh" "$LOCAL_DB" | cksum | awk '{print $1"-"$2}')
+  printf '{\n  "fingerprint": "%s",\n  "direction": "%s",\n  "host": "%s",\n  "at": "%s"\n}\n' \
+    "$sum" "$1" "$HOST" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$MARKER"
+}
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -71,8 +85,12 @@ else
   ssh "$HOST" "cd $REMOTE_DIR && sqlite3 data/aicomic.db \"SELECT (SELECT COUNT(*) FROM projects)||' 项目 / '||(SELECT COUNT(*) FROM episodes)||' 剧集 / '||(SELECT COUNT(*) FROM shots)||' 分镜';\"" | sed 's/^/  目标（服务器）: /'
 fi
 echo
-read -r -p "用「$SRC_DESC」整体覆盖「$DST_DESC」？目标会先备份。(yes/N) " ans
-[[ "$ans" == "yes" ]] || { echo "已取消"; exit 0; }
+if [[ "$ASSUME_YES" == "1" ]]; then
+  echo "用「$SRC_DESC」整体覆盖「$DST_DESC」（--yes，已跳过确认；目标仍会先备份）"
+else
+  read -r -p "用「$SRC_DESC」整体覆盖「$DST_DESC」？目标会先备份。(yes/N) " ans
+  [[ "$ans" == "yes" ]] || { echo "已取消"; exit 0; }
+fi
 
 STAMP="$(date +%Y%m%d-%H%M%S)"
 if [[ "$DIR" == "pull" ]]; then
@@ -81,10 +99,13 @@ if [[ "$DIR" == "pull" ]]; then
   # -shm/-wal 属于旧库，留着会让 SQLite 拿新库配旧 WAL
   rm -f "$LOCAL_DB-shm" "$LOCAL_DB-wal"
   cp "$TMP/incoming.db" "$LOCAL_DB"
+  write_marker pull
   echo "▸ 完成。原本地库备份在 data/_bak/local-$STAMP.db"
 else
   ssh "$HOST" "cd $REMOTE_DIR && mkdir -p data/_bak && docker compose down >/dev/null 2>&1 && sqlite3 data/aicomic.db \".backup 'data/_bak/server-$STAMP.db'\" && rm -f data/aicomic.db-shm data/aicomic.db-wal"
   scp -q "$TMP/incoming.db" "$HOST:$REMOTE_DB"
   ssh "$HOST" "cd $REMOTE_DIR && chmod 600 data/aicomic.db && docker compose up -d >/dev/null 2>&1"
+  # push 之后两端相同，本地同样处于「已同步」状态
+  write_marker push
   echo "▸ 完成。原服务器库备份在 $REMOTE_DIR/data/_bak/server-$STAMP.db"
 fi
