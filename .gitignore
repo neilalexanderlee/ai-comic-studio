@@ -58,3 +58,9 @@ run_kling.sh
 
 # docs — 本地保留，不进 git（架构笔记 + 外部客户项目资料）
 docs/
+
+# deploy — 我们自己那台阿里云机器的部署胶水（服务器地址、同步、部署脚本）。
+# 公开仓库面向的是「想在自己机器上跑一份」的人：Dockerfile / docker-compose.yml /
+# .env.example 这些通用件留在仓库里，我们自家的拓扑没必要给他们看。
+# 这些脚本随 deploy-ecs.sh 一起 rsync 到服务器，所以在那边有一份异地副本。
+deploy/
