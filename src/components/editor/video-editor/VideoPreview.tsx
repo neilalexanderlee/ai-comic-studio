@@ -854,12 +854,16 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     syncPromiseRef.current = syncSprites();
   }, [muted]);
 
-  // ── 导出（服务端 ffmpeg：concat libx264 归零 PTS → BGM adelay 精确对齐）────────
+  // ── 导出（入队 → 轮询）──────────────────────────────────────────────────────
+  //
+  // 服务端 ffmpeg：concat libx264 归零 PTS → BGM adelay 精确对齐。
+  // 渲染跑在 worker 进程里，所以这里拿到的是 taskId 而不是一条 SSE 流 ——
+  // 好处是关掉页面、刷新、甚至服务重启，任务都还在，回来还能看到结果。
   async function handleExport() {
     if (total === 0) return;
     setExporting(true);
     setExportSeconds(0);
-    setExportStage("准备中…");
+    setExportStage("排队中…");
     const timer = setInterval(() => setExportSeconds((s) => s + 1), 1000);
     try {
       const res = await apiFetch(
@@ -870,41 +874,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           body: JSON.stringify({ timeline: { tracks, canvasWidth, canvasHeight, globalSubtitleStyle: useEditorStore.getState().globalSubtitleStyle } }),
         }
       );
-      if (!res.ok || !res.body) throw new Error("Render request failed");
+      const { taskId } = (await res.json()) as { taskId?: string };
+      if (!taskId) throw new Error("导出任务创建失败");
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let outputUrl = "";
-      let buf = "";
+      const outputUrl = await pollRenderTask(taskId, (stage) => setExportStage(stage));
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const lines = buf.split("\n");
-        buf = lines.pop() ?? "";
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          try {
-            const event = JSON.parse(line.slice(6)) as
-              | { type: "progress"; message: string }
-              | { type: "done"; outputUrl: string }
-              | { type: "error"; message: string };
-            if (event.type === "progress") {
-              setExportStage(event.message);
-            } else if (event.type === "done") {
-              outputUrl = event.outputUrl;
-            } else if (event.type === "error") {
-              throw new Error(event.message);
-            }
-          } catch (parseErr) {
-            if (parseErr instanceof SyntaxError) continue;
-            throw parseErr;
-          }
-        }
-      }
-
-      if (!outputUrl) throw new Error("No output URL received");
       setExportStage("完成！");
       const a = document.createElement("a");
       a.href = uploadUrl(outputUrl);
@@ -1031,3 +1005,39 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     </div>
   );
 }
+
+/**
+ * 轮询导出任务直到完成。
+ *
+ * 刻意**不设总时长上限**：一集十几分钟的片子导出十来分钟是正常的，
+ * 卡一个"最多等 N 分钟"只会在慢机器上把成功的导出误报成失败。
+ * 真正卡死的任务由服务端的回收机制转成 failed，这里自然就看到了。
+ */
+async function pollRenderTask(
+  taskId: string,
+  onStage: (stage: string) => void
+): Promise<string> {
+  const POLL_MS = 1500;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    const res = await apiFetch(`/api/tasks/${taskId}`);
+    const task = (await res.json()) as {
+      status: "pending" | "running" | "completed" | "failed";
+      progress?: { stage?: string; message?: string } | null;
+      result?: { outputUrl?: string } | null;
+      error?: string | null;
+    };
+
+    if (task.status === "failed") throw new Error(task.error || "导出失败");
+    if (task.status === "completed") {
+      const url = task.result?.outputUrl;
+      if (!url) throw new Error("导出任务没有产出文件");
+      return url;
+    }
+    onStage(
+      task.progress?.message ??
+        (task.status === "running" ? "渲染中…" : "排队中…")
+    );
+  }
+}
+

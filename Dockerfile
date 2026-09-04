@@ -43,3 +43,19 @@ ENV DATABASE_URL="file:/app/data/aicomic.db"
 ENV UPLOAD_DIR="/app/uploads"
 
 CMD ["node", "server.js"]
+
+# --- Worker（独立的渲染进程）---
+#
+# 刻意基于 deps 而不是 standalone 产物：standalone 只含 Next 编译后的服务端代码，
+# 没有 src/ 也没有 tsx，跑不了 scripts/worker.ts。把 worker 单独 bundle 一份要处理
+# better-sqlite3 / ali-oss 这些原生与动态依赖，代价远大于多占一点磁盘。
+#
+# 它必须与 web 共享 /app/data 与 /app/uploads —— SQLite 的 WAL 支持同机多进程，
+# 但不支持跨网络文件系统。要把 worker 挪到另一台机器，得先迁到 PostgreSQL。
+FROM deps AS worker
+WORKDIR /app
+COPY . .
+ENV NODE_ENV=production
+ENV DATABASE_URL="file:/app/data/aicomic.db"
+ENV UPLOAD_DIR="/app/uploads"
+CMD ["pnpm", "worker"]

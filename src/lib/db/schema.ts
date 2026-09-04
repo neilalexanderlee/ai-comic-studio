@@ -442,6 +442,10 @@ export const tasks = sqliteTable("tasks", {
       "frame_generate",
       "video_generate",
       "video_assemble",
+      // 服务端 ffmpeg 的两个长任务。刻意走队列而不是留在请求处理函数里：
+      // 一次导出要跑几分钟，挂在 HTTP 连接上过任何代理都会超时，部署重启即全丢。
+      "episode_render",
+      "episode_merge",
     ],
   }).notNull(),
   status: text("status", {
@@ -458,6 +462,13 @@ export const tasks = sqliteTable("tasks", {
     .notNull()
     .$defaultFn(() => new Date()),
   scheduledAt: integer("scheduled_at", { mode: "timestamp" }),
+  /**
+   * 进行中的阶段说明（JSON）。worker 跑在别的进程里，进度推不回发起请求的那个连接，
+   * 只能落库让客户端轮询。
+   */
+  progress: text("progress", { mode: "json" }),
+  /** 被 worker 认领的时刻。用于回收「进程崩在中途、永远卡在 running」的任务。 */
+  startedAt: integer("started_at", { mode: "timestamp" }),
   episodeId: text("episode_id").references(() => episodes.id, {
     onDelete: "cascade",
   }),

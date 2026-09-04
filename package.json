@@ -8,6 +8,7 @@
     "dev:clean": "lsof -ti:3007 | xargs kill -9 2>/dev/null || true; rm -rf .next && next dev -p 3007",
     "build": "next build",
     "start": "next start -p 3007",
+    "worker": "tsx --conditions=react-server scripts/worker.ts",
     "lint": "eslint",
     "pdf:intro": "node scripts/print-intro-pdf.cjs",
     "test": "vitest run",

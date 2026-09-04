@@ -2,6 +2,7 @@ services:
   ai-comic-builder:
     build:
       context: .
+      target: runner
       args:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
     ports:
@@ -16,4 +17,28 @@ services:
       # 不需要代理时，删掉这两行或留空即可。
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
+      # 渲染交给下面的 worker 容器 —— 一次 ffmpeg 导出要跑几分钟，
+      # 留在 web 进程里会和请求处理抢同一份 CPU。
+      #
+      # ⚠️ 只跑单个容器（不起 worker）时，**必须删掉这一行**，
+      # 否则点了导出会永远停在「排队中」。默认值是 1，就是为了让单容器装机即用。
+      - WORKER_IN_WEB=0
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+      args:
+        ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
+    volumes:
+      # 必须和 web 挂同一份 data 与 uploads：任务表在 SQLite 里，
+      # 素材与产物在 uploads 里，两边看到的必须是同一个文件系统。
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+    depends_on:
+      - ai-comic-builder
     restart: unless-stopped

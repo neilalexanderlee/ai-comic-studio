@@ -435,6 +435,13 @@
       "when": 1779000037000,
       "tag": "0061_subscriptions_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1779000038000,
+      "tag": "0062_task_progress",
+      "breakpoints": true
     }
   ]
 }

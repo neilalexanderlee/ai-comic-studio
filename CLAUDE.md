@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 61` — `0061_subscriptions_orders`
+**当前最新迁移索引**：`idx 62` — `0062_task_progress`
 
 ### 关键表
 
@@ -683,6 +683,44 @@ P3（运镜时间线 + 本地渲染运镜视频）、背景板均已完成。
 **支付回调**（`/api/billing/callback/[channel]`）没有用户会话，身份由渠道签名证明，
 已在 `route-auth-guard.test.ts` 的 `NO_AUTH_ALLOWLIST` 登记。目前只有 mock 通道，
 真实渠道需要商户号（企业资质）。
+
+### 8j. 任务队列与 worker 外置 —— ffmpeg 不跑在请求路径上
+
+**规则没有例外：服务端 ffmpeg 一律进队列。** `episode_render`（剪辑台导出）与
+`episode_merge`（多集拼接）原先直接跑在请求处理函数里，导出一次把 HTTP 连接挂几分钟：
+过任何反向代理都会撞空闲超时、部署重启一次正在跑的导出全丢、还和请求处理抢同一份 CPU。
+留一个例外，下次就会有人照着它再写一个。
+
+代价是**进度不能再用 SSE 推给发起请求的连接**：worker 在别的进程里。
+改为 handler 写 `tasks.progress`，客户端拿 taskId 轮询 `GET /api/tasks/[id]`。
+好处顺带来了 —— 关页面、刷新、服务重启，任务都还在。
+
+⚠️ **handler 里出错必须 `throw`。** 原实现把错误当成一条 SSE 事件发出去然后正常结束；
+搬进队列后那等于「成功」—— 任务成败只看 handler 抛不抛异常。
+
+**`WORKER_IN_WEB` 默认为开**（未设为 `"0"` 即开）。自部署用户 `docker run` 单个容器
+就该能用全部功能，默认关掉的话他们点了导出会永远停在「排队中」且毫无线索。
+这与 `BILLING_ENABLED` 默认关闭是同一条原则的两面：**默认值要让单机装机即用**。
+托管部署把 web 侧设成 `0`，由 compose 里的 worker service 承担。
+
+⚠️ **独立 worker 必须带 `--conditions=react-server` 启动**（`pnpm worker` 已带）。
+生成链路上大量模块 `import "server-only"`，那个包在 Next 打包器下解析到空模块，
+在**纯 Node** 下解析到默认入口 —— 而默认入口就是一句 `throw`。
+
+**worker 必须与 web 同机**（Compose 两个 service 共享 volume 也算）：任务表在 SQLite 里，
+WAL 支持同机多进程但不支持跨网络文件系统。**要把 worker 挪到另一台机器，得先迁 PostgreSQL**
+（届时认领语句要改成 `FOR UPDATE SKIP LOCKED`；已决定迁则只留 PG，compose 自带一个，
+不维护双方言 schema）。Docker 里 worker 镜像基于 `deps` 而不是 standalone 产物 ——
+standalone 没有 `src/` 也没有 tsx。
+
+**队列的三条硬要求**（`task-queue/queue.ts`，真库单测锁死）：
+认领必须是**一条**语句（分两步做，两个 worker 会各跑一遍 ffmpeg）；
+失败要**退避**再排队（上游 429 立即重排会打成紧密循环）；
+`running` 超时要能**回收**（走与普通失败相同的 `failTask` 路径，重试语义自动一致）。
+
+⚠️ 又一次的秒/毫秒：`scheduled_at` 是 `mode:"timestamp"`（秒），原实现拿
+`now.getTime()`（毫秒）去比，`scheduled_at <= <毫秒>` 恒为真 —— **延迟执行静默失效**。
+当时没人传 `scheduledAt` 所以没暴露，重试退避一加上去就是致命的。同约定 8i。
 
 ### 9. Drizzle null 比较
 
