@@ -107,7 +107,7 @@ export function runParameterizedUpdate(
  * Hash computation matches drizzle-orm's own migrator (SHA-256 of raw file
  * content), so the __drizzle_migrations table stays compatible.
  */
-export function runMigrations() {
+function applyMigrations() {
   const sqlite = getSqliteHandle();
   const migrationsFolder = path.resolve("drizzle");
 
@@ -219,6 +219,107 @@ export function runMigrations() {
   }
 
   console.log("[DB] Migrations complete.");
+}
+
+/**
+ * 迁移锁。
+ *
+ * ## 为什么需要
+ *
+ * `bootstrap()` 里就有 `runMigrations()`，而 web 与 worker 是**两个都会调用它的进程**。
+ * 在已经迁移过的库上这没事（各自读到"全部已应用"直接返回）；但**全新数据库 + 两个进程
+ * 同时首启**时，两边会交错地跑同一批迁移，撞出
+ * `no such table: character_assets` 这类"表还没建就去 ALTER"的错误 ——
+ * 实测把 worker 打进了重启循环。
+ *
+ * 这是 worker 外置引入的缺陷：单进程时代不存在第二个迁移者。
+ *
+ * ## 为什么不是"只让 web 迁移"
+ *
+ * 那样 worker-only 的部署（以及自部署用户把 web 侧关掉的情况）就永远迁移不了。
+ * 锁的语义是"谁先到谁做，其余的等它做完"，两种拓扑都成立。
+ */
+const MIGRATION_LOCK_STALE_MS = 10 * 60 * 1000;
+const MIGRATION_LOCK_POLL_MS = 500;
+
+/**
+ * 等锁的上限。可用 `MIGRATION_LOCK_WAIT_MS` 覆盖 ——
+ * 等待是**同步**的（见 sleepSync），单测里没法靠定时器在同一线程释放锁，
+ * 只能把上限调短来验证"确实在等而不是直接闯进去"。
+ */
+function migrationLockWaitMs(): number {
+  const raw = Number(process.env.MIGRATION_LOCK_WAIT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 5 * 60 * 1000;
+}
+
+function sleepSync(ms: number): void {
+  // 迁移发生在启动阶段，此时阻塞事件循环是可接受的 —— 而且必须同步，
+  // 因为 runMigrations 是同步函数，改成异步会波及每一个调用方。
+  //
+  // ⚠️ 代价：等待期间**本线程的定时器不会触发**。所以持锁方必须是另一个进程
+  //（生产上正是如此），同线程里"边等边释放"是解不开的死锁。
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** 返回 true 表示本进程拿到了锁并应当执行迁移；false 表示别的进程已经做完了。 */
+function acquireMigrationLock(sqlite: SqliteHandle, owner: string): boolean {
+  sqlite
+    .prepare(
+      `CREATE TABLE IF NOT EXISTS __migration_lock (
+         id        INTEGER PRIMARY KEY CHECK (id = 1),
+         locked_at INTEGER NOT NULL,
+         owner     TEXT
+       )`
+    )
+    .run();
+
+  const deadline = Date.now() + migrationLockWaitMs();
+  for (;;) {
+    try {
+      sqlite
+        .prepare(`INSERT INTO __migration_lock (id, locked_at, owner) VALUES (1, ?, ?)`)
+        .run(Date.now(), owner);
+      return true;
+    } catch {
+      // 已被占用。持有者可能已经崩了 —— 超过阈值就抢过来，
+      // 否则一次崩溃会让后续所有启动永久卡死。
+      const row = sqlite
+        .prepare(`SELECT locked_at, owner FROM __migration_lock WHERE id = 1`)
+        .get() as { locked_at: number; owner: string | null } | undefined;
+
+      if (row && Date.now() - row.locked_at > MIGRATION_LOCK_STALE_MS) {
+        console.warn(`[DB] 迁移锁已陈旧（持有者 ${row.owner}），抢占`);
+        sqlite.prepare(`DELETE FROM __migration_lock WHERE id = 1`).run();
+        continue;
+      }
+
+      if (Date.now() > deadline) {
+        throw new Error("[DB] 等待迁移锁超时：另一个进程迁移耗时过长或已卡死");
+      }
+      sleepSync(MIGRATION_LOCK_POLL_MS);
+    }
+  }
+}
+
+/**
+ * 执行迁移。**同一时刻只有一个进程真正在跑**，其余进程在这里等它做完再返回。
+ */
+export function runMigrations() {
+  const sqlite = getSqliteHandle();
+  const owner = `pid:${process.pid}`;
+
+  acquireMigrationLock(sqlite, owner);
+  try {
+    // 拿到锁之后才读"已应用"集合 —— 等待期间别的进程可能刚好全部做完，
+    // 那样这里就是一次干净的空转。
+    applyMigrations();
+  } finally {
+    try {
+      sqlite.prepare(`DELETE FROM __migration_lock WHERE id = 1`).run();
+    } catch (err) {
+      console.warn("[DB] 释放迁移锁失败:", err);
+    }
+  }
 }
 
 // Proxy preserves the `db` export API — lazy-inits on first property access
