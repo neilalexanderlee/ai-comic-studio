@@ -71,6 +71,6 @@ export async function POST(req: NextRequest) {
 
   // 匿名数据迁移由客户端调用 /api/auth/migrate-data 完成（带参数绑定，无注入风险）
   const res = NextResponse.json({ ok: true, userId, username });
-  res.headers.set("Set-Cookie", makeSetCookieHeader(userId));
+  res.headers.set("Set-Cookie", makeSetCookieHeader(userId, 0, req));
   return res;
 }

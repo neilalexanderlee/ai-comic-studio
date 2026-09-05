@@ -111,22 +111,66 @@ export function getAuthUserIdFromRequest(request: Request): string | null {
 }
 
 /**
- * 生产环境加 `Secure`（只允许 HTTPS 传输）。
- * 开发环境走 http://localhost，加了 Secure 浏览器会直接丢弃 cookie，所以按环境区分。
+ * 这次请求要不要给 cookie 加 `Secure`。
+ *
+ * ⚠️ **不能用 `NODE_ENV` 判断 —— 「生产」不等于「HTTPS」。**
+ *
+ * 原实现是 `NODE_ENV === "production" ? "; Secure" : ""`，假设生产一定跑在 HTTPS 上。
+ * 但本项目在拿到备案和证书之前，生产就是**明文 HTTP**（`http://<ip>:3007`），
+ * 而浏览器会把 HTTP 响应里的 Secure cookie **静默丢弃**：
+ * 登录接口返回 200、`Set-Cookie` 也确实发了，浏览器就是不存 ——
+ * 症状是「提示登录成功，回到首页却没有数据，再进设置仍显示未登录」，
+ * 而且**控制台没有任何报错**，抓包才看得出来。2026-09-05 实测踩过。
+ *
+ * 改为按**这次请求实际用的协议**判断：
+ *   - 反向代理终止 TLS 时看 `x-forwarded-proto`（取第一段，可能是逗号分隔的链）
+ *   - 否则看请求 URL 的 scheme
+ *
+ * `COOKIE_SECURE=1/0` 可强制覆盖，给「代理终止了 TLS 却没设 x-forwarded-proto」兜底。
+ *
+ * **拿不到 request 时默认不加**：两种错法的代价不对称 ——
+ * 该加没加只是少一层传输保护（还有 HttpOnly + SameSite=Lax 兜着）；
+ * 不该加却加了会让登录**完全失效且无声无息**，是这次真实发生的那一种。
  */
-function secureAttr(): string {
-  return process.env.NODE_ENV === "production" ? "; Secure" : "";
+function isSecureRequest(request?: Request): boolean {
+  const forced = process.env.COOKIE_SECURE;
+  if (forced === "1") return true;
+  if (forced === "0") return false;
+  if (!request) return false;
+  const xfp = request.headers.get("x-forwarded-proto");
+  if (xfp) return xfp.split(",")[0].trim().toLowerCase() === "https";
+  try {
+    return new URL(request.url).protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
-/** 生成 Set-Cookie header 字符串（登录/注册时用） */
-export function makeSetCookieHeader(userId: string, tokenVersion = 0): string {
+function secureAttr(request?: Request): string {
+  return isSecureRequest(request) ? "; Secure" : "";
+}
+
+/**
+ * 生成 Set-Cookie header 字符串（登录/注册时用）。
+ * **务必把 request 传进来**，否则永远不会加 Secure（见 isSecureRequest）。
+ */
+export function makeSetCookieHeader(
+  userId: string,
+  tokenVersion = 0,
+  request?: Request
+): string {
   const value = createCookieValue(userId, tokenVersion);
-  return `${AUTH_COOKIE}=${value}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secureAttr()}`;
+  return `${AUTH_COOKIE}=${value}; Path=/; Max-Age=${COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secureAttr(request)}`;
 }
 
-/** 生成清除 cookie 的 Set-Cookie header（登出时用） */
-export function makeClearCookieHeader(): string {
-  return `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secureAttr()}`;
+/**
+ * 生成清除 cookie 的 Set-Cookie header（登出时用）。
+ *
+ * ⚠️ 清除用的属性必须与下发时**一致**（Path / SameSite / Secure），
+ * 否则浏览器会认为是另一个 cookie，登出点了没反应。
+ */
+export function makeClearCookieHeader(request?: Request): string {
+  return `${AUTH_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secureAttr(request)}`;
 }
 
 // ─── 密码哈希 ──────────────────────────────────────────────────────────────────

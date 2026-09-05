@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     // cookie 有效但用户不在 DB（极少见），清除 cookie
     const res = NextResponse.json({ loggedIn: false });
     const { makeClearCookieHeader } = await import("@/lib/auth");
-    res.headers.set("Set-Cookie", makeClearCookieHeader());
+    res.headers.set("Set-Cookie", makeClearCookieHeader(req));
     return res;
   }
 

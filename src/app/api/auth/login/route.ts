@@ -62,6 +62,6 @@ export async function POST(req: NextRequest) {
 
   const res = NextResponse.json({ ok: true, userId: user.id, username: user.username });
   // 带上当前会话版本号：之后自增该字段即可让这张 cookie 失效
-  res.headers.set("Set-Cookie", makeSetCookieHeader(user.id, user.tokenVersion));
+  res.headers.set("Set-Cookie", makeSetCookieHeader(user.id, user.tokenVersion, req));
   return res;
 }

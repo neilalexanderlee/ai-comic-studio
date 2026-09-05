@@ -4,8 +4,9 @@
 import { NextResponse } from "next/server";
 import { makeClearCookieHeader } from "@/lib/auth";
 
-export async function POST() {
+export async function POST(request: Request) {
   const res = NextResponse.json({ ok: true });
-  res.headers.set("Set-Cookie", makeClearCookieHeader());
+  // 传 request：清除用的属性必须和下发时一致，否则浏览器当成另一个 cookie，登出无效
+  res.headers.set("Set-Cookie", makeClearCookieHeader(request));
   return res;
 }
