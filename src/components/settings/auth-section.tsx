@@ -7,59 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Shield, LogOut, User, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
+// 与 /login 页共用同一份匿名数据迁移逻辑 —— 抄第二份必然漂移（见该文件注释里的三个坑）
+import {
+  getAnonymousId,
+  migrateAndClearAnonymousId,
+  markLoggedOut,
+  syncAuthFlag,
+} from "@/lib/client/anon-session";
 
 interface MeResponse {
   loggedIn: boolean;
   userId?: string;
   username?: string;
-}
-
-/** 读取浏览器中存储的旧匿名 ID */
-function getAnonymousId(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("ai_comic_uid");
-}
-
-/** 清除 IndexedDB 中保存的匿名 UID（防止 FingerprintProvider 在登录后恢复旧 ID） */
-function clearIdbUid(): Promise<void> {
-  return new Promise((resolve) => {
-    try {
-      const req = indexedDB.open("ai_comic", 1);
-      req.onsuccess = () => {
-        try {
-          const tx = req.result.transaction("session", "readwrite");
-          tx.objectStore("session").delete("uid");
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => resolve();
-        } catch {
-          resolve();
-        }
-      };
-      req.onerror = () => resolve();
-    } catch {
-      resolve();
-    }
-  });
-}
-
-/** 登录/注册成功后：把旧匿名 ID 迁移到当前账号，再清除所有本地存储 */
-async function migrateAndClearAnonymousId() {
-  const anonId = getAnonymousId();
-  if (!anonId) return;
-  try {
-    await fetch("/api/auth/migrate-data", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fromUserId: anonId }),
-    });
-  } catch {
-    // 静默失败：数据不丢失，用户可以手动恢复
-  }
-  localStorage.removeItem("ai_comic_uid");
-  // 同时清除 IDB，防止 FingerprintProvider 在登录后把旧 ID 恢复到 localStorage
-  await clearIdbUid();
-  // 标记为已登录，FingerprintProvider 看到此标志会跳过匿名 ID 同步
-  localStorage.setItem("ai_comic_is_auth", "1");
 }
 
 export function AuthSection() {
@@ -83,13 +42,8 @@ export function AuthSection() {
       .then((r) => r.json())
       .then((d: MeResponse) => {
         setMe(d);
-        // 同步登录状态到 localStorage，让 FingerprintProvider 知道是否需要跳过匿名 ID 同步
-        // 这里处理了「旧会话已登录但 localStorage 缺少标志」的兼容情况
-        if (d.loggedIn) {
-          localStorage.setItem("ai_comic_is_auth", "1");
-        } else {
-          localStorage.removeItem("ai_comic_is_auth");
-        }
+        // 兼容「旧会话已登录但本地标志缺失」的情况
+        syncAuthFlag(d.loggedIn);
       })
       .catch(() => setMe({ loggedIn: false }))
       .finally(() => setChecking(false));
@@ -133,8 +87,7 @@ export function AuthSection() {
     setLoading(true);
     try {
       await fetch("/api/auth/logout", { method: "POST" });
-      // 清除登录标志，FingerprintProvider 退出登录后可以恢复匿名 ID 同步
-      localStorage.removeItem("ai_comic_is_auth");
+      markLoggedOut();
       setMe({ loggedIn: false });
       toast.success("已退出登录");
       router.refresh();
