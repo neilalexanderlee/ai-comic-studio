@@ -65,7 +65,7 @@ export default async function DashboardPage({
             登录
           </Link>
         ) : (
-          <CreateProjectDialog />
+          <CreateProjectDialog triggerId="create-project-header" />
         )}
       </div>
 
@@ -99,7 +99,7 @@ export default async function DashboardPage({
             {t("noProjects")}
           </p>
           <div className="mt-6">
-            <CreateProjectDialog />
+            <CreateProjectDialog triggerId="create-project-empty" />
           </div>
         </div>
       ) : (

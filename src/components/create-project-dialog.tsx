@@ -51,7 +51,18 @@ const WHOLE_DRAMA_SOURCES = [
   },
 ] as const;
 
-export function CreateProjectDialog() {
+/**
+ * ⚠️ **`triggerId` 必须传，且同一页面内不能重复。**
+ *
+ * 不传的话由 base-ui 自己用 `useId` 生成，而它生成的值在**服务端与客户端不一致**
+ * （`base-ui-_R_1p…` vs `base-ui-_R_d…`），触发 hydration mismatch，
+ * React 明确说这类属性差异 "won't be patched up" —— 也就是客户端会一直带着服务端那个 id，
+ * base-ui 的 aria 关联就指错了。实测：显式传 id 之后报错消失。
+ *
+ * 本组件在首页出现两次（顶栏 + 空状态），所以 id 不能写死在组件里，必须由调用方给不同的值 ——
+ * 重复的 DOM id 同样会破坏 aria 关联和 `getElementById`。
+ */
+export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
   const t = useTranslations();
   const router = useRouter();
   const locale = useLocale();
@@ -193,7 +204,7 @@ export function CreateProjectDialog() {
         if (!v) reset();
       }}
     >
-      <DialogTrigger render={<Button size="sm" className="gap-1.5" />}>
+      <DialogTrigger id={triggerId} render={<Button size="sm" className="gap-1.5" />}>
         <Plus className="h-3.5 w-3.5" />
         {t("dashboard.newProject")}
       </DialogTrigger>
