@@ -1,85 +1,30 @@
-"use client";
+import { requirePageAuth } from "@/lib/auth-page-guard";
+import { ProjectShell } from "@/components/project/project-shell";
 
-import { useEffect, use } from "react";
-import { useProjectStore } from "@/stores/project-store";
-
-import { useTranslations } from "next-intl";
-import Link from "next/link";
-import { ArrowLeft, Loader2, Settings, Wand2 } from "lucide-react";
-import { LogoIcon } from "@/components/logo";
-import { VisualStylePicker } from "@/components/editor/visual-style-picker";
-
-export default function ProjectLayout({
+/**
+ * 项目区的登录闸。
+ *
+ * 之前这里是个客户端组件，所以加不了服务端闸：未登录访问一个项目链接会得到 **404**。
+ * 不泄漏数据，但对「收藏了项目链接、隔天再打开」的人是个死胡同 —— 他不知道该去哪登录。
+ *
+ * 现在拆成「服务端 layout（本文件，负责闸）+ 客户端外壳（ProjectShell，负责 UI）」。
+ * 这么拆的关键收益：**本文件的 `params` 里有 `[id]`**，
+ * 于是 `next=` 能精确指回这个项目，登录完直接回到原来那一页，deep link 不丢。
+ *
+ * 对比之下，如果只在上一层加 `project/layout.tsx`，那一层拿不到 `[id]`，
+ * `next=` 只能退化成首页 —— 那还不如不做。
+ *
+ * 判定逻辑（未开 REQUIRE_AUTH 不拦、这是 UX 跳转不是安全边界）见 `requirePageAuth`。
+ */
+export default async function ProjectLayout({
   children,
   params,
 }: {
   children: React.ReactNode;
-  params: Promise<{ id: string }>;
+  params: Promise<{ locale: string; id: string }>;
 }) {
-  const { id } = use(params);
-  const t = useTranslations("common");
-  const { project, loading, fetchProject } = useProjectStore();
+  const { locale, id } = await params;
+  await requirePageAuth(locale, `/${locale}/project/${id}`);
 
-  useEffect(() => {
-    fetchProject(id).catch((err) => {
-      console.error("[ProjectLayout] fetchProject failed:", err);
-    });
-  }, [id, fetchProject]);
-
-  if (loading || !project) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          <p className="text-sm text-[--text-muted]">{t("loading")}</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex min-h-screen flex-col">
-      {/* Top bar */}
-      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-[--border-subtle] bg-white/80 backdrop-blur-xl px-4 lg:px-6">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/zh"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-all hover:bg-[--surface] hover:text-[--text-primary]"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div className="h-4 w-px bg-[--border-subtle]" />
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-[--primary]/10 text-[--primary]">
-              <LogoIcon size={14} />
-            </div>
-            <h1 className="font-display text-sm font-semibold text-[--text-primary]">
-              {project.title}
-            </h1>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <VisualStylePicker />
-          <div className="flex items-center gap-1">
-          <Link
-            href={`/zh/settings/prompts?scope=project&projectId=${id}`}
-            title="项目提示词"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-all hover:bg-[--surface] hover:text-[--text-primary]"
-          >
-            <Wand2 className="h-4 w-4" />
-          </Link>
-          <Link
-            href="/zh/settings"
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-all hover:bg-[--surface] hover:text-[--text-primary]"
-          >
-            <Settings className="h-4 w-4" />
-          </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Content */}
-      {children}
-    </div>
-  );
+  return <ProjectShell id={id}>{children}</ProjectShell>;
 }
