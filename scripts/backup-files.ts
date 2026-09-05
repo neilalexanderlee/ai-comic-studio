@@ -1,9 +1,9 @@
 /**
  * 本地文档与部署脚本的备份 —— 把 `docs/` 与 `deploy/` 打包传到产物存储。
  *
- *   pnpm files:backup
- *   pnpm files:backup --dry-run
- *   pnpm files:backup --keep 20
+ *   pnpm docs:backup
+ *   pnpm docs:backup --dry-run
+ *   pnpm docs:backup --keep 20
  *
  * ## 为什么这两个目录需要单独备份
  *

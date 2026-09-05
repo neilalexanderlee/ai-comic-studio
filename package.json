@@ -15,7 +15,7 @@
     "start": "next start -p 3007",
     "worker": "tsx --conditions=react-server scripts/worker.ts",
     "db:backup": "tsx --conditions=react-server scripts/backup-db.ts",
-    "files:backup": "tsx --conditions=react-server scripts/backup-files.ts",
+    "docs:backup": "tsx --conditions=react-server scripts/backup-files.ts",
     "baseline:dump": "tsx scripts/dump-baseline.ts",
     "lint": "eslint",
     "pdf:intro": "node scripts/print-intro-pdf.cjs",
