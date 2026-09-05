@@ -9,7 +9,7 @@ import { CreateProjectDialog } from "@/components/create-project-dialog";
 import { Clapperboard, LogIn } from "lucide-react";
 import Link from "next/link";
 import { isAuthRequired } from "@/lib/get-user-id";
-import { buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button-variants";
 
 export default async function DashboardPage({
   params,
