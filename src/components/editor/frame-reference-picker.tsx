@@ -213,7 +213,7 @@ export function FrameReferencePicker({
                     >
                       <div className="aspect-video bg-[--surface] relative">
                         <img
-                          src={uploadUrl(opt.src, { w: 320 })}
+                          src={uploadUrl(opt.src, { w: 640 })}
                           alt={opt.label}
                           className="h-full w-full object-cover"
                         />
