@@ -770,7 +770,7 @@ standalone 没有 `src/` 也没有 tsx。
 | 洞 | 表现 | 开关 |
 |---|---|---|
 | `getUserIdFromRequest` 的回退链认**未签名**身份 | `curl -H "x-user-id: <某人的 ULID>"` 直接读到别人全部项目 | `REQUIRE_AUTH=1` |
-| `AUTH_SECRET` 未设时回落到代码里的默认值 | **本仓库是公开的** —— 任何人都能照着签一个合法 cookie | `AUTH_SECRET=<随机值>` |
+| ~~`AUTH_SECRET` 未设时回落到代码里的默认值~~ | **本仓库是公开的** —— 任何人都能照着签一个合法 cookie | 已改为**没设就自动生成一把随机密钥并落盘**（数据目录下 `.auth-secret`），不再有硬编码回落；显式设 `AUTH_SECRET` 行为不变 |
 | 登录接口零限速 | scrypt 只是把「几小时爆破」拖成「几天爆破」，不是挡住 | 无开关，`auth-rate-limit.ts` 常开 |
 
 加上监听地址，公网暴露前必须同时满足：
@@ -778,7 +778,7 @@ standalone 没有 `src/` 也没有 tsx。
 ```
 REQUIRE_AUTH=1              # 只认签名 cookie，未签名的请求头/cookie 一律不认
 ALLOW_REGISTRATION=0        # 关掉自助注册，否则任何人可以给自己开号
-AUTH_SECRET=<随机值>         # 未设则回落到公开仓库里的默认值
+AUTH_SECRET=<随机值>         # 可选：不设会自动生成并落盘（见下）
 APP_BIND=0.0.0.0:3007       # 默认 127.0.0.1:3007
 ```
 
@@ -1414,7 +1414,7 @@ src/lib/evals/
 | 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)，`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
 | 迁移链**根本无法从零建库**，全新安装/CI 全都撞得上 | `0001` 之后某处断链。本地库是历史演进来的，从来没人从零跑过，所以一直没暴露；部署到服务器跑空库时才炸出来（worker 反复重启报 `no such table: character_assets`）。我一开始误判成「两个容器并发跑迁移的竞态」并跟用户这么说了，单进程复现后已更正 | 基线压缩：`drizzle/baseline/schema.sql` + `meta.json`（`throughTag`），`applyBaselineIfFresh()` 只在空库时应用并把该 tag 及之前标记为已应用。并发是另一个真实隐患，单独用 `__migration_lock` 修掉。见约定 8l |
 | 判「是不是空库」的 SQL 把**每一张表**都排除了，基线差点盖到生产库上 | `name NOT LIKE '__%'` —— SQL 的 `LIKE` 里 `_` 是单字符通配符，本意排除 `__drizzle_migrations`，实际匹配任意两字符开头的表名，于是任何库都被判成空库 | 改 `NOT LIKE '\_\_%' ESCAPE '\'`，加专门的回归测试。发现契机是对比脚本报「健康库 0 张表」这个明显不可能的数字 |
-| 公网暴露后**只加一个请求头就能读到别人全部项目** | `getUserIdFromRequest` 的回退链认未签名身份（`x-user-id` 请求头 / 裸 `ai_comic_uid` cookie）。这对单机单用户是合理便利，对公网等于完全没有认证 | `REQUIRE_AUTH=1` 关掉未签名回退；`ALLOW_REGISTRATION=0` 关自助注册；`AUTH_SECRET` 必设（默认值在公开仓库里）；登录加双维度限速。默认全部保持改造前行为，见约定 8k |
+| 公网暴露后**只加一个请求头就能读到别人全部项目** | `getUserIdFromRequest` 的回退链认未签名身份（`x-user-id` 请求头 / 裸 `ai_comic_uid` cookie）。这对单机单用户是合理便利，对公网等于完全没有认证 | `REQUIRE_AUTH=1` 关掉未签名回退；`ALLOW_REGISTRATION=0` 关自助注册；`AUTH_SECRET`（当时会回落到公开仓库里的默认值；现已改为自动生成并落盘，见下方那条）；登录加双维度限速。默认全部保持改造前行为，见约定 8k |
 | 云控制台放行了端口，公网仍然连不上 | compose 里写死 `127.0.0.1:3007:3007`，**只绑回环**。安全组和监听地址是两道独立的闸 | `${APP_BIND:-127.0.0.1:3007}`，默认仍只绑回环 —— 暴露必须是显式选择 |
 | `db-sync.sh` 在服务器侧静默失败 | 服务器上**没装 sqlite3 CLI**，而脚本靠它取 `.backup` 一致性快照 | 装上；比较用的指纹脚本改成不依赖两端工具一致（见下条） |
 | `credit_ledger.balance_after` 同一列两种含义，流水无法对账 | `credits.ts` 记的是两个桶之和，`subscription.ts` / `orders.ts` 记的是永久桶且用事务开始时的旧值。账面余额一直是对的（`credit_accounts` 无误），坏的是审计追溯能力 —— 而写流水的全部意义就是审计 | 三处统一改为「改完账户后重读 `balance + subscription_balance`」。发现方式是新增 `order-lifecycle.test.ts` 按真实时间顺序跑完整闭环并逐条重放流水 —— **单点不变量各自成立不代表串起来成立**，那些单测早就全绿了 |
@@ -1434,6 +1434,7 @@ src/lib/evals/
 | 重写组件时把「在 effect 里读 localStorage」改回「在 render 里读」，引入 hydration mismatch | `localStorage` / `indexedDB` / `window` 只有浏览器有：在 render 里直接读，**服务端渲染出一个值、客户端渲染出另一个**，两份 HTML 对不上。被替换掉的旧代码里本来就有 `useEffect` + 一条明确注释在防这件事，重写时丢了 | 这类值一律 `useState(null)` + `useEffect` 里赋值。**重写一个组件前先读懂它每一处「看起来多余」的写法** —— `useEffect` 包一个同步读取、`typeof window !== "undefined"` 判断、看似无用的中间变量，通常都是在防某个具体的坑，注释没写全不代表没有原因 |
 | 首页 dev 控制台常驻一条 `Hydration failed`（base-ui 生成的 `id` 服务端/客户端不一致）| `base-ui-_R_1pinekned5rlb_`（服务端）vs `base-ui-_R_dinekned5rlb_`（客户端）。React 明确说这类属性差异 **"won't be patched up"** —— 客户端会一直带着服务端那个 id，base-ui 的 aria 关联因此指错。**不是 dev-only**（我一度这么误判，见下）| **给 `DialogTrigger` 显式传 `id`**，base-ui 就不再自己生成。`CreateProjectDialog` 因此把 `triggerId` 做成**必填 prop** —— 它在首页出现两次，写死在组件里会产生重复 DOM id，同样破坏 aria 关联和 `getElementById`。已双向验证：去掉显式 id 报错复现，加上就干净 |
 | 误判「这个 hydration 报错是 dev-only、线上没有」| 我拿生产环境的 `/zh/login` 和 `/zh/settings/prompts` 测出「零报错」就下了结论 —— 但**那两页根本不渲染出问题的组件**：生产是 `REQUIRE_AUTH=1`，未登录首页显示的是登录引导，`CreateProjectDialog` 压根没渲染。**「换个页面没复现」只有在那个页面确实包含问题组件时才算证据** | 排查顺序仍然是「先换未改动页面、再上生产构建复现」，但每一步都要先确认**被测页面真的包含那个组件**，否则测的是空气。另一类 hydration 问题（render 里读 `localStorage`/`window`）见上一条 || 页面级登录闸该放哪：**segment layout，不是 middleware** | middleware 跑在 **edge runtime，没有 node 的 `crypto`** —— 想在那里验 auth cookie 的签名，就得用 Web Crypto 再写一份 HMAC，于是仓库里有了**两份签名实现**，早晚漂移。而 segment layout 是服务端组件（node runtime），可以直接复用 `lib/auth.ts` 的 `parseCookieValue` | `src/app/[locale]/settings/layout.tsx` 是范本：`isAuthRequired()` 为真且 cookie 无效才 redirect。⚠️ 两条必须记住：① **未开 `REQUIRE_AUTH` 时不能拦** —— 自部署单机是匿名可用的，拦住等于废掉整个自部署场景；② **这是 UX 跳转，不是安全边界** —— 真正的准入在 API 那层（约定 8b），绕过跳转直接打接口一样会被挡。代价：layout 拿不到具体 pathname，从子页被踢出去时 `next=` 只能回到该区根路径 |
+| 自部署用户 `docker compose up` 之后**一注册就 500** | `getSecret()` 在 `NODE_ENV=production` 且未设 `AUTH_SECRET` 时直接抛错，而 compose 跑的就是 production。匿名浏览没事（不解析 auth cookie 就不会调到它），一旦注册/登录才炸，且错误只在服务端日志里。**另一半**：原实现用 `??` 回落，只认 `undefined` —— 而 `.env.example` 里有一行 `# AUTH_SECRET=`，用户取消注释却没填就会拿**空字符串**当签名密钥，绕过所有校验、毫无提示 | 改为：`AUTH_SECRET` 为空/空白一律当作没设；没设时**自动生成一把随机密钥并落盘**到数据目录的 `.auth-secret`（与 sqlite 同目录，Docker 下在挂载卷里，重启不踢人），**不再有任何硬编码默认值**（公开仓库里的默认密钥等于没有密钥）。随机的每部署独立密钥安全性严格优于共享默认值，同时满足「装机即用」。`auth-secret.test.ts` 锁死三种状态 + 持久化 + 「源码里不得再出现那个默认密钥字面量」|
 | 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
 ---

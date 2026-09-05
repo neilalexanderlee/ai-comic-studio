@@ -27,7 +27,7 @@ describe("Secure 属性按请求协议决定", () => {
   it("明文 HTTP 的生产环境**不能**加 Secure —— 加了浏览器会静默丢弃 cookie", async () => {
     vi.stubEnv("NODE_ENV", "production");
     const auth = await fresh();
-    const header = auth.makeSetCookieHeader("u1", 0, reqWith("http://60.205.91.158:3007/api/auth/login"));
+    const header = auth.makeSetCookieHeader("u1", 0, reqWith("http://203.0.113.10:3007/api/auth/login"));
     expect(header).not.toContain("Secure");
     expect(header).toContain("HttpOnly");
     expect(header).toContain("SameSite=Lax");

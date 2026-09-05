@@ -23,23 +23,93 @@
  *   AUTH_SECRET — 签名密钥，生产环境务必设置（否则使用默认值，重启后 cookie 仍有效）
  */
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 export const AUTH_COOKIE = "ai_comic_auth";
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 天（原为 1 年）
 const COOKIE_VERSION = "v2";
 
+/** 进程内缓存：签名密钥每次请求都要用，不能每次都读盘 */
+let cachedSecret: string | null = null;
+
+/**
+ * cookie 签名密钥。
+ *
+ * ## 为什么不是「没设就用一个默认值」
+ *
+ * 本仓库是**公开**的。任何硬编码的默认密钥全世界可见，等于任何人都能伪造登录态。
+ * 所以绝不回落到代码里的常量。
+ *
+ * ## 为什么也不是「没设就抛错」
+ *
+ * 抛错会让**自部署用户装不起来**：`docker compose up` 跑的是 `NODE_ENV=production`，
+ * 于是「clone 下来就能用」变成「一注册就 500」，而错误只出现在服务端日志里。
+ * 这与 `BILLING_ENABLED` / `WORKER_IN_WEB` / `REQUIRE_AUTH` 是同一条原则：
+ * **默认值要让单机装机即用**。
+ *
+ * ## 所以：没设就自己生成一把，并落盘持久化
+ *
+ * 随机的每部署独立密钥，安全性**严格优于**共享默认值；落在数据目录里
+ * （与 sqlite 同目录，Docker 下就是挂载卷），所以重启不会把所有人踢下线。
+ * 想自己管密钥的照常设 `AUTH_SECRET`，行为完全不变。
+ *
+ * ⚠️ **空串必须当作没设。** 原实现用 `??`，它只在 `undefined` 时回落 ——
+ * 而 `.env.example` 里恰好有一行 `# AUTH_SECRET=`，用户把它取消注释却没填，
+ * 就会拿**空字符串**当签名密钥，而且绕过所有校验、毫无提示。
+ */
 function getSecret(): string {
-  const secret = process.env.AUTH_SECRET ?? "ai-comic-builder-dev-secret-please-change";
-  if (
-    process.env.NODE_ENV === "production" &&
-    secret === "ai-comic-builder-dev-secret-please-change"
-  ) {
-    throw new Error(
-      "[auth] AUTH_SECRET must be set in production. " +
-        "Using the default dev secret is a security risk."
+  if (cachedSecret) return cachedSecret;
+
+  const fromEnv = process.env.AUTH_SECRET?.trim();
+  if (fromEnv) {
+    cachedSecret = fromEnv;
+    return cachedSecret;
+  }
+
+  cachedSecret = loadOrCreatePersistentSecret();
+  return cachedSecret;
+}
+
+/** 数据目录下的 `.auth-secret`；与 sqlite 同目录，Docker 下位于挂载卷内 */
+function secretFilePath(): string {
+  const dbPath = process.env.DATABASE_URL?.replace("file:", "") || "./data/aicomic.db";
+  return path.join(path.dirname(path.resolve(dbPath)), ".auth-secret");
+}
+
+function loadOrCreatePersistentSecret(): string {
+  const file = secretFilePath();
+  try {
+    const existing = fs.readFileSync(file, "utf8").trim();
+    if (existing) return existing;
+  } catch {
+    // 不存在就往下走去生成
+  }
+
+  const generated = crypto.randomBytes(48).toString("base64");
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    // 0600：同机其他用户读不到
+    fs.writeFileSync(file, generated, { mode: 0o600 });
+    console.warn(
+      `[auth] 未设置 AUTH_SECRET，已自动生成一把并保存到 ${file}。\n` +
+        `       想自己管理密钥就设环境变量 AUTH_SECRET；删掉该文件会让所有人重新登录。`
+    );
+  } catch (err) {
+    // 只读文件系统等情况：仍然用这把随机密钥（好过公开的默认值），
+    // 但重启会让所有会话失效，所以要显式告警。
+    console.warn(
+      `[auth] 未设置 AUTH_SECRET 且无法写入 ${file}（${
+        err instanceof Error ? err.message : err
+      }）。\n` + `       本次使用内存中的随机密钥：进程重启后所有人需要重新登录。请设置 AUTH_SECRET。`
     );
   }
-  return secret;
+  return generated;
+}
+
+/** 仅供测试：清掉缓存，让下次调用重新读环境变量 */
+export function __resetAuthSecretCacheForTests() {
+  cachedSecret = null;
 }
 
 // ─── Cookie 签名 ──────────────────────────────────────────────────────────────
