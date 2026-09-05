@@ -32,8 +32,8 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { pipeline } from "node:stream/promises";
 import Database from "better-sqlite3";
-import { saveArtifactFromFile, deleteArtifact } from "@/lib/storage/artifact-store";
-import { isOssEnabled, getOssClient, OSS_REF_PREFIX } from "@/lib/storage/oss-client";
+import { saveArtifactFromFile } from "@/lib/storage/artifact-store";
+import { mb, stamp, pruneBackups } from "./backup-common";
 
 const PREFIX = "backups/";
 
@@ -46,38 +46,6 @@ const DRY = process.argv.includes("--dry-run");
 
 function dbPath(): string {
   return path.resolve(process.env.DATABASE_URL?.replace("file:", "") || "./data/aicomic.db");
-}
-
-const mb = (b: number) => (b / 1024 / 1024).toFixed(2) + " MB";
-
-/** 备份文件名里带 UTC 时间戳，按字典序排就是按时间排 */
-function stamp(): string {
-  return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
-}
-
-/** 列出已有备份，**按新到旧**排序。只读元数据，不下载内容。 */
-async function listBackups(): Promise<string[]> {
-  if (isOssEnabled()) {
-    const out: string[] = [];
-    let marker: string | undefined;
-    do {
-      const r = (await getOssClient().list(
-        { prefix: PREFIX, "max-keys": 1000, marker } as never,
-        {},
-      )) as { objects?: { name: string }[]; nextMarker?: string };
-      for (const o of r.objects ?? []) out.push(OSS_REF_PREFIX + o.name);
-      marker = r.nextMarker;
-    } while (marker);
-    return out.sort().reverse();
-  }
-  const dir = path.resolve(process.env.UPLOAD_DIR || "./uploads", "backups");
-  if (!fs.existsSync(dir)) return [];
-  return fs
-    .readdirSync(dir)
-    .filter((f) => f.endsWith(".db.gz"))
-    .map((f) => path.join(process.env.UPLOAD_DIR || "uploads", "backups", f))
-    .sort()
-    .reverse();
 }
 
 async function main() {
@@ -115,19 +83,7 @@ async function main() {
       console.log(`已写入 ${ref}`);
     }
 
-    const existing = await listBackups();
-    const stale = existing.slice(DRY ? KEEP - 1 : KEEP);
-    if (stale.length === 0) {
-      console.log(`现有备份 ${existing.length} 份，未超过保留上限 ${KEEP}`);
-    } else {
-      for (const ref of stale) {
-        if (DRY) console.log(`[dry-run] 将删除 ${ref}`);
-        else {
-          await deleteArtifact(ref);
-          console.log(`已删除过期备份 ${ref}`);
-        }
-      }
-    }
+    await pruneBackups(PREFIX, ".db.gz", KEEP, DRY);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
