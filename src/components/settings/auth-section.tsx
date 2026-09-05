@@ -21,7 +21,13 @@ interface MeResponse {
  * 登录/注册表单已经搬到独立的 `/login` 和 `/register` 两页（普通网站的做法）。
  * 这里不再内嵌表单：同一个表单存在两处，改一处忘一处是必然的，
  * 而登录这条路径出问题的代价特别高 —— 用户直接进不来，且往往没有任何报错
- * （2026-09-05 的 Secure cookie 事故就是这样）。未登录时这里只给一个去 `/login` 的入口。
+ * （2026-09-05 的 Secure cookie 事故就是这样）。
+ *
+ * 下面那条「未登录 → 去登录」的分支，在 `REQUIRE_AUTH=1` 时**基本走不到** ——
+ * `settings/layout.tsx` 已经把未登录的人挡在门外了（常规网站的做法：设置页在登录之后）。
+ * 它服务的是两种情况：
+ *   1. 未开 `REQUIRE_AUTH` 的自部署单机 —— 匿名可用，这里是「升级成账号」的入口；
+ *   2. SSR 通过之后 cookie 才过期的那一小段竞态 —— 此时提示去登录正是对的。
  */
 export function AuthSection() {
   const router = useRouter();
