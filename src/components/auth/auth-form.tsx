@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Loader2, Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { migrateAndClearAnonymousId, getAnonymousId } from "@/lib/client/anon-session";
 
@@ -121,14 +121,14 @@ export function AuthForm({ mode, next }: Props) {
         </p>
       )}
 
+      {/*
+        提交按钮**刻意不放图标**。lucide 的 `LogIn` 与 `LogOut` 是一对镜像箭头
+        （`→]` / `[→`），并排出现时几乎分辨不出来 —— 用户反馈过「登录和退出用的是同一个图标」。
+        主 CTA 的文字本身已经足够明确，全站因此只保留 `LogOut` 一个箭头类图标，
+        不会再出现两个相似图标同时存在的情况。
+      */}
       <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password}>
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : isRegister ? (
-          <UserPlus className="h-4 w-4" />
-        ) : (
-          <LogIn className="h-4 w-4" />
-        )}
+        {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {isRegister ? "创建账号" : "登录"}
       </Button>
     </form>

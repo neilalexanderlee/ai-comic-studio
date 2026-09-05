@@ -1,13 +1,21 @@
 import { getTranslations } from "next-intl/server";
+import { requirePageAuth } from "@/lib/auth-page-guard";
 import { LogoIcon } from "@/components/logo";
 import Link from "next/link";
 import { Settings, Wand2 } from "lucide-react";
 
 export default async function DashboardLayout({
   children,
+  params,
 }: {
   children: React.ReactNode;
+  params: Promise<{ locale: string }>;
 }) {
+  const { locale } = await params;
+  // 整站需要登录时，首页直接送去登录页 —— 而不是渲染一张「请先登录」的空卡片。
+  // 那种做法会让同一屏出现两个登录入口（顶栏 + 卡片），还多一次点击。
+  await requirePageAuth(locale);
+
   const t = await getTranslations("common");
 
   return (

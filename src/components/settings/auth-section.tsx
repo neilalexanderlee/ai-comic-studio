@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Shield, LogOut, User, Loader2, LogIn } from "lucide-react";
+import { Shield, LogOut, User, Loader2, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { markLoggedOut, syncAuthFlag } from "@/lib/client/anon-session";
 
@@ -109,9 +109,10 @@ export function AuthSection() {
           <p className="text-xs text-[--text-muted]">
             当前未登录。登录后数据直接存在服务器数据库，清除浏览器缓存也不会丢失。
           </p>
+          {/* 用 ArrowRight 而不是 LogIn：后者与上面「退出登录」的 LogOut 是镜像箭头，容易混 */}
           <Link href={`/${locale}/login`} className={buttonVariants({ size: "sm" })}>
-            <LogIn className="h-3.5 w-3.5" />
             去登录
+            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
       )}
