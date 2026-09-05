@@ -151,7 +151,7 @@ export function ShotKanban({
                   >
                     <div className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-[--border-subtle] bg-[--surface]">
                       {thumb ? (
-                        <img src={uploadUrl(thumb)} alt={`Shot ${shot.sequence}`} className="h-full w-full object-cover" />
+                        <img src={uploadUrl(thumb, { w: 160 })} alt={`Shot ${shot.sequence}`} className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
                           <ImageIcon className="h-3 w-3 text-[--text-muted]" />

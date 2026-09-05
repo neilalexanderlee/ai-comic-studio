@@ -296,9 +296,34 @@ export const SIGNED_URL_WINDOW_SECONDS = 1800;
  * - OSS  → **签名 URL**（bucket 是私有的，裸 URL 会 403，已实测验证）
  * - 本地 → 走 `/api/uploads/[...path]`，与改造前一致（该路由有鉴权）
  */
+/**
+ * 能被 OSS 图片处理服务识别的扩展名。
+ *
+ * 缩略图指令加在**非图片**上（视频、音频、压缩包）会让 OSS 直接返回错误，
+ * 而调用方是纯客户端的 `uploadUrl()` —— 它拿到的是一个不透明的存储引用，
+ * 判断不了那是图片还是视频。所以在这里按扩展名兜底：不是图片就当没传缩略图参数，
+ * 原样签发原始对象。**静默忽略优于报错** —— 传错了只是没省到流量，不该让图挂掉。
+ */
+const PROCESSABLE_IMAGE_EXT = /\.(png|jpe?g|webp|bmp|tiff?)$/i;
+
+/**
+ * 缩略图的 OSS 图片处理指令。
+ *
+ * - `m_lfit` —— 等比缩放且**不放大**：原图本来就比目标窄时保持原样，
+ *   不会把一张 80px 的小图插值到 640px（那只会变大又变糊）
+ * - `format,webp` —— 同画质下比 PNG 小一个数量级；帧图是照片类内容，
+ *   PNG 的无损压缩在这里纯属浪费。webp 支持透明通道，角色立绘也不会掉 alpha
+ * - `quality,q_80` —— 缩略图尺寸下 80 与 100 肉眼无差别，体积差一倍
+ *
+ * 实测 4448 KB 的定妆图：w_320 → **7.4 KB**（600 倍），w_640 → 20.8 KB（214 倍）。
+ */
+function thumbProcess(width: number): string {
+  return `image/resize,w_${width},m_lfit/format,webp/quality,q_80`;
+}
+
 export function resolveArtifactUrl(
   ref: string,
-  opts?: { downloadFilename?: string }
+  opts?: { downloadFilename?: string; thumbWidth?: number }
 ): string {
   if (isOssRef(ref)) {
     const nowSec = Math.floor(Date.now() / 1000);
@@ -314,11 +339,23 @@ export function resolveArtifactUrl(
           "content-disposition": `attachment; filename="${encodeURIComponent(opts.downloadFilename)}"`,
         }
       : undefined;
-    return getOssSigningClient().signatureUrl(ossKeyOf(ref), {
+    const key = ossKeyOf(ref);
+    // 缩略图指令必须**签进 URL**（ali-oss 的 process 选项会把它算进签名）——
+    // 私有 bucket 下，事后往 URL 上贴 x-oss-process 会让签名失效直接 403。
+    const process =
+      opts?.thumbWidth && PROCESSABLE_IMAGE_EXT.test(key)
+        ? thumbProcess(opts.thumbWidth)
+        : undefined;
+    return getOssSigningClient().signatureUrl(key, {
       expires: alignedExpiry - nowSec,
       ...(response ? { response } : {}),
+      ...(process ? { process } : {}),
     });
   }
+  // 本地引用没有缩略图：自部署场景下文件就在同一台机器的磁盘上，
+  // 既不产生流量也不产生费用，为它引入一个图片处理依赖（sharp 等）不划算。
+  // 行为与改造前完全一致 —— 与 BILLING_ENABLED / WORKER_IN_WEB 同一条原则：
+  // 默认值要让单机装机即用。
   const normalized = ref.replace(/\\/g, "/");
   return `/api/uploads/${normalized.replace(/^.*uploads\//, "")}`;
 }

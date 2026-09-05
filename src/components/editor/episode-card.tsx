@@ -98,7 +98,7 @@ export function EpisodeCard({
       {previewImages.map((src, i) => (
         <img
           key={src}
-          src={uploadUrl(src)}
+          src={uploadUrl(src, { w: 640 })}
           alt={`${epLabel} preview ${i + 1}`}
           className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
           style={{ opacity: i === carouselIdx ? 1 : 0 }}

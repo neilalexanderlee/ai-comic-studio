@@ -560,7 +560,7 @@ export function ShotDrawer({
                         {prop.imagePath ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img
-                            src={uploadUrl(prop.imagePath)}
+                            src={uploadUrl(prop.imagePath, { w: 160 })}
                             alt={prop.tag || "道具"}
                             className="h-full w-full object-cover"
                           />

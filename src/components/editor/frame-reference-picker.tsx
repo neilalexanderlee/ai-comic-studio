@@ -213,7 +213,7 @@ export function FrameReferencePicker({
                     >
                       <div className="aspect-video bg-[--surface] relative">
                         <img
-                          src={uploadUrl(opt.src)}
+                          src={uploadUrl(opt.src, { w: 320 })}
                           alt={opt.label}
                           className="h-full w-full object-cover"
                         />
@@ -268,5 +268,5 @@ export function FrameRefThumb({ src, className }: { src?: string | null; classNa
       </div>
     );
   }
-  return <img src={uploadUrl(src)} alt="" className={`object-cover ${className ?? ""}`} />;
+  return <img src={uploadUrl(src, { w: 320 })} alt="" className={`object-cover ${className ?? ""}`} />;
 }

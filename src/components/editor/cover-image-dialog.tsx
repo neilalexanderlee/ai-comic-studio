@@ -273,7 +273,7 @@ export function CoverImageDialog({ open, onOpenChange, projectId }: CoverImageDi
               <div className="relative mx-auto overflow-hidden rounded-xl border border-[--border-subtle] bg-[--surface]" style={{ width: 140, height: 210 }}>
                 {resultPath ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={uploadUrl(resultPath)} alt="封面预览" className="h-full w-full object-cover" />
+                  <img src={uploadUrl(resultPath, { w: 320 })} alt="封面预览" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full items-center justify-center">
                     <Loader2 className="h-6 w-6 animate-spin text-[--text-muted]" />

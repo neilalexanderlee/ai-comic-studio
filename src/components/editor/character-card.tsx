@@ -522,7 +522,7 @@ export function CharacterCard({
         <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[--surface] border border-[--border-subtle] transition-shadow hover:shadow-md">
           {asset.imagePath ? (
             <img 
-              src={uploadUrl(asset.imagePath)} 
+              src={uploadUrl(asset.imagePath, { w: 640 })} 
               alt={name} 
               className="w-full h-full object-cover cursor-pointer transition-transform duration-300 group-hover/slot:scale-105" 
               onClick={() => setLightboxImage(asset.imagePath)} 
@@ -1012,7 +1012,7 @@ export function CharacterCard({
                       className="group relative aspect-[3/4] rounded-xl overflow-hidden border border-[--border-subtle] cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
                       onClick={() => saveGachaImage(path)}
                     >
-                      <img src={uploadUrl(path)} alt="Generated" className="w-full h-full object-cover" />
+                      <img src={uploadUrl(path, { w: 640 })} alt="Generated" className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 flex items-center justify-center transition-colors">
                         <div className="opacity-0 group-hover:opacity-100 bg-black/60 text-white text-sm px-3 py-1.5 rounded-full font-medium shadow-sm transition-opacity">
                           使用此图

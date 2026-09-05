@@ -228,7 +228,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                 >
                   {(shot.anchorFirst ?? shot.posterUrl) ? (
                     <img
-                      src={uploadUrl((shot.anchorFirst ?? shot.posterUrl)!)}
+                      src={uploadUrl((shot.anchorFirst ?? shot.posterUrl)!, { w: 160 })}
                       className="h-10 w-16 shrink-0 rounded object-cover"
                       alt=""
                     />

@@ -29,9 +29,10 @@ vi.mock("ali-oss", () => {
           : `${this.opts.region}.aliyuncs.com`;
         const resp = options?.response as Record<string, string> | undefined;
         const disp = resp?.["content-disposition"];
+        const process = options?.process as string | undefined;
         return `https://${this.opts.bucket}.${host}/${key}?sig=x${
           disp ? `&response-content-disposition=${encodeURIComponent(disp)}` : ""
-        }`;
+        }${process ? `&x-oss-process=${encodeURIComponent(process)}` : ""}`;
       }
     },
   };
@@ -129,5 +130,55 @@ describe("强制下载", () => {
     const b = store.resolveArtifactUrl("oss://renders/a.mp4");
     expect(a).toBe(b);
     expect(a).not.toContain("content-disposition");
+  });
+});
+
+/**
+ * 缩略图（OSS 实时图片处理）。
+ *
+ * 这里省下的是**下行流量**，而流量包只有 2 GB/月且已经打穿过一次 ——
+ * 所以「该缩的没缩」和「不该缩的缩了」是两类都不能出的错。
+ */
+describe("缩略图", () => {
+  it("图片带上 x-oss-process，尺寸进签名", async () => {
+    setOssEnv(false);
+    const { store } = await fresh();
+    const url = decodeURIComponent(store.resolveArtifactUrl("oss://frames/x.png", { thumbWidth: 320 }));
+    expect(url).toContain("image/resize,w_320");
+    // 不放大：原图比目标窄时保持原样，否则只是把小图插值成糊的大图
+    expect(url).toContain("m_lfit");
+    expect(url).toContain("format,webp");
+  });
+
+  it("不传宽度就是原图 —— 与改造前逐字节一致", async () => {
+    setOssEnv(false);
+    const { store } = await fresh();
+    expect(store.resolveArtifactUrl("oss://frames/x.png")).not.toContain("x-oss-process");
+  });
+
+  it("非图片（视频/音频）静默忽略缩略图参数", async () => {
+    setOssEnv(false);
+    const { store } = await fresh();
+    // uploadUrl 是纯客户端函数，拿到的只是一个不透明引用，分不清图片和视频；
+    // 传错了只该「没省到流量」，绝不能让视频 403 播不出来
+    for (const ref of ["oss://videos/a.mp4", "oss://bgm/b.wav"]) {
+      expect(store.resolveArtifactUrl(ref, { thumbWidth: 320 })).not.toContain("x-oss-process");
+    }
+  });
+
+  it("同宽度的 URL 逐字节稳定 —— 否则浏览器缓存永远落空", async () => {
+    setOssEnv(false);
+    const { store } = await fresh();
+    const a = store.resolveArtifactUrl("oss://frames/x.png", { thumbWidth: 160 });
+    const b = store.resolveArtifactUrl("oss://frames/x.png", { thumbWidth: 160 });
+    expect(a).toBe(b);
+    expect(a).not.toBe(store.resolveArtifactUrl("oss://frames/x.png", { thumbWidth: 640 }));
+  });
+
+  it("缩略图也走公网端点", async () => {
+    setOssEnv(true);
+    const { store } = await fresh();
+    const url = store.resolveArtifactUrl("oss://frames/x.png", { thumbWidth: 320 });
+    expect(url).not.toContain("-internal");
   });
 });

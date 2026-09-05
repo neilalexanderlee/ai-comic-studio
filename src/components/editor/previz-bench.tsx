@@ -202,7 +202,7 @@ export function PrevizBench({
                   {take.posterUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={uploadUrl(take.posterUrl)}
+                      src={uploadUrl(take.posterUrl, { w: 160 })}
                       alt="预演"
                       className="h-full w-full object-cover opacity-90"
                     />
@@ -259,7 +259,7 @@ export function PrevizBench({
             title="3D 导演台导出的构图参考图"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={uploadUrl(layoutUrl)} alt="构图参考" className="h-full w-auto object-cover" />
+            <img src={uploadUrl(layoutUrl, { w: 160 })} alt="构图参考" className="h-full w-auto object-cover" />
           </button>
         )}
         <span className="text-[10px] text-[--text-muted]">

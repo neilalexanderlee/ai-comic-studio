@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { requireUser } from "@/lib/api-guard";
-import { OSS_URL_SEGMENT } from "@/lib/utils/upload-url";
+import { OSS_URL_SEGMENT, THUMB_WIDTHS } from "@/lib/utils/upload-url";
 import { resolveArtifactUrl, SIGNED_URL_WINDOW_SECONDS } from "@/lib/storage/artifact-store";
 
 const uploadDir = process.env.UPLOAD_DIR || "./uploads";
@@ -50,7 +50,18 @@ export async function GET(
   // `?download=<文件名>` → 强制「另存为」而不是在浏览器里直接播放。
   // 成片迁到 OSS 之后前端的 `<a download>` 不再生效（302 之后是跨域地址，
   // download 属性会被忽略），所以必须由服务端把 content-disposition 定下来。
-  const downloadFilename = new URL(request.url).searchParams.get("download") || undefined;
+  const searchParams = new URL(request.url).searchParams;
+  const downloadFilename = searchParams.get("download") || undefined;
+
+  // `?w=<宽度>` → 请求缩略图（见 `uploadUrl` 的 THUMB_WIDTHS 注释）。
+  // **必须按白名单校验**：这个值最终会拼进 OSS 的图片处理指令，
+  // 放开成任意字符串就是让外部往我们的签名里注入内容；
+  // 而且每个宽度都会新开一份 OSS 处理结果和一个浏览器缓存键，
+  // 不设闭集等于允许任何人生成无限多份缓存不命中的变体。
+  const rawWidth = Number(searchParams.get("w"));
+  const thumbWidth = (THUMB_WIDTHS as readonly number[]).includes(rawWidth)
+    ? rawWidth
+    : undefined;
 
   // OSS 引用：鉴权通过后 302 到临时签名 URL。
   // 不在这里代理下载 —— 那会让所有流量绕经我们的服务器，白白吃掉带宽，
@@ -60,7 +71,7 @@ export async function GET(
     if (!key) return NextResponse.json({ error: "Missing object key" }, { status: 400 });
     try {
       const res = NextResponse.redirect(
-        resolveArtifactUrl(`oss://${key}`, { downloadFilename }),
+        resolveArtifactUrl(`oss://${key}`, { downloadFilename, thumbWidth }),
         302
       );
       // 让浏览器缓存这一跳。没有它，每次播放都要重新走一遍 302 并重新下载文件——
@@ -78,6 +89,8 @@ export async function GET(
     }
   }
 
+  // 本地分支刻意忽略 `?w=`：文件就在本机磁盘上，读它既不产生流量也不产生费用。
+  // 见 resolveArtifactUrl 里的同一条说明。
   const filePath = path.join(uploadDir, ...segments);
 
   // Prevent directory traversal

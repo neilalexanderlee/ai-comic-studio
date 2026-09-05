@@ -64,7 +64,7 @@ function FrameCell({
             <Loader2 className="h-4 w-4 animate-spin text-primary" />
           </div>
         ) : src && !pathMissing ? (
-          <img src={uploadUrl(src)} className="w-full object-contain" alt={label} />
+          <img src={uploadUrl(src, { w: 320 })} className="w-full object-contain" alt={label} />
         ) : pathMissing ? (
           <div className="flex h-16 flex-col items-center justify-center gap-0.5 px-1">
             <XCircle className="h-4 w-4 text-red-500" />
@@ -130,7 +130,8 @@ function FrameCell({
 }
 
 function FrameCellWithMissing(props: Omit<Parameters<typeof FrameCell>[0], "pathMissing"> & { src: string | null | undefined }) {
-  const pathMissing = useFrameImageMissing(props.src);
+  // 宽度与下面 <img> 的一致 —— 否则每张帧图会被下载两遍（见 hook 注释）
+  const pathMissing = useFrameImageMissing(props.src, 320);
   return <FrameCell {...props} pathMissing={pathMissing} />;
 }
 

@@ -437,7 +437,7 @@ export function ShotCard({
                 {src ? (
                   isVid
                     ? <video className="h-full w-full object-cover" src={uploadUrl(src)} />
-                    : <img src={uploadUrl(src)} className="h-full w-full object-cover" />
+                    : <img src={uploadUrl(src, { w: 160 })} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
                     {isVid
@@ -496,7 +496,7 @@ export function ShotCard({
                   isVideo ? (
                     <video className="h-full w-full object-cover" src={uploadUrl(src)} />
                   ) : (
-                    <img src={uploadUrl(src)} className="h-full w-full object-cover" />
+                    <img src={uploadUrl(src, { w: 160 })} className="h-full w-full object-cover" />
                   )
                 ) : (
                   <div className="flex h-full w-full items-center justify-center bg-[--surface]">
@@ -794,7 +794,7 @@ export function ShotCard({
                       >
                         {prop.imagePath ? (
                           // eslint-disable-next-line @next/next/no-img-element
-                          <img src={uploadUrl(prop.imagePath)} alt={prop.tag} className="h-full w-full object-cover" />
+                          <img src={uploadUrl(prop.imagePath, { w: 160 })} alt={prop.tag} className="h-full w-full object-cover" />
                         ) : (
                           <div className="flex h-full items-center justify-center bg-[--surface-alt] text-[7px] text-[--text-muted]">无图</div>
                         )}

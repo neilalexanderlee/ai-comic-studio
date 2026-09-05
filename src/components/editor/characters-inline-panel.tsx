@@ -152,7 +152,7 @@ export function CharactersInlinePanel({
                 >
                   {getDisplayImage(char) ? (
                     <img
-                      src={uploadUrl(getDisplayImage(char)!)}
+                      src={uploadUrl(getDisplayImage(char)!, { w: 320 })}
                       alt={char.name}
                       className="h-full w-full object-cover transition-opacity hover:opacity-80"
                     />
