@@ -1,45 +1,56 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Loader2, Eye, EyeOff, LogIn } from "lucide-react";
+import { Loader2, Eye, EyeOff, LogIn, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { migrateAndClearAnonymousId, getAnonymousId } from "@/lib/client/anon-session";
 
+export type AuthMode = "login" | "register";
+
 interface Props {
-  /** 服务端读 `ALLOW_REGISTRATION` 后传入。为 false 时整个「注册」页签都不渲染 */
-  allowRegistration: boolean;
-  /** 登录成功后回到哪里。已由服务端校验过是站内相对路径 */
+  mode: AuthMode;
+  /** 成功后回到哪里。已由服务端的 safeNext 校验过是站内相对路径 */
   next: string;
 }
 
 /**
- * `/login` 页的登录/注册表单。
+ * 登录 / 注册表单。**一个模式一个页面**，不再用页签切换。
  *
- * 与设置页里那个 `AuthSection` 的分工：那个是「已登录时看账号、顺手能登出」的面板，
- * 这个是**未登录时的入口**。两边共用 `lib/client/anon-session` 里的匿名数据迁移逻辑，
- * 不各抄一份。
+ * 之前登录页内嵌了「登录/注册」两个页签。改成两个独立路由是因为：
+ *  - `/register` 需要能被直接链接、直接分享，页签做不到；
+ *  - 关闭自助注册时（`ALLOW_REGISTRATION=0`）整条路由都该给出明确说明，
+ *    而不是在登录页里少渲染一个页签、让人不知道注册去哪了。
+ *
+ * 匿名数据迁移走 `lib/client/anon-session`，与设置页共用一份实现。
  */
-export function LoginForm({ allowRegistration, next }: Props) {
+export function AuthForm({ mode, next }: Props) {
   const router = useRouter();
-  const [tab, setTab] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 只在注册页签下提示「会迁移旧数据」，登录时提这个只会让人困惑
-  const anonId = typeof window !== "undefined" ? getAnonymousId() : null;
+  const isRegister = mode === "register";
+  const [anonId, setAnonId] = useState<string | null>(null);
+
+  // ⚠️ **必须在 effect 里读，不能在 render 里读。**
+  // localStorage 只有浏览器有：直接在 render 中调用，服务端渲染出 null、
+  // 客户端渲染出真实值，两份 HTML 不一致 → hydration mismatch。
+  // 只在注册时提示「会迁移旧数据」，登录时提这个只会让人困惑。
+  useEffect(() => {
+    if (isRegister) setAnonId(getAnonymousId());
+  }, [isRegister]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!username.trim() || !password) return;
     setLoading(true);
     try {
-      const res = await fetch(tab === "login" ? "/api/auth/login" : "/api/auth/register", {
+      const res = await fetch(isRegister ? "/api/auth/register" : "/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password }),
@@ -53,12 +64,12 @@ export function LoginForm({ allowRegistration, next }: Props) {
 
       await migrateAndClearAnonymousId();
       toast.success(
-        tab === "login" ? `欢迎回来，${data.username}！` : `账号创建成功，欢迎 ${data.username}！`
+        isRegister ? `账号创建成功，欢迎 ${data.username}！` : `欢迎回来，${data.username}！`
       );
 
-      // replace 而不是 push：登录页不该留在后退历史里
+      // replace 而不是 push：登录/注册页不该留在后退历史里
       router.replace(next);
-      // 首页是服务端组件，按 cookie 查项目；不 refresh 会拿到登录前那份空结果
+      // 首页是服务端组件、按 cookie 查项目；不 refresh 会拿到登录前那份空结果
       router.refresh();
     } catch {
       toast.error("网络错误，请重试");
@@ -69,29 +80,12 @@ export function LoginForm({ allowRegistration, next }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {allowRegistration && (
-        <div className="flex overflow-hidden rounded-lg border border-[--border-subtle] text-xs">
-          {(["login", "register"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={`flex-1 py-2 font-medium transition-colors ${
-                tab === t ? "bg-primary text-white" : "text-[--text-secondary] hover:bg-[--surface]"
-              }`}
-            >
-              {t === "login" ? "登录" : "注册"}
-            </button>
-          ))}
-        </div>
-      )}
-
       <div className="space-y-1.5">
         <Label className="text-xs">用户名</Label>
         <Input
           value={username}
           onChange={(e) => setUsername(e.target.value)}
-          placeholder={tab === "register" ? "至少 2 个字符" : ""}
+          placeholder={isRegister ? "至少 2 个字符" : ""}
           autoComplete="username"
           autoFocus
           disabled={loading}
@@ -105,8 +99,8 @@ export function LoginForm({ allowRegistration, next }: Props) {
             type={showPw ? "text" : "password"}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={tab === "register" ? "至少 6 个字符" : ""}
-            autoComplete={tab === "login" ? "current-password" : "new-password"}
+            placeholder={isRegister ? "至少 6 个字符" : ""}
+            autoComplete={isRegister ? "new-password" : "current-password"}
             disabled={loading}
             className="pr-10"
           />
@@ -121,23 +115,21 @@ export function LoginForm({ allowRegistration, next }: Props) {
         </div>
       </div>
 
-      {tab === "register" && anonId && (
+      {anonId && (
         <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
           检测到浏览器中有旧数据，注册后将自动迁移到新账号。
         </p>
       )}
 
-      <Button
-        type="submit"
-        className="w-full"
-        disabled={loading || !username.trim() || !password}
-      >
+      <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password}>
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
+        ) : isRegister ? (
+          <UserPlus className="h-4 w-4" />
         ) : (
           <LogIn className="h-4 w-4" />
         )}
-        {tab === "login" ? "登录" : "创建账号"}
+        {isRegister ? "创建账号" : "登录"}
       </Button>
     </form>
   );

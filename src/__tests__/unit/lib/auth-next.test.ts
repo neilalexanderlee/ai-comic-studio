@@ -1,5 +1,5 @@
 /**
- * `/login?next=` 的开放重定向防护。
+ * `/login?next=` 与 `/register?next=` 的开放重定向防护（两页共用同一个实现）。
  *
  * 不校验就是标准的开放重定向：攻击者发一个
  * `https://我们的域名/zh/login?next=https://evil.com` 的链接，
@@ -7,7 +7,7 @@
  * 而整个过程地址栏都显示我们的域名 —— 这正是钓鱼最想要的可信外壳。
  */
 import { describe, it, expect } from "vitest";
-import { safeNext } from "@/app/[locale]/login/page";
+import { safeNext } from "@/lib/auth-next";
 
 const HOME = "/zh";
 
