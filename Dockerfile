@@ -41,6 +41,22 @@ RUN pnpm config set registry "$NPM_REGISTRY" \
 # --- Build ---
 FROM deps AS builder
 COPY . .
+
+# 构建期堆内存上限（MB）。**默认为空 = 不设限，与改造前完全一致** ——
+# 自部署用户机器通常比这台服务器宽裕，硬塞一个上限只会白白拖慢他们的构建。
+#
+# 为什么要留这个口子：`next build` 在内存紧张的机器上不设防很危险，
+# 而且失败方式极差 —— 它不是"构建失败"，是**把整台机器拖到无法响应**。
+# 2026-09-05 生产机在 build 期间彻底冻死 1 小时 50 分钟（病因未证实，
+# 但构建期无上限是已知的风险面）：内核还能完成 TCP 握手，用户态却起不了新进程，
+# 连 journald 都写不进日志，于是**事后没有任何证据可查**。
+#
+# 关键点：`docker compose build` 期间**旧容器还在跑**（实测约 638 MB），
+# 构建能用的其实比 `free -m` 看到的总量少。设了上限之后，最坏情况是
+# **构建自己 OOM 失败**（报错清晰、机器活着），而不是把宿主机拖垮。
+# 那台 2c4g 服务器在 .env 里设 NODE_BUILD_MEMORY=2048。
+ARG NODE_BUILD_MEMORY=
+ENV NODE_OPTIONS=${NODE_BUILD_MEMORY:+--max-old-space-size=$NODE_BUILD_MEMORY}
 RUN pnpm build
 
 # --- Production ---

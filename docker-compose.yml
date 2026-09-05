@@ -7,6 +7,9 @@ services:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         BETTER_SQLITE3_BINARY_HOST: ${BETTER_SQLITE3_BINARY_HOST:-}
+        # 构建期堆内存上限（MB）。默认空 = 不设限（自部署不受影响）。
+        # 内存紧张的机器上设它，可以把「拖垮宿主机」换成「构建自己失败」。见 Dockerfile builder 段。
+        NODE_BUILD_MEMORY: ${NODE_BUILD_MEMORY:-}
     # ⚠️ 监听地址决定这个服务能不能被公网访问，安全组只是第二道闸。
     #   "127.0.0.1:3007:3007" —— 只绑回环，**外网连不上**，必须走 SSH 隧道：
     #        ssh -L 3007:localhost:3007 root@<服务器>
@@ -50,6 +53,9 @@ services:
         ALPINE_MIRROR: ${ALPINE_MIRROR:-https://dl-cdn.alpinelinux.org}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
         BETTER_SQLITE3_BINARY_HOST: ${BETTER_SQLITE3_BINARY_HOST:-}
+        # 构建期堆内存上限（MB）。默认空 = 不设限（自部署不受影响）。
+        # 内存紧张的机器上设它，可以把「拖垮宿主机」换成「构建自己失败」。见 Dockerfile builder 段。
+        NODE_BUILD_MEMORY: ${NODE_BUILD_MEMORY:-}
     volumes:
       # 必须和 web 挂同一份 data 与 uploads：任务表在 SQLite 里，
       # 素材与产物在 uploads 里，两边看到的必须是同一个文件系统。
