@@ -6,6 +6,9 @@ import { providerSecrets } from "@/lib/db/schema";
 import { syncSecretsVaultEncAfterMutation } from "@/lib/secrets-vault-file";
 import { encryptSecret, decryptSecret } from "@/lib/secret-crypto";
 import type { ProviderConfig } from "@/lib/ai/ai-sdk";
+import { getModelStorePrefs } from "@/lib/user-client-prefs";
+import { assertUsableEndpoint } from "@/lib/provider-endpoint";
+import { isBillingEnabled } from "@/lib/billing/gate";
 
 type ProviderConfigWithId = ProviderConfig & {
   providerId?: string;
@@ -72,6 +75,26 @@ async function readDecryptedSecret(userId: string, providerId: string) {
   };
 }
 
+/**
+ * 取出这个 provider 的**可信端点**：协议与地址一律以服务端存的 provider 记录为准
+ * （`user_client_prefs.model_store_json`），请求体里带来的同名字段不作数。
+ *
+ * 理由见 `provider-endpoint.ts` 的文件头：密钥从服务端取、地址却听客户端的，
+ * 在平台统一 Key 模式下等于把 Key 送给任何人；今天也已经是一个 SSRF 面。
+ *
+ * 找不到记录返回 null —— 调用方据此**拒绝注入密钥**，而不是退回去用客户端给的地址。
+ */
+export async function resolveTrustedEndpoint(
+  userId: string,
+  providerId: string
+): Promise<{ protocol: string; baseUrl: string } | null> {
+  const prefs = await getModelStorePrefs(userId);
+  const provider = prefs?.providers?.find((p) => p.id === providerId);
+  if (!provider?.baseUrl) return null;
+  assertUsableEndpoint(provider.baseUrl, { allowPrivate: !isBillingEnabled() });
+  return { protocol: provider.protocol, baseUrl: provider.baseUrl };
+}
+
 async function resolveOne(
   userId: string,
   config?: ProviderConfigWithId | null
@@ -91,8 +114,17 @@ async function resolveOne(
     };
   }
 
+  // 服务端没有这个 provider 的记录 = 不知道该往哪发。**绝不退回用请求体里的地址** ——
+  // 那正是「密钥从服务端取、地址听客户端的」这个洞本身。
+  const trusted = await resolveTrustedEndpoint(userId, providerId);
+  if (!trusted) {
+    return { ...config, apiKey: "", secretKey: undefined };
+  }
+
   return {
     ...config,
+    protocol: trusted.protocol,
+    baseUrl: trusted.baseUrl,
     apiKey: secret.apiKey,
     secretKey: secret.secretKey ?? undefined,
   };

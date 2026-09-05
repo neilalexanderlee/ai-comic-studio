@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Service } from "@volcengine/openapi";
 import { bootstrap } from "@/lib/bootstrap";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { getProviderSecret } from "@/lib/provider-secrets";
+import { getProviderSecret, resolveTrustedEndpoint } from "@/lib/provider-secrets";
 import { openBillingGate } from "@/lib/billing/gate";
 import { saveArtifact } from "@/lib/storage/artifact-store";
 
@@ -203,17 +203,26 @@ export async function POST(request: NextRequest) {
     targetDuration?: number;
   };
 
-  const { prompt, providerId, protocol, baseUrl, modelId, targetDuration } = body;
+  const { prompt, providerId, modelId, targetDuration } = body;
 
   if (!prompt?.trim()) {
     return NextResponse.json({ error: "prompt 不能为空" }, { status: 400 });
   }
-  if (!providerId || !protocol || !baseUrl) {
+  if (!providerId) {
+    return NextResponse.json({ error: "providerId 为必填" }, { status: 400 });
+  }
+
+  // 协议与地址一律以服务端存的 provider 记录为准，请求体里的同名字段不作数 ——
+  // 否则就是「密钥从服务端取、地址听客户端的」，把 baseUrl 换成自己的服务器即可收走密钥。
+  // 详见 lib/provider-endpoint.ts。
+  const endpoint = await resolveTrustedEndpoint(userId, providerId);
+  if (!endpoint) {
     return NextResponse.json(
-      { error: "providerId / protocol / baseUrl 均为必填" },
+      { error: "该 provider 未在设置里配置服务地址，请先在「设置 → 模型」保存一次" },
       { status: 400 }
     );
   }
+  const { protocol, baseUrl } = endpoint;
 
   // 从数据库读取密钥（不信任客户端传来的密钥）。火山音乐走 AK/SK，两者都必需。
   const secret = await getProviderSecret(userId, providerId);
