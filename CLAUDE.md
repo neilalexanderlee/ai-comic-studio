@@ -844,7 +844,9 @@ APP_BIND=0.0.0.0:3007       # 默认 127.0.0.1:3007
   这两个目录在 gitignore 里，代码在 GitHub、数据在 OSS，唯独它们只有本机一份，
   而 `docs/DEPLOYMENT.md` 正是「服务器没了怎么恢复」的手册。
   排除 `docs/APIs`（厂商 PDF，可重新下载）后整包约 0.3 MB。
-  **刻意不挂服务器 cron** —— 服务器上那份是上次部署的快照，挂上去只会每天备份一份过期副本
+  **刻意不挂服务器 cron** —— 服务器上那份是上次部署的快照，挂上去只会每天备份一份过期副本。
+  触发点是 `pnpm dev` 启动（12 小时节流、后台跑）与 `deploy-ecs.sh` 结尾：
+  **文档只在本机编辑时变化，所以备份挂在「你开工的那一刻」而不是「服务器的凌晨」**
 
 ⚠️ **产物引用列清单（`scripts/storage-audit.ts` 的 `REF_COLUMNS`）必须随 schema 同步。**
 它不只给审计用，`storage-migrate` / `prune-orphan-files` / `verify-editor-state-refs`
