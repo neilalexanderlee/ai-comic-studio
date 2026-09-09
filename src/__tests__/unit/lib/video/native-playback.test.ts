@@ -10,6 +10,10 @@ describe("native preview", () => {
     expect(supportsWebAv({ ...apis, isSecureContext:true })).toBe(false);
     expect(supportsWebAv({ ...apis, isSecureContext:true }, { getDirectory:()=>{} })).toBe(true);
   });
+  it("preserves gain above one and stops at the explicit source trim boundary", () => {
+    expect(mediaAtTime({...clip,volume:2,fadeIn:0,fadeOut:0}, {...track,volume:1}, 7, false).volume).toBe(2);
+    expect(mediaAtTime({...clip,trimEnd:3}, track, 7, false).active).toBe(false);
+  });
   it("maps seek/trim and respects clip, track, master volume and fades", () => {
     expect(mediaAtTime(clip, track, 5.5, false)).toEqual({active:true, sourceTime:2.5, volume:0.2});
     expect(mediaAtTime(clip, track, 9, false).volume).toBe(0.2);

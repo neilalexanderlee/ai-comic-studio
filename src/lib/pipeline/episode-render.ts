@@ -1,4 +1,5 @@
-import { normalizedClipArgs } from "@/lib/video/normalize-render-clip";
+import { timelineRenderArgs, type RenderMedia } from "@/lib/video/render-timeline";
+import { mediaTiming } from "@/lib/video/timeline";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -57,6 +58,10 @@ interface VideoClip {
   trimStart?: number;
   /** 素材内部裁剪终点（秒），undefined 表示用到结尾 */
   trimEnd?: number;
+  volume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  effectType?: string;
 }
 
 interface SubtitleClip {
@@ -78,6 +83,8 @@ interface AudioClip {
   volume?: number;
   fadeIn?: number;
   fadeOut?: number;
+  trimStart?: number;
+  trimEnd?: number;
 }
 
 type Clip = VideoClip | SubtitleClip | AudioClip;
@@ -120,23 +127,26 @@ function resolveLocalPath(filePath: string, materialized?: Map<string, string>):
 }
 
 
-/**
- * 用 ffprobe 检查视频文件是否包含音频流。
- * 无音频轨时后续 BGM 混音不能引用 [0:a]。
- */
-async function videoHasAudioTrack(videoPath: string): Promise<boolean> {
-  try {
-    const { stdout } = await execFileAsync("ffprobe", [
-      "-v", "quiet",
-      "-select_streams", "a",
-      "-show_entries", "stream=codec_type",
-      "-of", "csv=p=0",
-      videoPath,
-    ]);
-    return stdout.trim().length > 0;
-  } catch {
-    return false;
-  }
+/** Probe errors are errors, not evidence that the source has no audio. */
+async function probeMedia(input: string) {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v", "error", "-show_streams", "-of", "json", input,
+  ]);
+  return JSON.parse(stdout).streams as Array<{
+    codec_type: string; width?: number; height?: number; avg_frame_rate?: string;
+  }>;
+}
+
+/** Verify actual decoded samples, not just a declared container duration. */
+async function validateRender(input: string, duration: number) {
+  await execFileAsync("ffmpeg", ["-v", "error", "-xerror", "-i", input, "-map", "0:v:0", "-an", "-f", "null", "-" ]);
+  const { stdout } = await execFileAsync("ffmpeg", [
+    "-v", "error", "-xerror", "-i", input, "-map", "0:a:0", "-vn",
+    "-af", "asetpts=N/SR/TB", "-progress", "pipe:1", "-f", "null", "-",
+  ]);
+  const times = [...stdout.matchAll(/out_time_us=(\d+)/g)];
+  const decoded = Number(times.at(-1)?.[1] ?? 0) / 1e6;
+  if (Math.abs(decoded - duration) > 0.1) throw new Error(`导出音频不完整：预期 ${duration}s，实际解码 ${decoded}s`);
 }
 
 /** 秒数 → ASS 时间戳格式 H:MM:SS.cc */
@@ -233,6 +243,7 @@ export async function renderEpisodeTimeline(params: {
     .filter((t) => t.type === "video")
     .flatMap((t) =>
       t.clips.filter((c): c is VideoClip => c.type === "video" && !!c.url)
+        .map(c => ({ ...c, volume: t.muted ? 0 : (c.volume ?? 1) * (t.volume ?? 1) }))
     )
     .sort((a, b) => a.startTime - b.startTime);
 
@@ -252,8 +263,14 @@ export async function renderEpisodeTimeline(params: {
       t.clips.filter(
         (c): c is AudioClip =>
           (c.type === "bgm" || c.type === "audio") && !!(c.audioUrl || c.url)
-      )
+      ).map(c => ({ ...c, volume: (c.volume ?? 1) * (t.volume ?? 1) }))
     );
+
+  // Fail explicitly instead of silently discarding preview-only effects.
+  if (timeline.tracks.some(t => t.clips.some(c => String(c.type) === "transition" || (c.type === "video" && c.effectType)))) {
+    throw new Error("当前 MP4 导出尚不支持转场和画面特效，请先移除这些效果后导出");
+  }
+  [...videoClips, ...bgmClips].forEach(mediaTiming);
 
   // ── 物化 OSS 素材 ────────────────────────────────────────────────────────
   // ffmpeg / ffprobe 只能吃真实本地文件，oss:// 引用喂不进去。
@@ -279,174 +296,38 @@ export async function renderEpisodeTimeline(params: {
 
   // ── SSE 流式返回进度 ──────────────────────────────────────────────────────
   try {
-    await report("concat", `合并 ${videoClips.length} 个视频片段…`);
-    const concatListPath = path.join(tmpDir, "concat.txt");
-    const firstPath = resolveLocalPath(videoClips[0].url, materializedRefs);
-    const { stdout: dimensionsJson } = await execFileAsync("ffprobe", [
-      "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", firstPath,
-    ]);
-    const dimensions = JSON.parse(dimensionsJson).streams[0] as { width: number; height: number };
-    const concatEntries: string[] = [];
-    for (const [index, clip] of videoClips.entries()) {
+    await report("prepare", "检查素材并编译时间线…");
+    const videos: RenderMedia[] = [];
+    let fps = 24;
+    for (const clip of videoClips) {
       const input = resolveLocalPath(clip.url, materializedRefs);
-      const normalized = path.join(tmpDir, `clip-${index}.mp4`);
-      await report("concat", `统一音视频格式（${index + 1}/${videoClips.length}）…`);
-      await execFileAsync("ffmpeg", normalizedClipArgs({
-        input, output: normalized, hasAudio: await videoHasAudioTrack(input),
-        duration: clip.duration, trimStart: clip.trimStart, ...dimensions,
-      }));
-      concatEntries.push(`file '${normalized.replace(/'/g, "'\\''")}'`);
+      const streams = await probeMedia(input);
+      const video = streams.find(s => s.codec_type === "video");
+      if (!video?.width || !video.height) throw new Error("视频素材缺少有效画面流");
+      if (!videos.length) {
+        const [n, d] = (video.avg_frame_rate ?? "24/1").split("/").map(Number);
+        fps = n / d;
+        if (!Number.isFinite(fps) || fps <= 0) throw new Error("视频帧率无效");
+      }
+      videos.push({ ...clip, input, width: video.width, height: video.height,
+        hasAudio: streams.some(s => s.codec_type === "audio") });
     }
-    const concatLines = concatEntries.join("\n");
-    fs.writeFileSync(concatListPath, concatLines, "utf-8");
-
-    // ── Step 2：concat → 临时视频（始终 libx264 重编码）─────────────────────
-    //
-    // 重要：不能用 -c copy。AI 生成视频（Seedance/Kling）的 H.264 stream 有
-    // ~41ms encoder delay（video PTS 从 0.041s 开始，audio 从 0 开始）。
-    // libx264 重编码会把 PTS 从 0 开始重置，BGM adelay = stored clip.startTime
-    // 即可精确对齐，无需额外补偿。
-    const concatVideoPath = path.join(tmpDir, "concat.mp4");
-    await execFileAsync("ffmpeg", [
-      "-y",
-      "-f", "concat",
-      "-safe", "0",
-      "-i", concatListPath,
-      "-c:v", "libx264",
-      "-bf", "0",
-      "-preset", "fast",
-      "-crf", "23",
-      "-c:a", "aac",
-      "-b:a", "192k",
-      concatVideoPath,
-    ]);
-
-    // ── Step 3：字幕烧录（如有）──────────────────────────────────────
-    const assPath = buildAssFile(
-      subtitleClips,
-      tmpDir,
-      globalSubtitleStyle,
-      timeline.canvasWidth ?? 1920,
-      timeline.canvasHeight ?? 1080,
-    );
-    let videoWithSubsPath = concatVideoPath;
-
-    if (assPath) {
-      await report("subtitle", `烧录字幕（${subtitleClips.length} 条）…`);
-      const candidatePath = path.join(tmpDir, "with_subs.mp4");
-      try {
-        await execFileAsync("ffmpeg", [
-          "-y",
-          "-i", path.resolve(concatVideoPath),
-          "-vf", "subtitles=subtitles.ass",
-          "-c:v", "libx264",
-          "-bf", "0",
-          "-preset", "fast",
-          "-crf", "23",
-          "-c:a", "copy",
-          path.resolve(candidatePath),
-        ], { cwd: tmpDir });
-        videoWithSubsPath = candidatePath;
-      } catch (subtitleErr) {
-        console.warn("[render] 字幕烧录跳过:", (subtitleErr as Error).message?.slice(0, 200));
-      }
+    const audio: RenderMedia[] = [];
+    for (const clip of bgmClips) {
+      const input = resolveLocalPath(clip.audioUrl ?? clip.url ?? "", materializedRefs);
+      if (!(await probeMedia(input)).some(s => s.codec_type === "audio")) throw new Error("音频素材没有有效音轨");
+      audio.push({ ...clip, input, hasAudio: true });
     }
-
-    // ── Step 4：BGM 混音（如有）──────────────────────────────────────
-    if (bgmClips.length > 0) {
-      await report("bgm", `混合 ${bgmClips.length} 条背景音乐…`);
-
-      const hasOrigAudio = await videoHasAudioTrack(videoWithSubsPath);
-
-      // concat 已用 libx264 归零 PTS，存档 clip.startTime 直接等于视频帧位置，
-      // 距 clip 边界 ≤80ms 的 BGM 起点吸附到精确边界（消除次帧手动对齐误差）
-      const sortedVideoClips = [...videoClips].sort((a, b) => a.startTime - b.startTime);
-      const SNAP_MS = 0.08;
-      function toActualTime(storedTime: number): number {
-        let closestDist = Infinity, closestIdx = -1;
-        for (let k = 0; k < sortedVideoClips.length; k++) {
-          const dist = Math.abs(storedTime - sortedVideoClips[k].startTime);
-          if (dist < closestDist) { closestDist = dist; closestIdx = k; }
-        }
-        if (closestDist <= SNAP_MS) return sortedVideoClips[closestIdx].startTime;
-        return storedTime;
-      }
-
-      const totalVideoDuration = videoClips.reduce((s, c) => s + c.duration, 0);
-      const padDur = (totalVideoDuration + 2).toFixed(3);
-
-      const inputArgs: string[] = ["-y", "-i", videoWithSubsPath];
-      for (const clip of bgmClips) {
-        inputArgs.push("-i", resolveLocalPath(clip.audioUrl ?? clip.url ?? "", materializedRefs));
-      }
-
-      const filterParts: string[] = [];
-      const mixLabels: string[] = [];
-
-      if (hasOrigAudio) {
-        filterParts.push("[0:a]aresample=48000:async=1:first_pts=0,volume=1.0[orig]");
-        mixLabels.push("[orig]");
-      }
-
-      bgmClips.forEach((clip, i) => {
-        const inputIdx = i + 1;
-        const clipStart = toActualTime(clip.startTime ?? 0);
-        const delayMs = Math.round(clipStart * 1000);
-        const vol = clip.volume ?? 0.8;
-        const fadeIn = clip.fadeIn ?? 0;
-        const fadeOut = clip.fadeOut ?? 0;
-        const clipDuration = clip.duration ?? 0;
-
-        // atrim 先截断 → adelay 定位 → volume → afade → apad 填充到视频总时长
-        let chain = `[${inputIdx}:a]atrim=duration=${clipDuration.toFixed(3)},asetpts=PTS-STARTPTS,aresample=48000,adelay=${delayMs}|${delayMs},volume=${vol}`;
-        if (fadeIn > 0) chain += `,afade=t=in:st=${clipStart.toFixed(3)}:d=${fadeIn}`;
-        if (fadeOut > 0 && clipDuration > fadeOut) {
-          chain += `,afade=t=out:st=${(clipStart + clipDuration - fadeOut).toFixed(3)}:d=${fadeOut}`;
-        }
-        chain += `,apad=whole_dur=${padDur}`;
-        filterParts.push(`${chain}[bgm${i}]`);
-        mixLabels.push(`[bgm${i}]`);
-      });
-
-      let filterComplex: string;
-      let mapAudioArg: string;
-
-      if (mixLabels.length === 1) {
-        filterComplex = filterParts.join(";");
-        mapAudioArg = mixLabels[0];
-      } else {
-        filterParts.push(
-          `${mixLabels.join("")}amix=inputs=${mixLabels.length}:duration=longest:dropout_transition=2:normalize=0[aout]`
-        );
-        filterComplex = filterParts.join(";");
-        mapAudioArg = "[aout]";
-      }
-
-      await execFileAsync("ffmpeg", [
-        ...inputArgs,
-        "-filter_complex", filterComplex,
-        "-map", "0:v",
-        "-map", mapAudioArg,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-t", String(totalVideoDuration),
-        "-ar", "48000",
-        "-movflags", "+faststart",
-        outputPath,
-      ]);
-    } else {
-      // 无 BGM，直接重新封装确保音频为 aac
-      await report("mux", "封装输出文件…");
-      await execFileAsync("ffmpeg", [
-        "-y",
-        "-i", videoWithSubsPath,
-        "-c:v", "copy",
-        "-c:a", "aac",
-        "-b:a", "192k",
-        outputPath,
-      ]);
-    }
+    const duration = Math.max(...timeline.tracks.flatMap(t => t.clips.map(c => c.endTime)));
+    const assPath = buildAssFile(subtitleClips, tmpDir, globalSubtitleStyle,
+      timeline.canvasWidth ?? 1920, timeline.canvasHeight ?? 1080);
+    await report("render", "合成画面、字幕与音轨…");
+    await execFileAsync("ffmpeg", timelineRenderArgs({
+      videos, audio, output: path.resolve(outputPath), width: videos[0].width!, height: videos[0].height!,
+      fps, duration, subtitles: !!assPath,
+    }), { cwd: tmpDir });
+    await report("validate", "验证画面解码与完整音轨…");
+    await validateRender(outputPath, duration);
 
     // ── Step 5：产物入库 ──────────────────────────────────────────────
     //
@@ -469,6 +350,7 @@ export async function renderEpisodeTimeline(params: {
     return { outputUrl: stored };
   } catch (err) {
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    fs.rmSync(outputPath, { force: true });
     console.error("[render] ffmpeg error:", err);
     // 必须往外抛：任务的成败由 handler 是否抛异常决定。
     // 原先是把错误当成一个 SSE 事件发出去然后正常结束 —— 那在队列里等于「成功」。

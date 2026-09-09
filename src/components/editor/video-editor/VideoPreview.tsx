@@ -1,4 +1,5 @@
 "use client";
+import { mediaGain, mediaTiming } from "@/lib/video/timeline";
 
 /**
  * VideoPreview — AVCanvas 架构
@@ -25,7 +26,7 @@ import { uploadUrl } from "@/lib/utils/upload-url";
 import { fetchMedia } from "./utils/mediaCache";
 import { apiFetch } from "@/lib/api-fetch";
 
-import { NativeMediaPreview } from "./NativeMediaPreview";
+import { NativeMediaPreview, type NativePreviewHandle } from "./NativeMediaPreview";
 import { supportsWebAv } from "./utils/nativePlayback";
 
 const TRIM_MARGIN = 0.1; // 安全边界（秒），避免 split 边界报错
@@ -47,6 +48,9 @@ interface VideoPreviewProps {
 }
 
 export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
+  const nativeRef = useRef<NativePreviewHandle>(null);
+  const failedClipsRef = useRef(new Set<string>());
+  const [previewError, setPreviewError] = useState("");
   const [nativePreview, setNativePreview] = useState<boolean | null>(null);
   useEffect(() => { setNativePreview(!supportsWebAv(window, navigator.storage)); }, []);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -68,6 +72,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   const clipFrameCacheRef = useRef<Map<string, ImageBitmap>>(new Map());
 
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
   const [exporting, setExporting] = useState(false);
   const [exportSeconds, setExportSeconds] = useState(0);
   const [exportStage, setExportStage] = useState("");
@@ -329,6 +334,12 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return async (time: number, tickRet: any) => {
+      const currentTrack = useEditorStore.getState().tracks.find(t => t.clips.some(c => c.id === clipId));
+      const currentClip = currentTrack?.clips.find(c => c.id === clipId);
+      if (currentTrack && currentClip && tickRet.audio?.length) {
+        const gain = mutedRef.current ? 0 : mediaGain(currentClip, currentTrack, time / 1e6);
+        tickRet = { ...tickRet, audio: tickRet.audio.map((channel: Float32Array) => channel.map(v => v * gain)) };
+      }
       const ret = tickRet as { video?: VideoFrame | ImageBitmap };
       if (!ret.video) return tickRet;
 
@@ -457,6 +468,8 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     syncAbortRef.current?.abort();
     const abort = new AbortController();
     syncAbortRef.current = abort;
+    failedClipsRef.current.clear();
+    setPreviewError("");
     clipLoadPromisesRef.current = new Map();
 
     const startedAt = performance.now();
@@ -568,7 +581,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     const openGate = () => {
       releaseGate();
       if (!isCurrentRound()) return;
-      setPlayable(true);
+      setPlayable(failedClipsRef.current.size === 0);
       console.log(
         `[VideoPreview] playable in ${Math.round(performance.now() - startedAt)}ms ` +
           `(${gateIds.size}/${queue.length} clips)`
@@ -581,13 +594,27 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     const runTask = async (task: { clip: Clip; snapKey: string }) => {
       const work = (async () => {
         const sprite = await buildSprite(task.clip, abort.signal);
-        if (!sprite) return;
+        if (!sprite) {
+          if (!abort.signal.aborted) {
+            failedClipsRef.current.add(task.clip.id);
+            setPreviewError(`素材加载失败：${task.clip.name}。请检查素材或重试。`);
+            setPlayable(false);
+            avCanvas.pause();
+            setPlaying(false);
+          }
+          return;
+        }
         if (abort.signal.aborted) { sprite.destroy(); return; }
         await avCanvas.addSprite(sprite);
         if (abort.signal.aborted) { avCanvas.removeSprite(sprite); return; }
         spriteMap.set(task.clip.id, sprite);
         snapshotMap.set(task.clip.id, task.snapKey);
-      })();
+      })().catch((error: unknown) => {
+        if (!isCurrentRound()) return;
+        failedClipsRef.current.add(task.clip.id);
+        setPreviewError(`素材加载失败：${task.clip.name}。${error instanceof Error ? error.message : "请重试"}`);
+        setPlayable(false); avCanvas.pause(); setPlaying(false);
+      });
       // 留在 map 里不删：stall guard 会 await 它，已完成的 promise await 是零成本
       clipLoadPromisesRef.current.set(task.clip.id, work);
       try {
@@ -628,7 +655,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       // 被 abort 时也要开门，否则 await 这个 gate 的 handlePlay 会永远挂着
       releaseGate();
       if (isCurrentRound()) {
-        setPlayable(true);
+        setPlayable(failedClipsRef.current.size === 0);
         setLoadProgress(null);
       }
     }
@@ -652,8 +679,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
         // ── trimStart / trimEnd：用 MP4Clip.split() 切出素材内部范围 ──────────
         const originalDuration = mp4Clip.meta.duration / 1e6; // → 秒
-        const trimStart = clip.trimStart ?? 0;
-        const trimEnd = clip.trimEnd ?? originalDuration;
+        const { sourceStart: trimStart, sourceEnd: trimEnd } = mediaTiming(clip);
 
         if (trimStart > TRIM_MARGIN && trimStart < originalDuration - TRIM_MARGIN) {
           try {
@@ -715,9 +741,19 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         const res = await fetchMedia(clip.audioUrl, uploadUrl(clip.audioUrl), signal);
         if (!res.ok || !res.body || signal.aborted) return null;
 
-        const volume = muted ? 0 : (clip.volume ?? 0.5);
-        const audioClip = new AudioClip(res.body, { volume });
+        let audioClip = new AudioClip(res.body, { volume: 1 });
         await audioClip.ready;
+        const timing = mediaTiming(clip);
+        if (timing.sourceStart > 0 && timing.sourceStart < audioClip.meta.duration / 1e6) {
+          const [discard, keep] = await audioClip.split(timing.sourceStart * 1e6);
+          discard.destroy(); audioClip = keep; await audioClip.ready;
+        }
+        const keepDuration = timing.sourceEnd - timing.sourceStart;
+        if (keepDuration < audioClip.meta.duration / 1e6) {
+          const [keep, discard] = await audioClip.split(keepDuration * 1e6);
+          discard.destroy(); audioClip = keep; await audioClip.ready;
+        }
+        audioClip.tickInterceptor = createTickInterceptor(clip.id, clip.startTime, 1);
         if (signal.aborted) { audioClip.destroy?.(); return null; }
 
         const sprite = new VisibleSprite(audioClip);
@@ -792,6 +828,10 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         setBuffering(false);
         // 缓冲期间用户自己按了播放/暂停/拖了进度条 → 尊重用户的操作，不抢回控制权
         if (userActionRef.current !== token) return;
+        if (pending.some(c => !spriteMapRef.current.has(c.id))) {
+          setPlaying(false);
+          return;
+        }
         const cvs = avCanvasRef.current;
         if (!cvs) return;
         const end = totalDuration();
@@ -806,6 +846,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   async function handlePlay() {
     if (nativePreview) {
       if (total === 0) return;
+      if (!isPlaying) {
+        try { await nativeRef.current?.prepare(); }
+        catch { setPreviewError("音频设备初始化失败，请重新点击播放"); return; }
+        setPreviewError("");
+      }
       if (!isPlaying && playhead >= total) setPlayhead(0);
       setPlaying(!isPlaying);
       return;
@@ -828,7 +873,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
         await gate;
         if (readyGateRef.current === gate) break;
       }
-      if (!avCanvasRef.current) return;
+      if (!avCanvasRef.current || failedClipsRef.current.size > 0) return;
 
       const start = playhead >= total ? 0 : playhead;
       if (start === 0 && playhead >= total) {
@@ -854,22 +899,11 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
     avCanvas.previewFrame(time * 1e6).catch(() => {});
   }
 
-  // ── 静音（需重建 AudioClip sprite）────────────────────────────────────────
-  useEffect(() => {
-    for (const [id, sprite] of spriteMapRef.current.entries()) {
-      const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === id);
-      if (clip && (clip.type === "bgm" || clip.type === "audio")) {
-        avCanvasRef.current?.removeSprite(sprite);
-        spriteMapRef.current.delete(id);
-        clipSnapshotRef.current.delete(id);
-      }
-    }
-    syncPromiseRef.current = syncSprites();
-  }, [muted]);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
 
   // ── 导出（入队 → 轮询）──────────────────────────────────────────────────────
   //
-  // 服务端 ffmpeg：concat libx264 归零 PTS → BGM adelay 精确对齐。
+  // 服务端独立解码每条素材，按时间线合成，画面与字幕只编码一次。
   // 渲染跑在 worker 进程里，所以这里拿到的是 taskId 而不是一条 SSE 流 ——
   // 好处是关掉页面、刷新、甚至服务重启，任务都还在，回来还能看到结果。
   async function handleExport() {
@@ -922,7 +956,8 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           style={{ aspectRatio: `${canvasWidth}/${canvasHeight}` }}
         />
 
-        {nativePreview && <NativeMediaPreview muted={muted} />}
+        {previewError && <div role="alert" className="absolute top-3 left-3 z-30 rounded bg-black/80 p-3 text-sm text-white">{previewError} <button onClick={() => void syncSprites()} className="underline">重试加载</button></div>}
+        {nativePreview && <NativeMediaPreview ref={nativeRef} muted={muted} />}
 
         {/* 字幕 DOM 叠加 */}
         {activeSubtitle?.text && (
@@ -968,7 +1003,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           </button>
           <button
             onClick={handlePlay}
-            disabled={total === 0 || !playable}
+            disabled={total === 0 || (!nativePreview && !playable)}
             title={!playable ? "播放头附近的素材加载中…" : undefined}
             className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-black hover:bg-white/90 disabled:opacity-40"
           >
