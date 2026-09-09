@@ -1,6 +1,8 @@
 # Composition v2
 
-Preview and export now use **one server renderer**. The browser plays a rendered MP4 rather than interpreting effects independently. This works on HTTP without WebCodecs/OPFS. The tradeoff is an explicit render step on first preview or after composition edits; scrubbing and playback are immediate once ready. HTTPS remains a deployment concern outside this module.
+The editor defaults to **realtime editing preview** using native HTML media and Web Audio, including on HTTP. It immediately reflects trims, overlapping video layers, subtitles, track/clip gain and audio fades. It shares source timing/gain rules with export and never queues a render for ordinary playback. Media buffering is independent of rendering.
+
+**Precise preview and export use one server renderer.** Precise preview is opt-in for final transitions/effects and mixing verification. Realtime preview explicitly labels transitions/effects as requiring precise preview; it does not pretend to render them. Edits return the player to realtime mode and invalidate the precise composition. A fresh precise preview is reused when switching modes. HTTPS remains outside this module.
 
 ## Timeline contract
 
@@ -9,7 +11,7 @@ Preview and export now use **one server renderer**. The browser plays a rendered
 - Transitions belong to a video track and connect the closest pair around their midpoint. They occupy their stored interval without shortening the episode or shifting other tracks. Missing transition handles hold the adjacent endpoint frame *only within the transition*. Audio stays at its original timeline position; audio crossfades are explicit clip fades.
 - `composition.ts` defines all 13 offered transitions and eight effects. FFmpeg-native transitions replace legacy Canvas approximations, including the formerly unimplemented pixelate option. Preview and export use those same definitions.
 - Source trim bounds are applied before effects. Clip/track gains multiply, fades are local to the clip and precede timeline delay. Each input has a separate decoder; mixed AAC packets are never concatenated.
-- Subtitles are burned once in both preview and export. Global styling applies to old snapshots; explicit new per-clip edits opt in via `subtitleStyleOverride`, so historical default styles do not silently change old projects.
+- Subtitles are burned once in precise preview and export; realtime preview overlays them once on the displayed video canvas. Global styling applies to old snapshots; explicit new per-clip edits opt in via `subtitleStyleOverride`, so historical default styles do not silently change old projects.
 
 ## Derived artifacts and reproducibility
 

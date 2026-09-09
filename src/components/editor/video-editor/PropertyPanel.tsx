@@ -90,10 +90,14 @@ export function PropertyPanel() {
   // tab: "clip" | "subtitle"
   const [tab, setTab] = useState<"clip" | "subtitle">("clip");
 
+  const subtitleStyle = selectedClip?.subtitleStyleOverride
+    ? { ...globalSubtitleStyle, ...selectedClip.subtitleStyle }
+    : globalSubtitleStyle;
+
   function updateStyle(key: keyof SubtitleStyle, value: unknown) {
     updateClip(selectedClip!.id, {
       subtitleStyleOverride: true,
-      subtitleStyle: { ...(selectedClip!.subtitleStyle ?? {}), [key]: value },
+      subtitleStyle: { ...subtitleStyle, [key]: value },
     });
   }
 
@@ -333,7 +337,7 @@ export function PropertyPanel() {
               <Row label="字号">
                 <input
                   type="number" min={12} max={96} step={2}
-                  value={selectedClip.subtitleStyle?.fontSize ?? 32}
+                  value={subtitleStyle.fontSize ?? 32}
                   onChange={(e) => updateStyle("fontSize", parseInt(e.target.value))}
                   className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
                 />
@@ -342,16 +346,16 @@ export function PropertyPanel() {
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
-                    value={selectedClip.subtitleStyle?.color ?? "#ffffff"}
+                    value={subtitleStyle.color ?? "#ffffff"}
                     onChange={(e) => updateStyle("color", e.target.value)}
                     className="h-7 w-10 rounded border border-[--border-subtle] cursor-pointer"
                   />
-                  <span className="text-[10px] text-[--text-muted]">{selectedClip.subtitleStyle?.color ?? "#ffffff"}</span>
+                  <span className="text-[10px] text-[--text-muted]">{subtitleStyle.color ?? "#ffffff"}</span>
                 </div>
               </Row>
               <Row label="对齐">
                 <select
-                  value={selectedClip.subtitleStyle?.textAlign ?? "center"}
+                  value={subtitleStyle.textAlign ?? "center"}
                   onChange={(e) => updateStyle("textAlign", e.target.value)}
                   className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
                 >
@@ -363,7 +367,7 @@ export function PropertyPanel() {
               <Row label="垂直位置">
                 <input
                   type="range" min={0} max={1} step={0.01}
-                  value={selectedClip.subtitleStyle?.y ?? 0.82}
+                  value={subtitleStyle.y ?? 0.92}
                   onChange={(e) => updateStyle("y", parseFloat(e.target.value))}
                   className="w-full"
                 />

@@ -9,15 +9,15 @@ import {
   Volume2,
   VolumeX,
   Download,
-  RefreshCw,
 } from "lucide-react";
 import { useEditorStore } from "./hooks/useEditorStore";
 import { formatTime } from "./utils/clipMeta";
 import { apiFetch } from "@/lib/api-fetch";
 import { uploadUrl } from "@/lib/utils/upload-url";
+import { RealtimePreview, type RealtimePreviewHandle } from "./RealtimePreview";
 import { canonicalTimeline } from "@/lib/video/timeline-contract";
 
-/** The browser plays the same composition that export renders, including on HTTP. */
+/** Immediate editing by default; opt-in server preview uses the export renderer. */
 export function VideoPreview({
   projectId,
   episodeId,
@@ -39,6 +39,8 @@ export function VideoPreview({
     ...tracks.flatMap((t) => t.clips.map((c) => c.endTime)),
   );
   const video = useRef<HTMLVideoElement>(null);
+  const realtime = useRef<RealtimePreviewHandle>(null);
+  const [previewMode, setPreviewMode] = useState<"realtime" | "precise">("realtime");
   const [muted, setMuted] = useState(false),
     [error, setError] = useState("");
   const [mustRefresh, setMustRefresh] = useState(false);
@@ -67,8 +69,11 @@ export function VideoPreview({
   currentKey.current = key;
   const ready = !!preview && preview.key === key;
   useEffect(() => {
-    setPlaying(false);
-    video.current?.pause();
+    setPreviewMode("realtime");
+    if (video.current) {
+      setPlaying(false);
+      video.current.pause();
+    }
   }, [key, setPlaying]);
   useEffect(
     () => () => {
@@ -79,13 +84,13 @@ export function VideoPreview({
   );
   useEffect(() => {
     const el = video.current;
-    if (!el || !ready) return;
+    if (!el || !ready || previewMode !== "precise") return;
     if (!playing) {
       el.pause();
       if (Math.abs(el.currentTime - playhead) > 0.04)
         el.currentTime = Math.min(playhead, Math.max(0, total - 0.001));
     }
-  }, [playhead, playing, ready, total]);
+  }, [playhead, playing, ready, total, previewMode]);
   useEffect(() => {
     const pause = () => {
       if (document.hidden) {
@@ -128,7 +133,9 @@ export function VideoPreview({
           setError("时间线已修改，请生成最新预览");
           return;
         }
+        setPlaying(false);
         setPreview({ key: snapshot, url });
+        setPreviewMode("precise");
         setMustRefresh(false);
       } else {
         const a = document.createElement("a");
@@ -147,6 +154,18 @@ export function VideoPreview({
     }
   }
   async function togglePlay() {
+    if (previewMode === "realtime") {
+      if (playing) { setPlaying(false); return; }
+      try {
+        await realtime.current?.prepare();
+        if (playhead >= total) setPlayhead(0);
+        setError("");
+        setPlaying(true);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "播放失败");
+      }
+      return;
+    }
     if (!ready) {
       await render("preview");
       return;
@@ -188,7 +207,8 @@ export function VideoPreview({
   return (
     <div className="flex h-full flex-col bg-[#111] text-white">
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-black">
-        {preview && (
+        {previewMode === "realtime" && !invalid && <RealtimePreview ref={realtime} muted={muted} />}
+        {previewMode === "precise" && preview && (
           <video
             ref={video}
             src={uploadUrl(preview.url)}
@@ -219,19 +239,19 @@ export function VideoPreview({
             }}
           />
         )}
-        {!ready && !busy && (
+        {previewMode === "precise" && !ready && !busy && (
           <div className="absolute rounded bg-black/80 p-4 text-center text-sm">
             <p>
               {preview
                 ? "时间线已修改，预览需要更新"
-                : "生成成片预览后，可查看字幕、转场、特效和全部音轨"}
+                : "生成精准预览后，可查看字幕、转场、特效和全部音轨"}
             </p>
             <button
               className="mt-3 rounded bg-orange-600 px-4 py-2 disabled:opacity-40"
               disabled={!total || !!invalid}
               onClick={() => void render("preview")}
             >
-              生成成片预览
+              生成精准预览
             </button>
           </div>
         )}
@@ -252,8 +272,8 @@ export function VideoPreview({
           </div>
         )}
       </div>
-      <div className="flex items-center gap-3 p-3 text-xs">
-        <span className="w-28 shrink-0 font-mono">
+      <div className="flex flex-wrap items-center gap-2 p-3 text-xs">
+        <span className="w-24 shrink-0 font-mono">
           {formatTime(playhead)} / {formatTime(total)}
         </span>
         <input
@@ -297,13 +317,20 @@ export function VideoPreview({
           {muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
         </button>
         <button
-          title="更新成片预览"
-          aria-label="更新成片预览"
+          className={`shrink-0 rounded px-2 py-1 ${previewMode === "realtime" ? "bg-orange-700" : "bg-neutral-800"}`}
+          aria-pressed={previewMode === "realtime"}
+          onClick={() => { video.current?.pause(); setPlaying(false); setError(""); setPreviewMode("realtime"); }}
+        >实时预览</button>
+        <button
+          className={`shrink-0 rounded px-2 py-1 ${previewMode === "precise" ? "bg-orange-700" : "bg-neutral-800"}`}
+          aria-pressed={previewMode === "precise"}
+          title="生成并查看与导出一致的转场、特效和混音"
           disabled={!!busy || !total || !!invalid}
-          onClick={() => void render("preview", true)}
-        >
-          <RefreshCw size={17} />
-        </button>
+          onClick={() => {
+            if (ready && !mustRefresh) { setPlaying(false); setError(""); setPreviewMode("precise"); }
+            else void render("preview");
+          }}
+        >精准预览</button>
         <select
           aria-label="输出尺寸"
           className="rounded bg-neutral-800 p-1"
