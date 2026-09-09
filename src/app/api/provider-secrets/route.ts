@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireUser } from "@/lib/api-guard";
+import { allowUserProviders, isAdminUser } from "@/lib/admin";
 import { upsertProviderSecret } from "@/lib/provider-secrets";
 
 export async function POST(request: Request) {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
-    return NextResponse.json({ error: "Missing user id" }, { status: 401 });
+  const guard = await requireUser(request);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
+
+  // 平台模式（ALLOW_USER_PROVIDERS=0）下非管理员不再自己配 Key，统一用平台 Key。
+  // 默认开，自部署 BYOK 行为一行不变。
+  if (!allowUserProviders() && !(await isAdminUser(userId))) {
+    return NextResponse.json(
+      { error: "本站由管理员统一配置模型，无需填写 API Key" },
+      { status: 403 }
+    );
   }
 
   try {

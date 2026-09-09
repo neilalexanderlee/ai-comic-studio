@@ -6,7 +6,7 @@ import { listOrders } from "@/lib/billing/orders";
 
 /** 账户总览：双余额、订阅周期、最近流水与订单。 */
 export async function GET(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   if (!isBillingEnabled()) {

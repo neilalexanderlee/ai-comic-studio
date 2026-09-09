@@ -13,7 +13,7 @@ export async function POST(
   { params }: { params: Promise<{ presetId: string }> }
 ) {
   const { presetId } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const body = (await request.json()) as {

@@ -31,7 +31,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string; episodeId: string }> }
 ) {
   const { id: projectId, episodeId } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 

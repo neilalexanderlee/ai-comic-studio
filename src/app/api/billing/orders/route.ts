@@ -5,7 +5,7 @@ import { createOrder, OrderError } from "@/lib/billing/orders";
 
 /** 下单。只落 pending 记录，不动余额 —— 入账发生在支付回调里。 */
 export async function POST(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   if (!isBillingEnabled()) {

@@ -135,7 +135,7 @@ export interface Reservation {
 export async function reserveCredits(
   userId: string,
   input: QuoteInput,
-  ctx?: { projectId?: string; shotId?: string; protocol?: string }
+  ctx?: { projectId?: string; shotId?: string; protocol?: string; keySource?: "user" | "platform" }
 ): Promise<Reservation> {
   const quote = quoteCredits(input);
   const reservationId = ulid();
@@ -154,6 +154,7 @@ export async function reserveCredits(
       creditsReserved: 0,
       creditsCharged: 0,
       status: "settled",
+      keySource: ctx?.keySource ?? "user",
       createdAt: new Date(),
     });
     return { reservationId, credits: 0, explain: quote.explain };
@@ -233,6 +234,7 @@ export async function reserveCredits(
     creditsCharged: 0,
     reservedFromSubscription: split.fromSubscription,
     status: "reserved",
+    keySource: ctx?.keySource ?? "user",
     createdAt: new Date(),
   });
 

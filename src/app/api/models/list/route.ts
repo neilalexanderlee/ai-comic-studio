@@ -5,12 +5,47 @@ import {
 } from "@/lib/ai/model-capabilities";
 import { requireUser } from "@/lib/api-guard";
 import { ensureArkApiV3BaseUrl } from "@/lib/ai/ark-base-url";
+import { allowUserProviders, isAdminUser } from "@/lib/admin";
+import { resolveProviderCredentials } from "@/lib/provider-secrets";
+import { assertUsableEndpoint, UntrustedEndpointError } from "@/lib/provider-endpoint";
+import { isBillingEnabled } from "@/lib/billing/gate";
 
 interface ListRequest {
   protocol: string;
   baseUrl: string;
   apiKey: string;
+  /** 服务端据此解析密钥与端点；平台 Key 模式下这是唯一被接受的形式 */
+  providerId?: string;
   capability?: ModelCapability;
+}
+
+/**
+ * 这次列模型用哪一把 Key、往哪儿发。
+ *
+ * 这是约定 8n 里「还没做的那半边」：本路由原先直接拿请求体里的 `baseUrl` + `apiKey`
+ * 发服务端请求。BYOK 下那是无害的（你的 Key 发到你指定的地址），但平台统一 Key
+ * 一旦上线，它就是第二个密钥外泄口 —— 客户端把 baseUrl 指向自己的服务器即可。
+ *
+ * 规则：
+ *  · **有权自己配 Key 的人**（自部署默认全员、平台模式下的管理员）仍可带内联 apiKey ——
+ *    设置页「保存前先测一下这把 Key」必须能用，否则新用户根本没法完成配置
+ *  · 其余人只接受 `providerId`，密钥与端点一律由服务端解析（可能是平台 Key）
+ */
+async function resolveListCredentials(
+  userId: string,
+  body: ListRequest
+): Promise<{ protocol: string; baseUrl: string; apiKey: string } | null> {
+  const mayUseInlineKey = allowUserProviders() || (await isAdminUser(userId));
+  if (mayUseInlineKey && body.apiKey && body.baseUrl) {
+    // 内联 Key 也要过一次端点校验：这是本进程唯一会向调用方指定地址发请求的地方
+    assertUsableEndpoint(body.baseUrl, { allowPrivate: !isBillingEnabled() });
+    return { protocol: body.protocol, baseUrl: body.baseUrl, apiKey: body.apiKey };
+  }
+
+  if (!body.providerId) return null;
+  const creds = await resolveProviderCredentials(userId, body.providerId);
+  if (!creds.ok) return null;
+  return { protocol: creds.protocol, baseUrl: creds.baseUrl, apiKey: creds.apiKey };
 }
 
 interface ModelItem {
@@ -129,14 +164,20 @@ async function fetchGeminiModels(
 export async function POST(request: Request) {
   // 未知 protocol 时本路由会用客户端提供的 baseUrl 去发起服务端 fetch（见下方 fetchModels），
   // 不加身份校验等于对外提供一个开放的 SSRF 代理。
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   try {
     const body = (await request.json()) as ListRequest;
+    const creds = await resolveListCredentials(guard.userId, body);
+    // 静态列表分支（kling / 即梦 / 音乐 / minimax）不需要 Key，解析不到也照常回答；
+    // 需要发上游请求的分支下面会显式检查 creds。
+    const effProtocol = creds?.protocol || body.protocol;
+    const effBaseUrl = creds?.baseUrl ?? "";
+    const effApiKey = creds?.apiKey ?? "";
 
     // ── Kling 图片 / 视频 ───────────────────────────────────────────────
-    if (body.protocol === "kling") {
+    if (effProtocol === "kling") {
       return NextResponse.json({
         models: [
           { id: "kling-v1",          name: "Kling v1" },
@@ -155,7 +196,7 @@ export async function POST(request: Request) {
     // ── 即梦AI 图片生成（火山引擎 Visual API）──────────────────────────
     // model 字段对应 req_key，请参考官方文档确认可用值：
     // https://www.volcengine.com/docs/85621/2288388
-    if (body.protocol === "jimeng") {
+    if (effProtocol === "jimeng") {
       return NextResponse.json({
         models: [
           { id: "jimeng_high_aes_general_v21_L", name: "Jimeng Image Gen (General)" },
@@ -167,7 +208,7 @@ export async function POST(request: Request) {
     // 720P 单 req_key 覆盖图生（含首尾帧）：https://www.volcengine.com/docs/85621/1792710
     // 1080P 官方按模式多个 req_key，客户端用 jimeng_i2v_v30_1080 自动映射：
     // https://www.volcengine.com/docs/85621/1792711
-    if (body.protocol === "jimeng-video") {
+    if (effProtocol === "jimeng-video") {
       return NextResponse.json({
         models: [
           { id: "jimeng_i2v_v30", name: "Jimeng Video 3.0 720P" },
@@ -180,7 +221,7 @@ export async function POST(request: Request) {
     // 该服务没有「模型」概念，只有算法版本号（作为 GenBGMForTime 的 Version 字段传入）。
     // 无模型列表端点，固定返回当前可用版本。
     // 控制台：https://console.volcengine.com/ai-music
-    if (body.protocol === "volc-music") {
+    if (effProtocol === "volc-music") {
       return NextResponse.json({
         models: [
           { id: "v5.0", name: "生成纯音乐 v5.0（纯器乐，30–120 秒）" },
@@ -191,7 +232,7 @@ export async function POST(request: Request) {
     // ── MiniMax H3 视频生成（v2 异步任务 API）──────────────────────────
     // 官方无模型列表端点，模型固定为 MiniMax-H3。
     // 文档：https://platform.minimax.io/docs/api-reference/video-generation-v2-create
-    if (body.protocol === "minimax-video") {
+    if (effProtocol === "minimax-video") {
       return NextResponse.json({
         models: [{ id: "MiniMax-H3", name: "MiniMax H3" }],
       });
@@ -199,7 +240,7 @@ export async function POST(request: Request) {
 
     // ── 豆包 Seedream 图片生成（方舟 Ark API，OpenAI 兼容）─────────────
     // 参考文档：https://www.volcengine.com/docs/82379/1541523
-    if (body.protocol === "doubao") {
+    if (effProtocol === "doubao") {
       const DOUBAO_FALLBACK: ModelItem[] = [
         { id: "doubao-seedream-5-0-260128",      name: "Doubao Seedream 5.0" },
         { id: "doubao-seedream-4-5-251128",      name: "Doubao Seedream 4.5" },
@@ -207,12 +248,12 @@ export async function POST(request: Request) {
       ];
 
       // 尝试从方舟 API 动态拉取，过滤图片生成模型（ID 含 seedream）
-      if (body.baseUrl && body.apiKey) {
+      if (effBaseUrl && effApiKey) {
         try {
-          const base = arkModelsBase(body.baseUrl);
+          const base = arkModelsBase(effBaseUrl);
           const modelsUrl = `${base}/models`;
           const res = await fetch(modelsUrl, {
-            headers: { Authorization: `Bearer ${body.apiKey}` },
+            headers: { Authorization: `Bearer ${effApiKey}` },
             signal: AbortSignal.timeout(8000),
           });
           if (res.ok) {
@@ -239,7 +280,7 @@ export async function POST(request: Request) {
     // 参考文档：https://www.volcengine.com/docs/82379/1520757
     // 模型 ID 参考：https://www.volcengine.com/docs/82379/2291680
     // 注：doubao-* 为中国区 Volcengine Ark 的 ID；国际区 BytePlus 对应 dreamina-*
-    if (body.protocol === "seedance") {
+    if (effProtocol === "seedance") {
       // 兜底列表（官方文档确认，万一 API 拉取失败时使用）
       const SEEDANCE_FALLBACK: ModelItem[] = [
         { id: "doubao-seedance-2-5-260628",      name: "Doubao Seedance 2.5 (30s, up to 1080p, 30图+10视频+10音频)" },
@@ -251,12 +292,12 @@ export async function POST(request: Request) {
       ];
 
       // 尝试从方舟 API 动态拉取，过滤出视频生成模型（ID 含 seedance/dreamina）
-      if (body.baseUrl && body.apiKey) {
+      if (effBaseUrl && effApiKey) {
         try {
-          const base = arkModelsBase(body.baseUrl);
+          const base = arkModelsBase(effBaseUrl);
           const modelsUrl = `${base}/models`;
           const res = await fetch(modelsUrl, {
-            headers: { Authorization: `Bearer ${body.apiKey}` },
+            headers: { Authorization: `Bearer ${effApiKey}` },
             signal: AbortSignal.timeout(8000),
           });
           if (res.ok) {
@@ -281,19 +322,26 @@ export async function POST(request: Request) {
       return NextResponse.json({ models: SEEDANCE_FALLBACK });
     }
 
-    if (!body.baseUrl) {
-      return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
-    }
-    if (!body.apiKey) {
-      return NextResponse.json({ error: "API Key is required" }, { status: 400 });
+    if (!effBaseUrl || !effApiKey) {
+      return NextResponse.json(
+        {
+          error: allowUserProviders()
+            ? "缺少服务地址或 API Key"
+            : "本站由管理员统一配置模型，未找到可用的平台配置，请联系管理员",
+        },
+        { status: 400 }
+      );
     }
 
     const models =
-      body.protocol === "gemini"
-        ? await fetchGeminiModels(body.baseUrl, body.apiKey, body.capability)
-        : await fetchModels(body.baseUrl, body.apiKey);
+      effProtocol === "gemini"
+        ? await fetchGeminiModels(effBaseUrl, effApiKey, body.capability)
+        : await fetchModels(effBaseUrl, effApiKey);
     return NextResponse.json({ models });
   } catch (err) {
+    if (err instanceof UntrustedEndpointError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error("[models/list] Error:", message);
     return NextResponse.json({ error: message }, { status: 502 });

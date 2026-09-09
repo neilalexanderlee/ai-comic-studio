@@ -89,9 +89,15 @@ describe("空库基线", () => {
     const { throughTag } = JSON.parse(
       fs.readFileSync("drizzle/baseline/meta.json", "utf8")
     ) as { throughTag: string };
-    const expected = journal.entries.findIndex((e) => e.tag === throughTag) + 1;
-    expect(expected).toBeGreaterThan(0); // throughTag 必须在 journal 里
-    expect(applied).toBe(expected);
+    const coveredByBaseline = journal.entries.findIndex((e) => e.tag === throughTag) + 1;
+    expect(coveredByBaseline).toBeGreaterThan(0); // throughTag 必须在 journal 里
+
+    // 基线覆盖的那些被**标记**为已应用（不重放），其后的照常增量执行 ——
+    // 两段加起来必须是 journal 的全部。
+    // ⚠️ 不能写成 `applied === coveredByBaseline`：那等于假设 throughTag 永远是
+    // journal 的最后一条，于是每加一条新迁移这个测试就红，而它其实是对的。
+    expect(applied).toBe(journal.entries.length);
+    expect(journal.entries.length).toBeGreaterThanOrEqual(coveredByBaseline);
   });
 
   it("可重复执行 —— 第二次不报错也不改变 schema", async () => {

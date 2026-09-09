@@ -27,6 +27,7 @@ const AUTH_MARKERS = [
   "requireProjectOwner",
   "requireTaskOwner",
   "requireUser",
+  "requireAdmin",
   "getUserIdFromRequest",
   "getAuthUserIdFromRequest",
   "getFreshAuthUserId",

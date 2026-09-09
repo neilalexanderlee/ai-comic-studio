@@ -29,36 +29,58 @@ function hasPayloadContent(p: ModelStorePersistPayload) {
   );
 }
 
-/** 从服务端拉取 model-store 备份（密钥仍在 provider_secrets）；本地为空时合并；变更后防抖写回 */
+function applyPayload(data: ModelStorePersistPayload) {
+  useModelStore.setState({
+    providers: data.providers.map((p) => ({
+      ...p,
+      apiKey: "",
+      secretKey: undefined,
+    })),
+    defaultTextModel: data.defaultTextModel ?? null,
+    defaultImageModel: data.defaultImageModel ?? null,
+    defaultVideoModel: data.defaultVideoModel ?? null,
+    defaultMusicModel: data.defaultMusicModel ?? null,
+  });
+}
+
+/**
+ * 从服务端拉取 model-store 备份（密钥仍在 provider_secrets）；本地为空时合并；变更后防抖写回。
+ *
+ * 平台模式（`ALLOW_USER_PROVIDERS=0`）下的非管理员走另一条路：
+ * **无条件采用管理员那份 provider 列表并停止写回**。
+ * 「本地为空才合并」在这里是错的 —— 用户本地留着一份旧的（甚至是自己以前配的）
+ * 列表时就不会更新，结果是管理员换了模型、用户这边还在用一个已经不存在的 providerId，
+ * 而失败信息只会是「未配置 Key」。
+ */
 export function ModelStoreServerSync() {
   const allowRemoteSave = useRef(false);
+  const managedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function pull() {
       try {
+        const platformRes = await apiFetch("/api/platform/providers");
+        const platform = (await platformRes.json()) as {
+          managed?: boolean;
+          payload?: ModelStorePersistPayload | null;
+        };
+        if (cancelled) return;
+        if (platform?.managed) {
+          managedRef.current = true;
+          if (platform.payload?.providers?.length) applyPayload(platform.payload);
+          return; // 托管：不再拉自己的备份，也不写回（finally 里 allowRemoteSave 保持 false）
+        }
+
         const res = await apiFetch("/api/user-prefs/model-store");
         const data = (await res.json()) as ModelStorePersistPayload | null;
         if (cancelled || !data?.providers?.length) return;
-        const localLen = useModelStore.getState().providers.length;
-        if (localLen === 0) {
-          useModelStore.setState({
-            providers: data.providers.map((p) => ({
-              ...p,
-              apiKey: "",
-              secretKey: undefined,
-            })),
-            defaultTextModel: data.defaultTextModel ?? null,
-            defaultImageModel: data.defaultImageModel ?? null,
-            defaultVideoModel: data.defaultVideoModel ?? null,
-            defaultMusicModel: data.defaultMusicModel ?? null,
-          });
-        }
+        if (useModelStore.getState().providers.length === 0) applyPayload(data);
       } catch {
         // ignore
       } finally {
-        if (!cancelled) allowRemoteSave.current = true;
+        if (!cancelled && !managedRef.current) allowRemoteSave.current = true;
       }
     }
 

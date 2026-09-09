@@ -154,7 +154,10 @@ export function ProviderForm({ provider }: ProviderFormProps) {
           protocol: provider.protocol,
           capability: provider.capability,
           baseUrl: provider.baseUrl,
+          // 输入框里还没保存的那把 Key（「保存前先测一下」）。平台模式下服务端会忽略
+          // 非管理员的内联 Key，改按 providerId 解析平台配置 —— 见 models/list 路由。
           apiKey: apiKeyInput.trim(),
+          providerId: provider.id,
         }),
       });
       const data = await res.json();

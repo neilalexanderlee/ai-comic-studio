@@ -7,6 +7,7 @@ import { safeNext } from "@/lib/auth-next";
 import { AuthShell } from "@/components/auth/auth-shell";
 import { AuthForm } from "@/components/auth/auth-form";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { resolveRegistrationMode } from "@/lib/registration";
 
 /**
  * `/[locale]/register` —— 独立的注册页。
@@ -16,7 +17,7 @@ import { buttonVariants } from "@/components/ui/button-variants";
  * 何况这条路由本来就只有手动输网址才会到（关闭注册时登录页不给链接），
  * 到这儿的人正需要一句解释。
  *
- * 真正的准入控制在 `POST /api/auth/register` 里（`ALLOW_REGISTRATION`），
+ * 真正的准入控制在 `POST /api/auth/register` 里（`REGISTRATION_MODE` / `ALLOW_REGISTRATION`），
  * 这一页只是界面 —— 即使有人绕过界面直接打接口，也一样会被服务端拒。
  */
 export default async function RegisterPage({
@@ -35,9 +36,9 @@ export default async function RegisterPage({
   if (authRaw && parseCookieValue(authRaw)) redirect(next);
 
   const loginHref = `/${locale}/login${rawNext ? `?next=${encodeURIComponent(next)}` : ""}`;
-  const allowRegistration = process.env.ALLOW_REGISTRATION !== "0";
+  const mode = resolveRegistrationMode();
 
-  if (!allowRegistration) {
+  if (mode === "closed") {
     return (
       <AuthShell subtitle="注册已关闭">
         <div className="space-y-4 text-center">
@@ -59,7 +60,11 @@ export default async function RegisterPage({
 
   return (
     <AuthShell
-      subtitle="创建账号后，数据存在服务器，换设备也在"
+      subtitle={
+        mode === "invite"
+          ? "本站为邀请制，注册需要一个邀请码"
+          : "创建账号后，数据存在服务器，换设备也在"
+      }
       footer={
         <p>
           已有账号？
@@ -72,7 +77,7 @@ export default async function RegisterPage({
         </p>
       }
     >
-      <AuthForm mode="register" next={next} />
+      <AuthForm mode="register" next={next} requireInviteCode={mode === "invite"} />
     </AuthShell>
   );
 }

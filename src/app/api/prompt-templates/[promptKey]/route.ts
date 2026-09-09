@@ -12,7 +12,7 @@ export async function PUT(
   { params }: { params: Promise<{ promptKey: string }> }
 ) {
   const { promptKey } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const body = (await request.json()) as {
@@ -146,7 +146,7 @@ export async function DELETE(
   { params }: { params: Promise<{ promptKey: string }> }
 ) {
   const { promptKey } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const slotKey = new URL(request.url).searchParams.get("slotKey");

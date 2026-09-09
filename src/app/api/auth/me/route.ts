@@ -1,6 +1,6 @@
 /**
  * GET /api/auth/me — 返回当前登录用户信息
- * Response: { loggedIn: true, userId, username } | { loggedIn: false }
+ * Response: { loggedIn: true, userId, username, role, disabled } | { loggedIn: false }
  */
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
@@ -17,7 +17,12 @@ export async function GET(req: NextRequest) {
   }
 
   const [user] = await db
-    .select({ id: users.id, username: users.username })
+    .select({
+      id: users.id,
+      username: users.username,
+      role: users.role,
+      status: users.status,
+    })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -30,5 +35,19 @@ export async function GET(req: NextRequest) {
     return res;
   }
 
-  return NextResponse.json({ loggedIn: true, userId: user.id, username: user.username });
+  // 停用的账号在这里也当作未登录：前端据此掉线，不需要再判一次 status
+  if (user.status === "disabled") {
+    const res = NextResponse.json({ loggedIn: false, disabled: true });
+    const { makeClearCookieHeader } = await import("@/lib/auth");
+    res.headers.set("Set-Cookie", makeClearCookieHeader(req));
+    return res;
+  }
+
+  return NextResponse.json({
+    loggedIn: true,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+    isAdmin: user.role === "admin",
+  });
 }

@@ -42,7 +42,7 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   // 关掉「任何人拿到 URL 就能下载任意用户成片」这一条：至少要带身份 cookie
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   const { path: segments } = await params;

@@ -13,7 +13,7 @@ import { checkProjectQuota, planLimitResponse } from "@/lib/billing/plan-limits"
 import { resolveFeatures } from "@/lib/billing/subscription";
 
 export async function GET(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const allProjects = await db
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const body = (await request.json()) as {

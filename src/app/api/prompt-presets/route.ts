@@ -9,7 +9,7 @@ import { BUILT_IN_PRESETS } from "@/lib/ai/prompts/presets";
 
 // GET: List built-in + user presets
 export async function GET(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 
@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 
 // POST: Save current config as preset
 export async function POST(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
   const body = (await request.json()) as {

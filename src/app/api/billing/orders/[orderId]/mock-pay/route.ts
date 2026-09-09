@@ -14,7 +14,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ orderId: string }> }
 ) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   if (!isBillingEnabled()) {
     return NextResponse.json({ error: "本实例未启用计费" }, { status: 400 });

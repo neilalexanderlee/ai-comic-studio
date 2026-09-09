@@ -6,7 +6,7 @@ import { ensureSubscriptionPeriod } from "@/lib/billing/subscription";
 
 /** 套餐与加油包列表 + 当前订阅。套餐定义是代码常量（见 plans.ts），这里只是转出去。 */
 export async function GET(request: Request) {
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   // 未启用计费：自部署场景，没有套餐概念。返回空列表让前端整块不渲染，

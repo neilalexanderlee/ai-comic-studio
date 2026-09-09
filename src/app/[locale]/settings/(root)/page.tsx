@@ -8,12 +8,16 @@ import { AuthSection } from "@/components/settings/auth-section";
 import { BillingSection } from "@/components/settings/billing-section";
 import { useTranslations } from "next-intl";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Settings, Zap, Type, ImageIcon, VideoIcon, Wand2, Layers, Music, ShieldCheck, ShieldUser } from "lucide-react";
 import Link from "next/link";
+import { usePlatformMode } from "@/lib/client/use-platform-mode";
 
 export default function SettingsPage() {
   const t = useTranslations("settings");
   const router = useRouter();
+  // 平台托管模式下非管理员不再自己配 Key（约定 8p）。ready 之前不渲染这几块，
+  // 避免「先闪出一整页配置表单再消失」。
+  const { managed, isAdmin, ready } = usePlatformMode();
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -42,6 +46,21 @@ export default function SettingsPage() {
           {/* 账户与套餐 —— 未启用计费时组件自己返回 null，整块不渲染 */}
           <BillingSection />
 
+          {isAdmin && (
+            <Link
+              href="/admin"
+              className="flex items-center gap-3 rounded-2xl border border-[--border-subtle] bg-white p-5 transition-all duration-200 hover:border-[--border-hover] hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
+                <ShieldUser className="h-4 w-4" />
+              </div>
+              <div>
+                <div className="font-display text-sm font-semibold">管理后台</div>
+                <div className="text-xs text-[--text-muted]">邀请码、用户与平台 Key</div>
+              </div>
+            </Link>
+          )}
+
           {/* Default model selection */}
           <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
             <h3 className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
@@ -65,42 +84,59 @@ export default function SettingsPage() {
             </div>
           </Link>
 
-          {/* Language Models section */}
-          <ProviderSection
-            capability="text"
-            label={t("languageModels")}
-            icon={<Type className="h-3.5 w-3.5" />}
-            defaultProtocol="openai"
-            defaultBaseUrl="https://api.openai.com/v1"
-          />
+          {ready && managed ? (
+            <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
+              <h3 className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                <ShieldCheck className="h-3.5 w-3.5" />
+                模型配置
+              </h3>
+              <p className="text-sm text-[--text-muted]">
+                本站的生成模型由管理员统一配置，你不需要填写任何 API Key ——
+                在上方「默认模型」里选择要用哪一个即可。
+              </p>
+            </div>
+          ) : ready ? (
+            <>
+              {/* Language Models section */}
+              <ProviderSection
+                capability="text"
+                label={t("languageModels")}
+                icon={<Type className="h-3.5 w-3.5" />}
+                defaultProtocol="openai"
+                defaultBaseUrl="https://api.openai.com/v1"
+              />
 
-          {/* Image Models section */}
-          <ProviderSection
-            capability="image"
-            label={t("imageModels")}
-            icon={<ImageIcon className="h-3.5 w-3.5" />}
-            defaultProtocol="kling"
-            defaultBaseUrl="https://api.klingai.com"
-          />
+              {/* Image Models section */}
+              <ProviderSection
+                capability="image"
+                label={t("imageModels")}
+                icon={<ImageIcon className="h-3.5 w-3.5" />}
+                defaultProtocol="kling"
+                defaultBaseUrl="https://api.klingai.com"
+              />
 
-          {/* Video Models section */}
-          <ProviderSection
-            capability="video"
-            label={t("videoModels")}
-            icon={<VideoIcon className="h-3.5 w-3.5" />}
-            defaultProtocol="kling"
-            defaultBaseUrl="https://api.klingai.com"
-          />
+              {/* Video Models section */}
+              <ProviderSection
+                capability="video"
+                label={t("videoModels")}
+                icon={<VideoIcon className="h-3.5 w-3.5" />}
+                defaultProtocol="kling"
+                defaultBaseUrl="https://api.klingai.com"
+              />
 
-          {/* Music Models section */}
-          <ProviderSection
-            capability="music"
-            label="音乐生成模型"
-            icon={<Music className="h-3.5 w-3.5" />}
-            defaultProtocol="volc-music"
-            defaultBaseUrl="https://open.volcengineapi.com"
-          />
+              {/* Music Models section */}
+              <ProviderSection
+                capability="music"
+                label="音乐生成模型"
+                icon={<Music className="h-3.5 w-3.5" />}
+                defaultProtocol="volc-music"
+                defaultBaseUrl="https://open.volcengineapi.com"
+              />
+            </>
+          ) : null}
 
+          {ready && !managed && (
+            <>
           {/* AI 多媒体套件（AI MediaKit）分类标题 */}
           <div className="flex items-center gap-2 pt-2">
             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-violet-100 text-violet-600">
@@ -128,6 +164,8 @@ export default function SettingsPage() {
 
           {/* 私域虚拟人像素材资产库 */}
           <ArkAssetLibrarySection />
+            </>
+          )}
 
           {/* Account / Auth */}
           <AuthSection />

@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { characterAssets, characters, projects, shots, tasks } from "@/lib/db/schema";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { isAdminUser, isUserDisabled } from "@/lib/admin";
 
 /**
  * API 路由的统一租户校验。
@@ -31,11 +32,34 @@ function deny(status: number, error: string): { ok: false; response: NextRespons
   return { ok: false, response: NextResponse.json({ error }, { status }) };
 }
 
-/** 仅要求「有身份」（登录用户或匿名指纹），不校验具体资源归属。 */
-export function requireUser(request: Request): Guard {
+/**
+ * 身份 + 停用状态。三个 require* 的公共前半段。
+ *
+ * ⚠️ **停用检查必须覆盖所有受保护路由，不能只挑几条**。只挡一部分就是
+ * 「两道闸只开了一道却以为全开了」那类故障：管理员点了停用，界面显示已停用，
+ * 而那个账号仍在某几条路由上继续消耗平台 Key。
+ *
+ * 代价由 `isUserDisabled` 的 30 秒 TTL 缓存吸收（见 lib/admin.ts），
+ * 稳态下不产生额外查库。
+ */
+async function identify(request: Request): Promise<Guard> {
   const userId = getUserIdFromRequest(request);
   if (!userId) return deny(401, "Missing user id");
+  if (await isUserDisabled(userId)) {
+    return deny(403, "该账号已被停用");
+  }
   return { ok: true, userId };
+}
+
+/**
+ * 仅要求「有身份」（登录用户或匿名指纹）且未被停用，不校验具体资源归属。
+ *
+ * ⚠️ 这是 async 的（原来是同步）—— 加停用检查必须读一次状态。调用方写
+ * `const guard = await requireUser(request);`，漏掉 await 会让 `guard.ok`
+ * 恒为 undefined（falsy），路由整体失效而不是放行，属于会立刻暴露的错法。
+ */
+export async function requireUser(request: Request): Promise<Guard> {
+  return identify(request);
 }
 
 /**
@@ -45,8 +69,9 @@ export function requireUser(request: Request): Guard {
  * 避免被用来枚举他人的 project id。
  */
 export async function requireProjectOwner(request: Request, projectId: string): Promise<Guard> {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) return deny(401, "Missing user id");
+  const id = await identify(request);
+  if (!id.ok) return id;
+  const userId = id.userId;
   if (!projectId) return deny(400, "Missing project id");
 
   const [project] = await db
@@ -113,8 +138,8 @@ export async function requireCharacterAssetInProject(
 
 /** 任务归属：task → projectId → projects.userId。同样用 404 而非 403。 */
 export async function requireTaskOwner(request: Request, taskId: string): Promise<Guard> {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) return deny(401, "Missing user id");
+  const id = await identify(request);
+  if (!id.ok) return id;
   if (!taskId) return deny(400, "Missing task id");
 
   const [row] = await db
@@ -126,4 +151,20 @@ export async function requireTaskOwner(request: Request, taskId: string): Promis
   // tasks.project_id 允许为空（历史数据/非项目级任务）；没有归属就无法证明有权访问
   if (!row?.projectId) return deny(404, "Task not found");
   return requireProjectOwner(request, row.projectId);
+}
+
+/**
+ * 要求当前请求者是管理员。
+ *
+ * 管理端接口（邀请码、用户停用、平台 Key）全部经这里。
+ * **非管理员一律 403 而不是 404**：这里不涉及「某个资源 id 是否存在」，
+ * 没有可枚举的信息；说清楚「你不是管理员」才是对的（与套餐限制同理，见约定 8i）。
+ */
+export async function requireAdmin(request: Request): Promise<Guard> {
+  const id = await identify(request);
+  if (!id.ok) return id;
+  if (!(await isAdminUser(id.userId))) {
+    return deny(403, "需要管理员权限");
+  }
+  return id;
 }
