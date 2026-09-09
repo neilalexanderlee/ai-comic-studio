@@ -267,10 +267,6 @@ src/
 |:---:|
 | ![提示词快捷入口](images/demo/提示词快捷入口.png) |
 
-## Demo
-
-[Bilibili — 龙智俊影AI漫剧工坊·使用教程](https://www.bilibili.com/video/BV1khY86uEzF/)
-
 ## 模型配置（重要）
 
 首次使用需要在设置页配置模型供应商。
