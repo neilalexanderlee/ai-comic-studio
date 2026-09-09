@@ -2,6 +2,8 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { and, count, eq, gte } from "drizzle-orm";
 import { ulid } from "ulid";
+import { users } from "@/lib/db/schema";
+import { quoteCredits } from "./pricing";
 import { db } from "@/lib/db";
 import { usageRecords } from "@/lib/db/schema";
 import type { KeySource } from "@/lib/provider-secrets";
@@ -235,4 +237,126 @@ export async function checkPlatformUsage(
   }
 
   return null;
+}
+
+
+// ─── 管理端可观测性 ───────────────────────────────────────────────────────────
+
+/**
+ * 「过去 24 小时谁烧了多少」。
+ *
+ * 支付没接、计费关着，所以**账面上看不出任何东西** —— `credit_accounts` 全是 0，
+ * 唯一的记录是 `usage_records` 里那些 `credits=0` 的行。没有这个汇总，
+ * 平台 Key 的实际开销对管理员是完全不可见的，刹车有没有在起作用也无从判断。
+ *
+ * 这条正是这个项目自己的教训：**监控要在需要它之前就验证过一次**
+ * （sysstat 装了却是 `ENABLED="false"`，事故当下一个指标都拿不到）。
+ *
+ * 金额用 `quoteCredits().upstreamCostYuan` 反推 —— 与生成时的报价同一套纯函数，
+ * 所以不会出现「报价一套、对账另一套」。它是**估算**（上游真实账单以厂商为准），
+ * 界面上必须这么标，不能显示成精确金额。
+ */
+export interface PlatformUsageRow {
+  userId: string;
+  username: string | null;
+  videoSeconds: number;
+  imageCount: number;
+  musicCount: number;
+  /** 估算的上游成本（元） */
+  estimatedYuan: number;
+}
+
+export interface PlatformUsageSummary {
+  windowHours: number;
+  limits: PlatformLimits;
+  /** 当前在飞的平台任务（按协议） */
+  inflight: Array<{ protocol: string; count: number }>;
+  rows: PlatformUsageRow[];
+  totals: { videoSeconds: number; imageCount: number; musicCount: number; estimatedYuan: number };
+}
+
+export async function summarizePlatformUsage(): Promise<PlatformUsageSummary> {
+  const since = new Date(Date.now() - WINDOW_MS);
+
+  const records = await db
+    .select({
+      userId: usageRecords.userId,
+      kind: usageRecords.kind,
+      params: usageRecords.params,
+      modelId: usageRecords.modelId,
+      protocol: usageRecords.protocol,
+      status: usageRecords.status,
+      createdAt: usageRecords.createdAt,
+    })
+    .from(usageRecords)
+    .where(and(eq(usageRecords.keySource, "platform"), gte(usageRecords.createdAt, since)));
+
+  const nameRows = await db.select({ id: users.id, username: users.username }).from(users);
+  const names = new Map(nameRows.map((r) => [r.id, r.username]));
+
+  const byUser = new Map<string, PlatformUsageRow>();
+  const inflight = new Map<string, number>();
+  const staleBefore = Date.now() - STALE_RESERVATION_MS;
+
+  for (const r of records) {
+    // 退还掉的不算钱也不算量 —— 与 checkPlatformUsage 的口径保持一致，
+    // 两处若不一致，界面显示的和实际挡人的就对不上
+    if (r.status === "refunded") continue;
+
+    if (r.status === "reserved" && r.createdAt.getTime() >= staleBefore) {
+      const key = r.protocol ?? "unknown";
+      inflight.set(key, (inflight.get(key) ?? 0) + 1);
+    }
+
+    const row =
+      byUser.get(r.userId) ??
+      ({
+        userId: r.userId,
+        username: names.get(r.userId) ?? null,
+        videoSeconds: 0,
+        imageCount: 0,
+        musicCount: 0,
+        estimatedYuan: 0,
+      } satisfies PlatformUsageRow);
+
+    let parsed: { durationSeconds?: number; imageCount?: number; resolution?: string } = {};
+    try {
+      parsed = r.params ? JSON.parse(r.params) : {};
+    } catch {
+      // 脏数据按最小单位计，不要因为一条解析失败就少算整个人的用量
+    }
+
+    if (r.kind === "video") row.videoSeconds += unitsOf("video", r.params);
+    else if (r.kind === "image") row.imageCount += unitsOf("image", r.params);
+    else if (r.kind === "music") row.musicCount += 1;
+
+    if (r.kind === "video" || r.kind === "image" || r.kind === "music" || r.kind === "text") {
+      row.estimatedYuan += quoteCredits({
+        kind: r.kind,
+        modelId: r.modelId,
+        durationSeconds: parsed.durationSeconds,
+        resolution: parsed.resolution,
+        imageCount: parsed.imageCount,
+      }).upstreamCostYuan;
+    }
+
+    byUser.set(r.userId, row);
+  }
+
+  const rows = [...byUser.values()].sort((a, b) => b.estimatedYuan - a.estimatedYuan);
+
+  return {
+    windowHours: WINDOW_MS / 3_600_000,
+    limits: platformLimits(),
+    inflight: [...inflight.entries()]
+      .map(([protocol, count]) => ({ protocol, count }))
+      .sort((a, b) => b.count - a.count),
+    rows,
+    totals: {
+      videoSeconds: rows.reduce((n, r) => n + r.videoSeconds, 0),
+      imageCount: rows.reduce((n, r) => n + r.imageCount, 0),
+      musicCount: rows.reduce((n, r) => n + r.musicCount, 0),
+      estimatedYuan: rows.reduce((n, r) => n + r.estimatedYuan, 0),
+    },
+  };
 }

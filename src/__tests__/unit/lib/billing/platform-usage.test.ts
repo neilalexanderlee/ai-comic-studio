@@ -201,3 +201,86 @@ describe("开关的失效方式必须是「没省到钱」而不是「谁都用�
     expect(await check({ kind: "video", keySource: "platform", durationSeconds: 600 })).toBeNull();
   });
 });
+
+describe("管理端汇总（summarizePlatformUsage）", () => {
+  async function summarize() {
+    const { summarizePlatformUsage } = await import("@/lib/billing/platform-usage");
+    return summarizePlatformUsage();
+  }
+
+  function seedUser(id: string, username: string) {
+    holder.sqlite!
+      .prepare(
+        `INSERT INTO users (id, username, password_hash, token_version, role, status, created_at)
+         VALUES (?, ?, 'x', 0, 'user', 'active', 0)`
+      )
+      .run(id, username);
+  }
+
+  beforeEach(() => {
+    holder.sqlite!.prepare(`DELETE FROM users`).run();
+  });
+
+  it("按人汇总用量，并把 userId 换成用户名", async () => {
+    seedUser(USER, "neil");
+    seedUsage({ kind: "video", seconds: 7 });
+    seedUsage({ kind: "video", seconds: 5 });
+    seedUsage({ kind: "image", images: 3 });
+
+    const sum = await summarize();
+    expect(sum.rows).toHaveLength(1);
+    expect(sum.rows[0].username).toBe("neil");
+    expect(sum.rows[0].videoSeconds).toBe(12);
+    expect(sum.rows[0].imageCount).toBe(3);
+    expect(sum.totals.videoSeconds).toBe(12);
+  });
+
+  it("估算出非零金额 —— 计费关着时这是唯一能看出钱花在哪的数字", async () => {
+    seedUsage({ kind: "video", seconds: 10 });
+    const sum = await summarize();
+    expect(sum.totals.estimatedYuan).toBeGreaterThan(0);
+  });
+
+  it("BYOK 的生成完全不出现在这里 —— 那不花平台的钱", async () => {
+    seedUsage({ kind: "video", seconds: 100, keySource: "user" });
+    const sum = await summarize();
+    expect(sum.rows).toHaveLength(0);
+    expect(sum.totals.estimatedYuan).toBe(0);
+  });
+
+  it("退还掉的不计入 —— 口径必须与 checkPlatformUsage 一致，否则界面显示的和实际挡人的对不上", async () => {
+    seedUsage({ kind: "video", seconds: 50, status: "refunded" });
+    seedUsage({ kind: "video", seconds: 5 });
+    const sum = await summarize();
+    expect(sum.totals.videoSeconds).toBe(5);
+  });
+
+  it("在飞任务按协议统计，15 分钟前的残骸不算", async () => {
+    seedUsage({ kind: "video", seconds: 5, status: "reserved", protocol: "seedance" });
+    seedUsage({ kind: "video", seconds: 5, status: "reserved", protocol: "seedance" });
+    seedUsage({
+      kind: "video",
+      seconds: 5,
+      status: "reserved",
+      protocol: "seedance",
+      ageMs: 20 * 60 * 1000,
+    });
+    const sum = await summarize();
+    expect(sum.inflight).toEqual([{ protocol: "seedance", count: 2 }]);
+  });
+
+  it("24 小时之外的不计入", async () => {
+    seedUsage({ kind: "video", seconds: 99, ageMs: 25 * 60 * 60 * 1000 });
+    const sum = await summarize();
+    expect(sum.totals.videoSeconds).toBe(0);
+  });
+
+  it("多个用户按花费从高到低排序（先看谁烧得最多）", async () => {
+    seedUser("u_small", "small");
+    seedUser("u_big", "big");
+    seedUsage({ kind: "video", seconds: 3, userId: "u_small" });
+    seedUsage({ kind: "video", seconds: 30, userId: "u_big" });
+    const sum = await summarize();
+    expect(sum.rows.map((r) => r.username)).toEqual(["big", "small"]);
+  });
+});

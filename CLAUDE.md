@@ -468,6 +468,20 @@ getUserIdFromRequest(request); // ❌ 注释写着 auth check，实际返回值�
 **注意 `getUserIdFromRequest` 包含匿名指纹用户**（`src/proxy.ts` 下发的 `ai_comic_uid`），
 所以本地匿名使用不受影响，被挡住的只有跨租户访问。
 
+⚠️ **身份 ≠ 归属，而按标志词扫描分不出这两者。** 一条路由可以老老实实调用
+`getUserIdFromRequest` 并使用它的返回值 —— 只是拿去**查密钥**而不是**校验归属**，
+于是两条守卫测试全绿、洞照样在。2026-09-09 一次性发现三条这种形状的：
+
+| 路由 | 后果 |
+|---|---|
+| `shots/[shotId]/enhance` | 知道 projectId + shotId 就能对别人的分镜跑画质增强（花 Key 的钱）|
+| `episodes/[episodeId]/editor-state` | 读走**并覆盖**别人整条剪辑时间线，不可逆 |
+| `characters/.../assets/.../lock-to-ark` | 把别人的角色图注册进自己的方舟素材库，顺带改掉对方资产状态 |
+
+所以守卫测试补了第三条断言：**`projects/[id]/**` 下的路由必须证明归属** ——
+接 `requireProjectOwner` / `requireTaskOwner`，或自己写一条带 `projects.userId`
+的查询（`generate/route.ts` 就是后者）。只识别身份直接判红。
+
 ### 8c. 计费闸门 — 默认关闭，三段式扣费
 
 **`BILLING_ENABLED` 未设为 `"1"` 时，`src/lib/billing/gate.ts` 全部退化为空操作**，
@@ -1014,6 +1028,33 @@ ownerId 上，是**唯一允许读取平台 Key 的路径**；
 「本地为空才合并」在这里是错的 —— 用户本地留着一份旧列表就不会更新，
 结果是管理员换了模型、用户还在用一个已不存在的 providerId，而报错只会是「未配置 Key」。
 
+#### 刹车必须看得见 —— `GET /api/admin/usage`
+
+支付没接、`BILLING_ENABLED` 关着，于是 `credit_accounts` 全是 0，
+**平台 Key 到底烧了多少钱，账面上完全看不出来**。管理后台的「平台 Key 用量」
+面板按最近 24 小时汇总每个人的秒数/张数/条数，并用 `quoteCredits().upstreamCostYuan`
+反推**估算**金额（与生成时同一套纯函数，不会出现「报价一套、对账另一套」）。
+
+这条是本项目自己的教训：**监控要在需要它之前就验证过一次** ——
+sysstat 装了却是 `ENABLED="false"`，事故当下一个指标都拿不到。
+
+⚠️ 汇总口径必须与 `checkPlatformUsage` 完全一致（退还的不算、24 小时窗口、
+15 分钟残骸不计入在飞）。两处不一致的话，界面显示的和实际挡人的就对不上，
+而这种偏差只会在用户抱怨「我明明没用满」的时候才暴露。
+
+#### 平台 Key 要覆盖**所有**花钱的路径，不只是生成三件套
+
+画质增强（`shots/[shotId]/enhance`，AI MediaKit）原来只查用户自己的密钥。
+托管模式下非管理员的设置页**不显示** MediaKit 配置区 —— 于是必然查不到，
+而报错还写着「请前往设置填写」，指向一个根本不存在的入口。
+已改为走 `resolveProviderCredentials`（同一套「用户 → 平台」优先级），
+并按镜头时长计入同一份视频额度：**额度的语义是「这个人每天最多花多少钱」，
+不是「最多生成多少条」。**
+
+⚠️ `VOLCENGINE_ENHANCE_API_KEY` 这类**环境变量兜底本质上也是一把平台 Key**，
+但它记为 `keySource: "user"`、不受限额约束 —— 因为自部署用户设它就是在用自己的 Key。
+托管部署要让限额生效，就把 Key 配在管理员设置页里（那才是平台 Key 的标准路径）。
+
 #### `/api/models/list` 的那半边（约定 8n 的遗留项）
 
 已改为按 `providerId` 从服务端解析。唯一例外：**有权自己配 Key 的人**
@@ -1532,6 +1573,7 @@ src/lib/evals/
 | `requireUser` 从同步改成异步之后，漏掉 `await` 不会报错 | `guard.ok` 变成读一个 Promise 的属性 = `undefined`（falsy），于是路由**整体拒绝**而不是整体放行 | 这是刻意选的失效方向：错法会立刻暴露（功能全坏），而不是静默放行。24 个调用点已全部改为 `await requireUser(...)`，`tsc` 也能挡住大部分 |
 | 计费相关单测在加了 `users` 表查询之后集体炸 `Database.prepare` | 那些测试的内存库只建了计费五张表；而 `lib/admin.ts` 会问「这个用户是不是管理员 / 平台 Key 挂在谁名下」 | `__tests__/helpers/billing-schema.ts` 补 `users` 表与 `usage_records.key_source`。**凡是被生成/计费链路调用的新模块，都要检查共享测试 DDL 是否跟得上** |
 | `baseline-schema.test.ts` 会在**每次新增迁移**时误报 | 它断言 `已应用条数 === 基线覆盖条数`，等于假设 `throughTag` 永远是 journal 的最后一条。而设计本来就是「基线覆盖的标记为已应用、之后的增量执行」 | 改断言 `已应用条数 === journal.entries.length`。基线本身不需要每次重导 —— `pnpm baseline:dump` 只在基线明显过期时才跑 |
+| 三条路由「调了鉴权函数、返回值也用了」，却仍然是 IDOR | 它们把 `getUserIdFromRequest` 的结果拿去**查密钥**而不是**校验归属**（`enhance` / `editor-state` / `lock-to-ark`）。守卫测试的两条断言（标志词存在、返回值没被丢弃）**全都满足**，所以三条洞在绿灯下活了很久。平台 Key 上线后代价从「改别人数据」升级成「花平台的钱」 | 三条都补 `requireProjectOwner` + 对应的 `requireXxxInProject`；守卫测试新增第三条断言：`projects/[id]/**` 必须有归属证明（助手或 `projects.userId` 查询），只识别身份判红。**已反向验证该断言不是空跑**（临时摘掉 enhance 的守卫 → 精确报红，还原 → 绿）|
 | 本机跑 `docs:backup`/`db:backup` 偶发 OSS 上传超时（`ResponseTimeoutError`），看着像配置或密钥出了问题 | **这不是上一条「VPN 伪造连接成功」的同一现象，是它的反面**：上一条是连接被伪造成「成功」，这次是本地 VPN 状态不好时**真实的 HTTPS 请求**（握手能建立，但数据传输不畅）在应用层超时失败。实测同一份 0.33MB 的包连续失败 4 次，**什么都没改**、只是换个时间点重试，第一次就成功 | **先用控制端口对照测试判断本机网络当前是否可信**（连一个没放行的端口，`成功`说明不可信），若不可信就**直接重试那个失败的操作本身**（不是重试对照测试）——过去多次证实间隔几分钟重试 1–2 次即可，不需要改配置、怀疑密钥或改代码。**偶发的 OSS 上传超时先当网络问题重试，不要当成代码/密钥问题去排查**，真信号是「反复重试仍然失败」而不是「失败过一次」|
 | 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
@@ -1601,3 +1643,4 @@ pnpm dev
 - [ ] 管理端路由用 `requireAdmin`（约定 8p）
 - [ ] 新的花钱路径传了 `keySource`，并在调用上游前过 `checkPlatformUsage`（约定 8p）
 - [ ] 读平台 Key 只经 `readOwnedCredentials` —— 密钥与端点必须同源（约定 8p）
+- [ ] `projects/[id]/**` 的新路由证明了**归属**而不只是识别身份（约定 8b）

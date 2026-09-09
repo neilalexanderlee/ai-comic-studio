@@ -12,9 +12,14 @@ import { db } from "@/lib/db";
 import { shots, storyboardVersions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { VolcengineEnhanceProvider } from "@/lib/ai/providers/volcengine-enhance";
-import { getProviderSecret } from "@/lib/provider-secrets";
+import { resolveProviderCredentials, type KeySource } from "@/lib/provider-secrets";
 import { saveVideoToHistory } from "@/lib/video/video-history";
-import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
+import {
+  checkPlatformUsage,
+  platformUsageResponse,
+  recordPlatformUsage,
+} from "@/lib/billing/platform-usage";
 import path from "path";
 
 const AI_MEDIAKIT_PROVIDER_ID = "volcengine-ai-mediakit";
@@ -32,10 +37,20 @@ async function getVersionedUploadDir(versionId: string | null | undefined): Prom
 }
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string; shotId: string }> }
 ) {
   const { id: projectId, shotId } = await params;
+
+  // ⚠️ 原来这条路由**完全没有归属校验** —— 只调了 getUserIdFromRequest 拿去查密钥，
+  // 于是知道 projectId + shotId 就能对别人的分镜跑一次增强（花的是 Key 的钱）。
+  // 而按标志词扫描的守卫测试照样是绿的：它调了鉴权函数、返回值也用了，只是没用来鉴权。
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
+
+  const shotGuard = await requireShotInProject(shotId, projectId);
+  if (!shotGuard.ok) return shotGuard.response;
 
   const [shot] = await db
     .select()
@@ -45,9 +60,6 @@ export async function POST(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
-  if (shot.projectId !== projectId) {
-    return NextResponse.json({ error: "Shot does not belong to project" }, { status: 403 });
-  }
   if (!shot.videoUrl) {
     return NextResponse.json({ error: "Shot has no video to enhance" }, { status: 400 });
   }
@@ -55,20 +67,21 @@ export async function POST(
     return NextResponse.json({ error: "Video is already at 720p" }, { status: 400 });
   }
 
-  // Load AI MediaKit API Key from provider_secrets (user-specific)
-  const userId = getUserIdFromRequest(req);
-  let apiKey: string | undefined;
+  // 密钥：用户自己的 → 管理员的平台 Key → 环境变量（见下）。
+  //
+  // 平台兜底不能少：托管模式下非管理员的设置页**不显示** MediaKit 配置区，
+  // 只查用户自己的密钥必然查不到，而报错还写着「请前往设置填写」——
+  // 指向一个根本不存在的入口，是最难自查的一类失败。
+  const creds = await resolveProviderCredentials(userId, AI_MEDIAKIT_PROVIDER_ID);
+  let apiKey: string | undefined = creds.ok ? creds.apiKey : undefined;
+  let keySource: KeySource = creds.ok ? creds.keySource : "user";
 
-  if (userId) {
-    const secret = await getProviderSecret(userId, AI_MEDIAKIT_PROVIDER_ID);
-    if (secret?.apiKey) {
-      apiKey = secret.apiKey;
-    }
-  }
-
-  // Fall back to env var if no DB secret found
+  // 环境变量兜底**记为 user**：它是部署者自己配的 Key，自部署场景下不该被平台限额约束
+  // （与「限额只作用于确实用了平台 Key 的请求」一致）。托管部署要让限额生效，
+  // 就把 Key 配在管理员的设置页里 —— 那才是平台 Key 的标准路径。
   if (!apiKey) {
     apiKey = process.env.VOLCENGINE_ENHANCE_API_KEY;
+    keySource = "user";
   }
 
   if (!apiKey) {
@@ -77,6 +90,26 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  // 画质增强按视频时长向上游计费，用的还是同一把 Key —— 所以计入同一份额度。
+  // 额度的语义是「这个人每天最多花多少钱」，不是「最多生成多少条」。
+  const enhanceSeconds = Math.max(1, Math.ceil(shot.duration ?? 5));
+  const usage = await checkPlatformUsage(userId, {
+    kind: "video",
+    keySource,
+    durationSeconds: enhanceSeconds,
+    protocol: "volcengine-enhance",
+  });
+  if (usage) return platformUsageResponse(usage);
+  await recordPlatformUsage(userId, {
+    kind: "video",
+    keySource,
+    durationSeconds: enhanceSeconds,
+    protocol: "volcengine-enhance",
+    modelId: "ai-mediakit-enhance",
+    projectId,
+    shotId,
+  });
 
   // Mark as enhancing (reuse generating status)
   await db

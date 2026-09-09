@@ -3,7 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { bootstrap } from "@/lib/bootstrap";
 import { db } from "@/lib/db";
 import { episodes } from "@/lib/db/schema";
-import { getUserIdFromRequest } from "@/lib/get-user-id";
+import { requireProjectOwner } from "@/lib/api-guard";
 
 type Params = { params: Promise<{ id: string; episodeId: string }> };
 
@@ -14,8 +14,11 @@ type Params = { params: Promise<{ id: string; episodeId: string }> };
 export async function GET(req: NextRequest, { params }: Params) {
   await bootstrap();
   const { id: projectId, episodeId } = await params;
-  const userId = getUserIdFromRequest(req);
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // ⚠️ 原来只识别「有没有身份」，不校验这个项目是不是你的 —— 知道 projectId +
+  // episodeId 就能读走别人整条剪辑时间线。episodeId 与 projectId 的配对在下面的
+  // where 里已经有了，缺的是 project → user 这一跳。
+  const guard = await requireProjectOwner(req, projectId);
+  if (!guard.ok) return guard.response;
 
   const [ep] = await db
     .select({ editorState: episodes.editorState })
@@ -35,8 +38,9 @@ export async function GET(req: NextRequest, { params }: Params) {
 export async function PUT(req: NextRequest, { params }: Params) {
   await bootstrap();
   const { id: projectId, episodeId } = await params;
-  const userId = getUserIdFromRequest(req);
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // 写路径同理 —— 缺归属校验时任何人都能覆盖别人的时间线，且是不可逆的
+  const guard = await requireProjectOwner(req, projectId);
+  if (!guard.ok) return guard.response;
 
   const body = await req.json() as { tracks?: unknown; globalSubtitleStyle?: unknown };
   if (!body.tracks) return NextResponse.json({ error: "tracks required" }, { status: 400 });

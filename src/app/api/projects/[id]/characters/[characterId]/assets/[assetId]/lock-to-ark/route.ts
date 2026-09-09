@@ -2,7 +2,11 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { characterAssets, characters } from "@/lib/db/schema";
-import { getUserIdFromRequest } from "@/lib/get-user-id";
+import {
+  requireCharacterAssetInProject,
+  requireCharacterInProject,
+  requireProjectOwner,
+} from "@/lib/api-guard";
 import { resolveArkAssetLibraryClientCredentials } from "@/lib/ark-asset-library-credentials";
 import { registerCharacterPortraitToArk } from "@/lib/ai/ark-asset-library";
 import { uploadUrl } from "@/lib/utils/upload-url";
@@ -27,12 +31,20 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; characterId: string; assetId: string }> }
 ) {
-  const userId = getUserIdFromRequest(request);
-  if (!userId) {
-    return NextResponse.json({ error: "Missing user id" }, { status: 401 });
-  }
+  const { id: projectId, characterId, assetId } = await params;
 
-  const { characterId, assetId } = await params;
+  // ⚠️ 三级校验缺一不可。原来只识别了「有没有身份」：拿自己的 projectId 配上
+  // **别人的** characterId / assetId，就能把别人的角色图注册进自己的方舟素材库，
+  // 顺带把对方那条资产的 arkAssetStatus 改掉。
+  const guard = await requireProjectOwner(request, projectId);
+  if (!guard.ok) return guard.response;
+  const userId = guard.userId;
+
+  const charGuard = await requireCharacterInProject(characterId, projectId);
+  if (!charGuard.ok) return charGuard.response;
+
+  const assetGuard = await requireCharacterAssetInProject(assetId, projectId);
+  if (!assetGuard.ok) return assetGuard.response;
 
   const credentials = await resolveArkAssetLibraryClientCredentials(userId);
   if (!credentials) {
