@@ -9,7 +9,7 @@
 
 AI 驱动的漫剧工坊 — 从剧本到动画视频的全自动流水线。
 
-📺 **系统介绍 / Demo**：[Bilibili — AI漫剧工坊](https://b23.tv/3xzE8uz)
+📺 **系统介绍 / 使用教程**：[Bilibili — 龙智俊影AI漫剧工坊·使用教程](https://www.bilibili.com/video/BV1khY86uEzF/)
 
 > 基于 [AIComicBuilder](https://github.com/twwch/AIComicBuilder)（Apache-2.0）演进。上游致谢与版权说明见 [NOTICE](./NOTICE)。
 
@@ -269,7 +269,7 @@ src/
 
 ## Demo
 
-[Bilibili — AI漫剧工坊](https://b23.tv/3xzE8uz)
+[Bilibili — 龙智俊影AI漫剧工坊·使用教程](https://www.bilibili.com/video/BV1khY86uEzF/)
 
 ## 模型配置（重要）
 
