@@ -11,15 +11,16 @@
  */
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-guard";
-import { allowUserProviders, getPlatformKeyOwnerId, isAdminUser } from "@/lib/admin";
+import { allowUserProviders, getPlatformKeyOwnerId, isKeyOwner } from "@/lib/admin";
 import { getModelStorePrefs } from "@/lib/user-client-prefs";
 
 export async function GET(request: Request) {
   const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
-  // 管理员看到的永远是自己那份（他就是平台配置的作者），不需要托管
-  if (allowUserProviders() || (await isAdminUser(guard.userId))) {
+  // owner 看到的永远是自己那份（他就是平台配置的作者），不需要托管。
+  // 运营 admin 走托管分支 —— 他不该看到任何 Key，包括 provider 列表里的配置入口。
+  if (allowUserProviders() || (await isKeyOwner(guard.userId))) {
     return NextResponse.json({ managed: false, payload: null });
   }
 

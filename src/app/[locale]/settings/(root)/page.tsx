@@ -17,7 +17,7 @@ export default function SettingsPage() {
   const router = useRouter();
   // 平台托管模式下非管理员不再自己配 Key（约定 8p）。ready 之前不渲染这几块，
   // 避免「先闪出一整页配置表单再消失」。
-  const { managed, isAdmin, ready } = usePlatformMode();
+  const { managed, isStaff, ready } = usePlatformMode();
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -46,7 +46,7 @@ export default function SettingsPage() {
           {/* 账户与套餐 —— 未启用计费时组件自己返回 null，整块不渲染 */}
           <BillingSection />
 
-          {isAdmin && (
+          {isStaff && (
             <Link
               href="/admin"
               className="flex items-center gap-3 rounded-2xl border border-[--border-subtle] bg-white p-5 transition-all duration-200 hover:border-[--border-hover] hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
@@ -56,7 +56,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <div className="font-display text-sm font-semibold">管理后台</div>
-                <div className="text-xs text-[--text-muted]">邀请码、用户与平台 Key</div>
+                <div className="text-xs text-[--text-muted]">邀请码、用户与用量看板</div>
               </div>
             </Link>
           )}
@@ -91,7 +91,7 @@ export default function SettingsPage() {
                 模型配置
               </h3>
               <p className="text-sm text-[--text-muted]">
-                本站的生成模型由管理员统一配置，你不需要填写任何 API Key ——
+                本站的生成模型由平台统一配置，你不需要填写任何 API Key ——
                 在上方「默认模型」里选择要用哪一个即可。
               </p>
             </div>

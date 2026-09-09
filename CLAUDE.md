@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 63` — `0063_admin_invite_usage`
+**当前最新迁移索引**：`idx 64` — `0064_role_owner`
 
 ### 关键表
 
@@ -203,7 +203,7 @@ VideoProvider    // generateVideo
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`previewUrl`/`posterUrl`（480p 预览代理与封面，migration 0058）；`previzSelectedId`（已选用的白模预演，migration 0059）；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
 | `episodes.previz_scene` | 3D 导演台的**场景**（JSON）：一集搭好的景 + 出场演员身形，跨镜共用。只有数字，不内嵌素材路径 |
 | `shots.previz_blocking` / `previz_layout_url` | 本镜的走位与机位（JSON，参数化机位：主体/方位角/距离/高度/焦距）；以及导演台导出的构图参考图 |
-| `users` | 账号。`role`（`user`/`admin`，管理员的 `provider_secrets` 即平台 Key）、`status`（`active`/`disabled`，停用是撤销层的开关）、`tokenVersion`（自增即批量失效 cookie）|
+| `users` | 账号。`role`（`owner`/`admin`/`user`，见约定 8p 的三级权限；**owner** 的 `provider_secrets` 才是平台 Key）、`status`（`active`/`disabled`，停用是撤销层的开关）、`tokenVersion`（自增即批量失效 cookie，改密码时也会自增）|
 | `invite_codes` / `invite_code_uses` | 邀请码与「谁用了哪个码」。作废是软删除 —— 删掉记录就查不出这个码带进来过谁 |
 | `subscriptions` | 订阅（一用户一条）。周期滚动是**惰性**的：`ensureSubscriptionPeriod()` 在闸门与余额读取处调用，发现周期已过就当场滚动，不用 cron |
 | `orders` | 订单。状态机 `pending → paid / closed → refunded`；价格与积分在下单时快照，改价不影响历史；`UNIQUE(channel, channel_trade_no)` 是回调幂等的数据库兜底 |
@@ -972,8 +972,39 @@ URL 上贴 `x-oss-process` 会让签名失效，直接 403。
 反复出现的那类故障（「部署成功了跑的却是旧代码」「安全组放行了容器只绑回环」——
 都是两道闸里只开了一道却以为全开了）。冲突时打一条明确告警说清楚怎么改。
 
-**第一个管理员**：`ADMIN_USERNAMES`（逗号分隔）在 bootstrap 与每次登录时**幂等授予**；
-空库且未设该变量时，第一个注册的人自动是 admin。
+#### 三级权限：管理后台准入 ≠ 模型 Key 准入
+
+| 角色 | 管理后台（邀请码/用户/用量） | 模型 Key（查看·配置·BYOK 例外） |
+|---|---|---|
+| `owner` | ✅ | ✅ —— 平台 Key 挂在他名下 |
+| `admin` | ✅ | ❌ |
+| `user` | ❌ | ❌ |
+
+⚠️ **改造前 `isAdminUser` 一个函数同时回答了这两个问题**，于是「想让人帮忙拉人，
+就得把上游密钥一并交出去」。现在拆成两个，**任何新增的权限判断都必须先想清楚问的是哪一个**：
+
+- `isPlatformStaff()` —— 管理后台准入（owner + admin）
+- `isKeyOwner()` —— 模型 Key 准入（**仅 owner**）：`provider-secrets` 写入、
+  `models/list` 的内联 Key 例外、`platform/providers` 是否托管、`resolveOne` 的 `byokAllowed`
+
+`getPlatformKeyOwnerId()` 也**只认 owner** —— 运营 admin 名下没有密钥，
+选中他会让全站解析不到 Key，而报错只会是「未配置 Key」。
+
+只有 owner 能改角色（`admin/users/[userId]` 里 `roleOf(actor) === "owner"`）。
+否则运营 admin 可以把自己提成 owner —— **「不给你看 Key」这条限制就能被它约束的人自己解除**，
+整个分级失去意义。运营 admin 同样不能停用 owner。
+
+**普通用户不发邀请码**（刻意）：邀请码是准入闸，让普通用户发码会同时打穿准入和撤销 ——
+一个泄露的账号能自己发码建新号，而你停用它之后它此前发出的码仍然有效。
+将来做增长邀请时，`invite_codes.created_by` 已经存着，加开关即可。
+
+**第一个 owner**：`ADMIN_USERNAMES`（逗号分隔）在 bootstrap 与每次登录时**幂等授予 owner**；
+空库且未设该变量时，第一个注册的人自动是 owner。
+
+⚠️ `ADMIN_USERNAMES` 授予的是 **owner 而不是 admin** —— 这个变量在三级权限之前就存在，
+当时它给的是全权。改成只给运营权限会让线上唯一的管理员突然配不了 Key，
+而报错只会是「未配置 Key」，完全看不出是降权造成的。migration `0064` 同理把存量
+`role='admin'` 全部升为 `owner`。运营 admin 只能由 owner 在后台指派。
 为什么不只用后者：**它在已有库上永远不触发** —— 要让它生效就得写一条「把最早创建的
 用户设为 admin」的迁移，等于把策略判断固化进迁移，且可能授权给错误的账号。
 环境变量**只授予不撤销**（「改了个变量把自己踢出去且看不出为什么」最难排查），
@@ -1027,6 +1058,20 @@ ownerId 上，是**唯一允许读取平台 Key 的路径**；
 （脱敏，无 Key），`ModelStoreServerSync` **无条件覆盖**本地列表。
 「本地为空才合并」在这里是错的 —— 用户本地留着一份旧列表就不会更新，
 结果是管理员换了模型、用户还在用一个已不存在的 providerId，而报错只会是「未配置 Key」。
+
+#### 改密码 —— 必须让旧会话失效
+
+`POST /api/auth/change-password` 校验当前密码后自增 `token_version`，
+**其他设备上的登录全部失效**，只给发起这次改密的设备补发一张新 cookie。
+不失效的话，改密对已经泄漏出去的 cookie 毫无作用 —— 而「怀疑号被盗就改密码」
+正是用户唯一会想到的自救动作。
+
+⚠️ 两处顺序不能反：**先自增版本号、再补发 cookie**（反过来刚发的那张会当场失效）；
+**限速要在校验当前密码之前**（拿到 cookie 后这个接口就是猜密码入口，与登录同类），
+且与登录**共用同一套计数器** —— 换个入口爆破不该重置计数。
+
+命令行建号在 `scripts/create-user.ts`（`pnpm user:create <名> <密码> [角色]`）：
+注册关闭时也能开号，不必「临时把注册改开、建完再改回去」——那中间门是敞着的。
 
 #### 刹车必须看得见 —— `GET /api/admin/usage`
 
@@ -1574,6 +1619,7 @@ src/lib/evals/
 | 计费相关单测在加了 `users` 表查询之后集体炸 `Database.prepare` | 那些测试的内存库只建了计费五张表；而 `lib/admin.ts` 会问「这个用户是不是管理员 / 平台 Key 挂在谁名下」 | `__tests__/helpers/billing-schema.ts` 补 `users` 表与 `usage_records.key_source`。**凡是被生成/计费链路调用的新模块，都要检查共享测试 DDL 是否跟得上** |
 | `baseline-schema.test.ts` 会在**每次新增迁移**时误报 | 它断言 `已应用条数 === 基线覆盖条数`，等于假设 `throughTag` 永远是 journal 的最后一条。而设计本来就是「基线覆盖的标记为已应用、之后的增量执行」 | 改断言 `已应用条数 === journal.entries.length`。基线本身不需要每次重导 —— `pnpm baseline:dump` 只在基线明显过期时才跑 |
 | 三条路由「调了鉴权函数、返回值也用了」，却仍然是 IDOR | 它们把 `getUserIdFromRequest` 的结果拿去**查密钥**而不是**校验归属**（`enhance` / `editor-state` / `lock-to-ark`）。守卫测试的两条断言（标志词存在、返回值没被丢弃）**全都满足**，所以三条洞在绿灯下活了很久。平台 Key 上线后代价从「改别人数据」升级成「花平台的钱」 | 三条都补 `requireProjectOwner` + 对应的 `requireXxxInProject`；守卫测试新增第三条断言：`projects/[id]/**` 必须有归属证明（助手或 `projects.userId` 查询），只识别身份判红。**已反向验证该断言不是空跑**（临时摘掉 enhance 的守卫 → 精确报红，还原 → 绿）|
+| 一个 `isAdminUser` 同时管着「进后台」和「碰密钥」两件事 | 想找人帮忙运营（拉人、看用量），就必须把上游 API Key 的查看与配置权一并给出去 —— 这两件事的信任级别完全不同 | 拆成 `isPlatformStaff`（owner+admin）与 `isKeyOwner`（仅 owner）；`getPlatformKeyOwnerId` 只认 owner；只有 owner 能改角色（否则运营 admin 可自提为 owner，把加在自己身上的限制解除掉）。migration `0064` 把存量 admin 升为 owner —— **降权会让线上唯一管理员突然配不了 Key，而报错只会是「未配置 Key」** |
 | 本机跑 `docs:backup`/`db:backup` 偶发 OSS 上传超时（`ResponseTimeoutError`），看着像配置或密钥出了问题 | **这不是上一条「VPN 伪造连接成功」的同一现象，是它的反面**：上一条是连接被伪造成「成功」，这次是本地 VPN 状态不好时**真实的 HTTPS 请求**（握手能建立，但数据传输不畅）在应用层超时失败。实测同一份 0.33MB 的包连续失败 4 次，**什么都没改**、只是换个时间点重试，第一次就成功 | **先用控制端口对照测试判断本机网络当前是否可信**（连一个没放行的端口，`成功`说明不可信），若不可信就**直接重试那个失败的操作本身**（不是重试对照测试）——过去多次证实间隔几分钟重试 1–2 次即可，不需要改配置、怀疑密钥或改代码。**偶发的 OSS 上传超时先当网络问题重试，不要当成代码/密钥问题去排查**，真信号是「反复重试仍然失败」而不是「失败过一次」|
 | 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
@@ -1641,6 +1687,7 @@ pnpm dev
 - [ ] **空库能建起来**：加了迁移之后跑一次 `baseline-schema.test.ts`（约定 8l）
 - [ ] 新 API 路由接了 `api-guard`，或在 `route-auth-guard.test.ts` 白名单里登记了理由（约定 8b）
 - [ ] 管理端路由用 `requireAdmin`（约定 8p）
+- [ ] 新的权限判断想清楚问的是「进后台」还是「碰密钥」：`isPlatformStaff` vs `isKeyOwner`（约定 8p）
 - [ ] 新的花钱路径传了 `keySource`，并在调用上游前过 `checkPlatformUsage`（约定 8p）
 - [ ] 读平台 Key 只经 `readOwnedCredentials` —— 密钥与端点必须同源（约定 8p）
 - [ ] `projects/[id]/**` 的新路由证明了**归属**而不只是识别身份（约定 8b）

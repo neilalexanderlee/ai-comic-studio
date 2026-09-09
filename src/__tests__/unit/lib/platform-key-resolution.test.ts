@@ -54,7 +54,7 @@ const EVIL_URL = "https://attacker.example.com";
 const PLATFORM_KEY = "sk-PLATFORM-secret";
 const OWN_KEY = "sk-my-own";
 
-function seedUser(id: string, username: string, role: "admin" | "user", status = "active") {
+function seedUser(id: string, username: string, role: "owner" | "admin" | "user", status = "active") {
   holder.sqlite!
     .prepare(
       `INSERT INTO users (id, username, password_hash, token_version, role, status, created_at)
@@ -98,7 +98,7 @@ beforeEach(async () => {
 
 describe("平台 Key 兜底", () => {
   it("用户没配 Key → 用管理员那把，且地址也来自管理员", async () => {
-    seedUser(ADMIN, "admin", "admin");
+    seedUser(ADMIN, "admin", "owner");
     seedUser(USER, "someone", "user");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
@@ -110,7 +110,7 @@ describe("平台 Key 兜底", () => {
   });
 
   it("⚠️ 攻击面：用户用同一个 providerId 指向自己的服务器，也绝不能拿到平台 Key", async () => {
-    seedUser(ADMIN, "admin", "admin");
+    seedUser(ADMIN, "admin", "owner");
     seedUser(USER, "someone", "user");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
@@ -130,8 +130,8 @@ describe("平台 Key 兜底", () => {
     expect(r.sources.video).toBe("user");
   });
 
-  it("管理员被停用 → 不再作为平台 Key 归属人", async () => {
-    seedUser(ADMIN, "admin", "admin", "disabled");
+  it("owner 被停用 → 不再作为平台 Key 归属人", async () => {
+    seedUser(ADMIN, "admin", "owner", "disabled");
     seedUser(USER, "someone", "user");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
@@ -143,7 +143,7 @@ describe("平台 Key 兜底", () => {
 
 describe("BYOK 优先", () => {
   it("用户自己配了 Key → 用自己的，keySource=user", async () => {
-    seedUser(ADMIN, "admin", "admin");
+    seedUser(ADMIN, "admin", "owner");
     seedUser(USER, "someone", "user");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
@@ -158,7 +158,7 @@ describe("BYOK 优先", () => {
 
   it("ALLOW_USER_PROVIDERS=0 时非管理员跳过自己的 Key，统一走平台", async () => {
     vi.stubEnv("ALLOW_USER_PROVIDERS", "0");
-    seedUser(ADMIN, "admin", "admin");
+    seedUser(ADMIN, "admin", "owner");
     seedUser(USER, "someone", "user");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
@@ -171,14 +171,32 @@ describe("BYOK 优先", () => {
     expect(r.sources.video).toBe("platform");
   });
 
-  it("ALLOW_USER_PROVIDERS=0 下管理员仍用自己的（他就是平台配置的作者）", async () => {
+  it("ALLOW_USER_PROVIDERS=0 下 owner 仍用自己的（他就是平台配置的作者）", async () => {
     vi.stubEnv("ALLOW_USER_PROVIDERS", "0");
-    seedUser(ADMIN, "admin", "admin");
+    seedUser(ADMIN, "admin", "owner");
     seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
     seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
 
     const r = await resolve(ADMIN);
     expect(r.config?.video?.apiKey).toBe(PLATFORM_KEY);
     expect(r.sources.video).toBe("user");
+  });
+});
+
+describe("运营 admin 在密钥这件事上和普通用户没有区别", () => {
+  it("⚠️ 平台模式下运营 admin 也走平台 Key，不能用自己配的那份", async () => {
+    vi.stubEnv("ALLOW_USER_PROVIDERS", "0");
+    seedUser(ADMIN, "neil", "owner");
+    seedUser("u_ops", "ops", "admin");
+    seedSecret(ADMIN, PROVIDER, PLATFORM_KEY);
+    seedPrefs(ADMIN, PROVIDER, PLATFORM_URL);
+    // 运营 admin 手上即便有历史残留的密钥与地址，也一律不采用
+    seedSecret("u_ops", PROVIDER, OWN_KEY);
+    seedPrefs("u_ops", PROVIDER, EVIL_URL);
+
+    const r = await resolve("u_ops");
+    expect(r.config?.video?.apiKey).toBe(PLATFORM_KEY);
+    expect(r.config?.video?.baseUrl).toBe(PLATFORM_URL);
+    expect(r.sources.video).toBe("platform");
   });
 });

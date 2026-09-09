@@ -61,7 +61,7 @@ describe("ADMIN_USERNAMES", () => {
     await ensureBootstrapAdmins();
     await ensureBootstrapAdmins(); // 再来一次不应出错也不应变化
 
-    expect(roleOf("u1")).toBe("admin");
+    expect(roleOf("u1")).toBe("owner");
     expect(roleOf("u2")).toBe("user");
   });
 
@@ -71,16 +71,16 @@ describe("ADMIN_USERNAMES", () => {
     vi.stubEnv("ADMIN_USERNAMES", " neil , alice ");
     const { ensureBootstrapAdmins } = await import("@/lib/admin");
     await ensureBootstrapAdmins();
-    expect(roleOf("u1")).toBe("admin");
-    expect(roleOf("u2")).toBe("admin");
+    expect(roleOf("u1")).toBe("owner");
+    expect(roleOf("u2")).toBe("owner");
   });
 
-  it("只授予不撤销：把名字从列表里删掉，已有的管理员不会被降级", async () => {
-    seed("u1", "neil", "admin");
+  it("只授予不撤销：把名字从列表里删掉，已有的 owner 不会被降级", async () => {
+    seed("u1", "neil", "owner");
     vi.stubEnv("ADMIN_USERNAMES", "alice");
     const { ensureBootstrapAdmins } = await import("@/lib/admin");
     await ensureBootstrapAdmins();
-    expect(roleOf("u1")).toBe("admin");
+    expect(roleOf("u1")).toBe("owner");
   });
 
   it("未设置时什么都不做", async () => {
@@ -92,9 +92,9 @@ describe("ADMIN_USERNAMES", () => {
 });
 
 describe("空库首用户", () => {
-  it("库里零用户且未设 ADMIN_USERNAMES → 新用户是 admin（自部署装机即用）", async () => {
+  it("库里零用户且未设 ADMIN_USERNAMES → 新用户是 owner（自部署装机即用）", async () => {
     const { roleForNewUser } = await import("@/lib/admin");
-    expect(await roleForNewUser()).toBe("admin");
+    expect(await roleForNewUser()).toBe("owner");
   });
 
   it("库里已有用户 → 新用户是普通用户", async () => {
@@ -110,6 +110,49 @@ describe("空库首用户", () => {
   });
 });
 
+describe("三级权限：管理后台准入 ≠ 模型 Key 准入", () => {
+  it("owner 两样都能", async () => {
+    seed("u1", "neil", "owner");
+    const { isPlatformStaff, isKeyOwner } = await import("@/lib/admin");
+    expect(await isPlatformStaff("u1")).toBe(true);
+    expect(await isKeyOwner("u1")).toBe(true);
+  });
+
+  it("⚠️ 运营 admin 能进管理后台，但**碰不到模型 Key** —— 这是整个分级的核心", async () => {
+    seed("u2", "ops", "admin");
+    const { isPlatformStaff, isKeyOwner } = await import("@/lib/admin");
+    expect(await isPlatformStaff("u2")).toBe(true);
+    expect(await isKeyOwner("u2")).toBe(false);
+  });
+
+  it("普通用户两样都不能", async () => {
+    seed("u3", "bob", "user");
+    const { isPlatformStaff, isKeyOwner } = await import("@/lib/admin");
+    expect(await isPlatformStaff("u3")).toBe(false);
+    expect(await isKeyOwner("u3")).toBe(false);
+  });
+
+  it("匿名指纹用户（users 表里没有行）按 user 处理", async () => {
+    const { isPlatformStaff, isKeyOwner, roleOf } = await import("@/lib/admin");
+    expect(await isPlatformStaff("anon")).toBe(false);
+    expect(await isKeyOwner("anon")).toBe(false);
+    expect(await roleOf("anon")).toBe("user");
+  });
+
+  it("平台 Key 归属人只能是 owner —— 选中运营 admin 会让全站解析不到 Key", async () => {
+    seed("u_ops", "ops", "admin", 100);
+    seed("u_owner", "neil", "owner", 200);
+    const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+    expect(await getPlatformKeyOwnerId()).toBe("u_owner");
+  });
+
+  it("只有运营 admin、没有 owner 时，平台 Key 归属人为空（而不是错选 admin）", async () => {
+    seed("u_ops", "ops", "admin");
+    const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+    expect(await getPlatformKeyOwnerId()).toBeNull();
+  });
+});
+
 describe("邀请制的引导死锁", () => {
   it("空库时 hasAnyUser 为 false —— 注册路由据此豁免邀请码", async () => {
     const { hasAnyUser } = await import("@/lib/admin");
@@ -122,17 +165,17 @@ describe("邀请制的引导死锁", () => {
     expect(await hasAnyUser()).toBe(true);
   });
 
-  it("第一个账号仍然是管理员 —— 豁免掉的只是邀请码，不是角色规则", async () => {
+  it("第一个账号仍然是 owner —— 豁免掉的只是邀请码，不是角色规则", async () => {
     const { roleForNewUser, hasAnyUser } = await import("@/lib/admin");
     expect(await hasAnyUser()).toBe(false);
-    expect(await roleForNewUser()).toBe("admin");
+    expect(await roleForNewUser()).toBe("owner");
   });
 });
 
 describe("平台 Key 归属人", () => {
   it("默认取**最早创建**的管理员，结果稳定不飘移", async () => {
-    seed("u_late", "late", "admin", 200);
-    seed("u_early", "early", "admin", 100);
+    seed("u_late", "late", "owner", 200);
+    seed("u_early", "early", "owner", 100);
     const { getPlatformKeyOwnerId, __resetAdminCachesForTests } = await import("@/lib/admin");
     expect(await getPlatformKeyOwnerId()).toBe("u_early");
     __resetAdminCachesForTests();
@@ -140,21 +183,21 @@ describe("平台 Key 归属人", () => {
   });
 
   it("PLATFORM_KEY_USERNAME 可以指定", async () => {
-    seed("u_early", "early", "admin", 100);
-    seed("u_late", "late", "admin", 200);
+    seed("u_early", "early", "owner", 100);
+    seed("u_late", "late", "owner", 200);
     vi.stubEnv("PLATFORM_KEY_USERNAME", "late");
     const { getPlatformKeyOwnerId } = await import("@/lib/admin");
     expect(await getPlatformKeyOwnerId()).toBe("u_late");
   });
 
   it("停用的管理员不作数", async () => {
-    seed("u_early", "early", "admin", 100, "disabled");
-    seed("u_late", "late", "admin", 200);
+    seed("u_early", "early", "owner", 100, "disabled");
+    seed("u_late", "late", "owner", 200);
     const { getPlatformKeyOwnerId } = await import("@/lib/admin");
     expect(await getPlatformKeyOwnerId()).toBe("u_late");
   });
 
-  it("一个管理员都没有 → null（调用方据此拒绝注入密钥）", async () => {
+  it("一个 owner 都没有 → null（调用方据此拒绝注入密钥）", async () => {
     seed("u1", "neil");
     const { getPlatformKeyOwnerId } = await import("@/lib/admin");
     expect(await getPlatformKeyOwnerId()).toBeNull();
@@ -171,9 +214,9 @@ describe("停用状态", () => {
   });
 
   it("users 表里没有这一行（匿名指纹用户）不算被停用 —— 单机匿名使用必须继续可用", async () => {
-    const { isUserDisabled, isAdminUser } = await import("@/lib/admin");
+    const { isUserDisabled, isPlatformStaff } = await import("@/lib/admin");
     expect(await isUserDisabled("anon-fingerprint")).toBe(false);
-    expect(await isAdminUser("anon-fingerprint")).toBe(false);
+    expect(await isPlatformStaff("anon-fingerprint")).toBe(false);
   });
 });
 

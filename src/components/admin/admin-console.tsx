@@ -64,6 +64,7 @@ export function AdminConsole() {
   const [mode, setMode] = useState<string>("");
   const [ownerId, setOwnerId] = useState<string | null>(null);
   const [meId, setMeId] = useState<string | null>(null);
+  const [myRole, setMyRole] = useState<string>("user");
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -83,6 +84,7 @@ export function AdminConsole() {
         users?: AdminUser[];
         platformKeyOwnerId?: string | null;
         currentUserId?: string;
+        currentUserRole?: string;
       };
       setUsage((await usageRes.json()) as UsageSummary);
       setCodes(codesData.codes ?? []);
@@ -90,6 +92,7 @@ export function AdminConsole() {
       setUsers(usersData.users ?? []);
       setOwnerId(usersData.platformKeyOwnerId ?? null);
       setMeId(usersData.currentUserId ?? null);
+      setMyRole(usersData.currentUserRole ?? "user");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "加载失败");
     } finally {
@@ -151,6 +154,9 @@ export function AdminConsole() {
     }
   }
 
+  /** 只有 owner 能调整角色（服务端 PATCH 那边才是真正的准入，这里只管显示） */
+  const canManageRoles = myRole === "owner";
+
   function statusOf(c: InviteCode): { text: string; tone: string } {
     if (c.revokedAt) return { text: "已作废", tone: "text-[--text-muted] line-through" };
     if (c.expiresAt && new Date(c.expiresAt).getTime() <= Date.now())
@@ -184,13 +190,13 @@ export function AdminConsole() {
             </div>
           ) : (
             <>
-              {/* 平台 Key 开销 —— 计费没开时，这是唯一能看出钱花在哪的地方 */}
+              {/* 模型开销 —— 计费没开时，这是唯一能看出钱花在哪的地方 */}
               {usage && (
                 <div className="space-y-3 rounded-2xl border border-[--border-subtle] bg-white p-5">
                   <div className="flex items-center justify-between">
                     <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
                       <Activity className="h-3.5 w-3.5" />
-                      平台 Key 用量 · 最近 {usage.windowHours} 小时
+                      模型用量 · 最近 {usage.windowHours} 小时
                     </h3>
                     <span className="text-xs text-[--text-muted]">
                       在飞{" "}
@@ -245,8 +251,8 @@ export function AdminConsole() {
                   )}
 
                   <p className="text-[11px] text-[--text-muted]">
-                    金额按生成时的报价函数反推，是<strong>估算</strong>，上游真实账单以厂商控制台为准。
-                    自带 Key（BYOK）的生成不计入这里 —— 那不花平台的钱。
+                    金额按生成时的报价函数反推，是<strong>估算</strong>，真实账单以模型厂商控制台为准。
+                    自带密钥的生成不计入这里 —— 那不花平台的钱。
                   </p>
                 </div>
               )}
@@ -346,9 +352,14 @@ export function AdminConsole() {
                         <span className={`text-sm ${disabled ? "text-[--text-muted] line-through" : ""}`}>
                           {u.username}
                         </span>
+                        {u.role === "owner" && (
+                          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">
+                            owner · 可配置模型密钥
+                          </span>
+                        )}
                         {u.role === "admin" && (
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
-                            管理员
+                            运营管理员
                           </span>
                         )}
                         {isOwner && (
@@ -362,7 +373,9 @@ export function AdminConsole() {
                           </span>
                         )}
                         <div className="ml-auto flex gap-2">
-                          {!isSelf && !isOwner && (
+                          {/* 只有 owner 能改角色 —— 否则运营管理员可以把自己提成 owner，
+                              「不给你看 Key」这条限制就能被它约束的人自己解除 */}
+                          {canManageRoles && !isSelf && !isOwner && u.role !== "owner" && (
                             <Button
                               size="sm"
                               variant="outline"
@@ -370,10 +383,10 @@ export function AdminConsole() {
                                 patchUser(u.id, { role: u.role === "admin" ? "user" : "admin" })
                               }
                             >
-                              {u.role === "admin" ? "取消管理员" : "设为管理员"}
+                              {u.role === "admin" ? "取消运营权限" : "设为运营管理员"}
                             </Button>
                           )}
-                          {!isSelf && !isOwner && (
+                          {!isSelf && !isOwner && !(u.role === "owner" && !canManageRoles) && (
                             <Button
                               size="sm"
                               variant={disabled ? "outline" : "destructive"}

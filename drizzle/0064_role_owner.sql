@@ -1,0 +1,11 @@
+-- 三级权限：owner / admin / user。
+--
+-- 在此之前 role 只有 admin | user，而 admin 是全权的（含配置模型 Key）。
+-- 现在把「能进管理后台」和「能碰模型 Key」拆成两件事：
+--   owner —— 全部权限，含查看/配置模型 Key；平台 Key 挂在他名下
+--   admin —— 运营：邀请码、用户停用、用量看板；**看不到也配不了任何 Key**
+--   user  —— 只能用
+--
+-- 存量 admin 一律升为 owner：改造前他们本来就是全权的，
+-- 降权会让线上唯一的管理员突然配不了 Key（而报错只会是「未配置 Key」）。
+UPDATE users SET role = 'owner' WHERE role = 'admin';

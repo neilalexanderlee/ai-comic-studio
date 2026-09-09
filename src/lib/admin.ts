@@ -6,11 +6,24 @@ import { users } from "@/lib/db/schema";
 /**
  * 管理员概念 —— 平台统一 Key 模式的地基。
  *
- * ## 管理员是什么
+ ## 三级权限
  *
- * 管理员的 `provider_secrets` 就是**平台 Key**：普通用户没自己配 Key 时，
+ * | 角色 | 管理后台（邀请码/用户/用量） | 模型 Key（查看·配置） | 说明 |
+ * |---|---|---|---|
+ * | `owner` | ✅ | ✅ | 平台 Key 挂在他名下 |
+ * | `admin` | ✅ | ❌ | 运营：拉人、看用量、停用账号 |
+ * | `user`  | ❌ | ❌ | 只能用 |
+ *
+ * **拆开的理由**：改造前 `isAdminUser` 一个函数同时回答了两个不同的问题 ——
+ * 「能不能进管理后台」和「能不能碰模型 Key」。合在一起意味着「想让人帮忙拉人，
+ * 就得把上游密钥一并交出去」，这正是最不该捆绑的两件事。
+ *
+ * 所以现在是两个函数，**任何新增的权限判断都必须先想清楚问的是哪一个**：
+ *   · `isPlatformStaff()` —— 管理后台准入（owner + admin）
+ *   · `isKeyOwner()`      —— 模型 Key 准入（仅 owner）
+ *
+ * owner 的 `provider_secrets` 就是**平台 Key**：普通用户没自己配 Key 时，
  * 生成链路 fallback 到这一份（见 `provider-secrets.ts` 的 `resolveOne`）。
- * 这解决了「用户既要买积分又要自带 Key」这个矛盾。
  *
  * ## 第一个管理员怎么产生
  *
@@ -18,8 +31,13 @@ import { users } from "@/lib/db/schema";
  *
  * | 场景 | 规则 |
  * |---|---|
- * | **已有库**（线上/本地都已经有用户） | `ADMIN_USERNAMES=neil,alice` 幂等授予 |
- * | **全新空库**（自部署用户） | 未设该变量且库里零用户时，第一个注册的人自动是 admin |
+ * | **已有库**（线上/本地都已经有用户） | `ADMIN_USERNAMES=neil,alice` 幂等授予 **owner** |
+ * | **全新空库**（自部署用户） | 未设该变量且库里零用户时，第一个注册的人自动是 **owner** |
+ *
+ * ⚠️ `ADMIN_USERNAMES` 授予的是 **owner** 而不是 admin —— 这个变量在三级权限之前
+ * 就存在，当时它给的是全权。改成只给运营权限会让线上唯一的管理员突然配不了 Key，
+ * 而报错只会是「未配置 Key」，完全看不出是降权造成的。
+ * 运营 admin 由 owner 在管理后台里指派，不走环境变量。
  *
  * 为什么不只用「全库第一个用户自动 admin」：**它在已有库上永远不会触发**。
  * 要让它生效就得写一条「把最早创建的用户设为 admin」的迁移 —— 把策略判断
@@ -29,6 +47,8 @@ import { users } from "@/lib/db/schema";
  * 「改了个变量把自己踢出去且看不出为什么」。撤销走管理端显式操作。
  * 它同时也是逃生通道：丢了管理员权限时改一行环境变量重启就能拿回来。
  */
+
+export type Role = "owner" | "admin" | "user";
 
 /** `ADMIN_USERNAMES`（逗号分隔）。未设置时为空数组 —— 自部署走空库首用户那条规则。 */
 export function getAdminUsernames(): string[] {
@@ -53,13 +73,13 @@ export async function ensureBootstrapAdmins(): Promise<void> {
     .from(users)
     .where(inArray(users.username, names));
 
-  const toPromote = rows.filter((r) => r.role !== "admin").map((r) => r.id);
+  const toPromote = rows.filter((r) => r.role !== "owner").map((r) => r.id);
   if (toPromote.length === 0) return;
 
-  await db.update(users).set({ role: "admin" }).where(inArray(users.id, toPromote));
+  await db.update(users).set({ role: "owner" }).where(inArray(users.id, toPromote));
   invalidateAdminCaches();
   console.log(
-    `[admin] 已按 ADMIN_USERNAMES 授予管理员：${rows
+    `[admin] 已按 ADMIN_USERNAMES 授予 owner：${rows
       .filter((r) => toPromote.includes(r.id))
       .map((r) => r.username)
       .join(", ")}`
@@ -88,9 +108,9 @@ export async function hasAnyUser(): Promise<boolean> {
  * 只有「库里一个用户都没有」且「没设 ADMIN_USERNAMES」时才自动给 admin ——
  * 也就是自部署用户第一次打开的那一刻。已有库永远走不到这条。
  */
-export async function roleForNewUser(): Promise<"admin" | "user"> {
+export async function roleForNewUser(): Promise<Role> {
   if (getAdminUsernames().length > 0) return "user";
-  return (await hasAnyUser()) ? "user" : "admin";
+  return (await hasAnyUser()) ? "user" : "owner";
 }
 
 // ─── 角色 / 停用状态查询（带短 TTL 缓存） ─────────────────────────────────────
@@ -145,8 +165,30 @@ async function readFlags(userId: string): Promise<UserFlags | null> {
   return flags;
 }
 
-export async function isAdminUser(userId: string): Promise<boolean> {
-  return (await readFlags(userId))?.role === "admin";
+/**
+ * 能不能进**管理后台**（邀请码 / 用户 / 用量看板）。owner 与 admin 都可以。
+ *
+ * ⚠️ 这**不**代表能碰模型 Key —— 那要问 `isKeyOwner`。
+ */
+export async function isPlatformStaff(userId: string): Promise<boolean> {
+  const role = (await readFlags(userId))?.role;
+  return role === "owner" || role === "admin";
+}
+
+/**
+ * 能不能**查看和配置模型 Key**，以及在平台模式下继续用自己的 Key（BYOK 例外）。
+ * **只有 owner。**
+ *
+ * 运营 admin 走到这里一律 false：让他帮忙拉人、看用量，不等于把上游密钥交给他。
+ */
+export async function isKeyOwner(userId: string): Promise<boolean> {
+  return (await readFlags(userId))?.role === "owner";
+}
+
+/** 当前角色，取不到（匿名指纹用户）时按 user 处理 */
+export async function roleOf(userId: string): Promise<Role> {
+  const role = (await readFlags(userId))?.role;
+  return role === "owner" || role === "admin" ? role : "user";
 }
 
 export async function isUserDisabled(userId: string): Promise<boolean> {
@@ -164,7 +206,8 @@ let platformOwnerCache: { at: number; userId: string | null } | null = null;
  * 端点和密钥必须来自同一个人（见 `provider-secrets.ts` 里的安全不变量），
  * 归属人在请求之间飘移会让同一个 providerId 时而解析得到、时而解析不到。
  *
- * 规则：`PLATFORM_KEY_USERNAME` 指定 > 最早创建的、未停用的管理员。
+ * 规则：`PLATFORM_KEY_USERNAME` 指定 > 最早创建的、未停用的 **owner**。
+ * 运营 admin 名下没有密钥，选中他会让全站解析不到 Key，所以这里只认 owner。
  */
 export async function getPlatformKeyOwnerId(): Promise<string | null> {
   if (platformOwnerCache && Date.now() - platformOwnerCache.at < CACHE_TTL_MS) {
@@ -185,7 +228,7 @@ export async function getPlatformKeyOwnerId(): Promise<string | null> {
     const [row] = await db
       .select({ id: users.id })
       .from(users)
-      .where(and(eq(users.role, "admin"), ne(users.status, "disabled")))
+      .where(and(eq(users.role, "owner"), ne(users.status, "disabled")))
       .orderBy(asc(users.createdAt))
       .limit(1);
     userId = row?.id ?? null;

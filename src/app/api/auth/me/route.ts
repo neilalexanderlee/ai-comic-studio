@@ -1,6 +1,6 @@
 /**
  * GET /api/auth/me — 返回当前登录用户信息
- * Response: { loggedIn: true, userId, username, role, disabled } | { loggedIn: false }
+ * Response: { loggedIn: true, userId, username, role, isStaff, isKeyOwner } | { loggedIn: false }
  */
 import { NextRequest, NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
@@ -48,6 +48,9 @@ export async function GET(req: NextRequest) {
     userId: user.id,
     username: user.username,
     role: user.role,
-    isAdmin: user.role === "admin",
+    /** 能进管理后台（owner 或运营 admin） */
+    isStaff: user.role === "owner" || user.role === "admin",
+    /** 能查看/配置模型 Key（仅 owner） */
+    isKeyOwner: user.role === "owner",
   });
 }

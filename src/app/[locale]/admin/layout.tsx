@@ -2,7 +2,7 @@ import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { AUTH_COOKIE, parseCookieValue } from "@/lib/auth";
 import { requirePageAuth } from "@/lib/auth-page-guard";
-import { isAdminUser } from "@/lib/admin";
+import { isPlatformStaff } from "@/lib/admin";
 
 /**
  * `/admin` 的准入。两道：先登录闸（复用 `requirePageAuth`），再管理员校验。
@@ -26,7 +26,7 @@ export default async function AdminLayout({
 
   const raw = (await cookies()).get(AUTH_COOKIE)?.value;
   const userId = raw ? parseCookieValue(raw) : null;
-  if (!userId || !(await isAdminUser(userId))) notFound();
+  if (!userId || !(await isPlatformStaff(userId))) notFound();
 
   return <>{children}</>;
 }

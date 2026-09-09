@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/api-guard";
-import { allowUserProviders, isAdminUser } from "@/lib/admin";
+import { allowUserProviders, isKeyOwner } from "@/lib/admin";
 import { upsertProviderSecret } from "@/lib/provider-secrets";
 
 export async function POST(request: Request) {
@@ -8,11 +8,12 @@ export async function POST(request: Request) {
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 
-  // 平台模式（ALLOW_USER_PROVIDERS=0）下非管理员不再自己配 Key，统一用平台 Key。
+  // 平台模式（ALLOW_USER_PROVIDERS=0）下只有 owner 能写密钥。
+  // 运营 admin 也挡在外面 —— 让他帮忙拉人不等于把上游密钥交给他。
   // 默认开，自部署 BYOK 行为一行不变。
-  if (!allowUserProviders() && !(await isAdminUser(userId))) {
+  if (!allowUserProviders() && !(await isKeyOwner(userId))) {
     return NextResponse.json(
-      { error: "本站由管理员统一配置模型，无需填写 API Key" },
+      { error: "本站的模型由平台统一配置，你的账号没有配置密钥的权限" },
       { status: 403 }
     );
   }

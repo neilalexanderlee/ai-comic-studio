@@ -9,7 +9,7 @@ import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { getModelStorePrefs } from "@/lib/user-client-prefs";
 import { assertUsableEndpoint } from "@/lib/provider-endpoint";
 import { isBillingEnabled } from "@/lib/billing/gate";
-import { allowUserProviders, getPlatformKeyOwnerId, isAdminUser } from "@/lib/admin";
+import { allowUserProviders, getPlatformKeyOwnerId, isKeyOwner } from "@/lib/admin";
 
 type ProviderConfigWithId = ProviderConfig & {
   providerId?: string;
@@ -141,7 +141,7 @@ async function resolveOne(
   // ① 用户自己的 Key 优先（BYOK）。
   //    托管模式（ALLOW_USER_PROVIDERS=0）下非管理员跳过这一步：那边统一用平台 Key，
   //    读到一条历史残留的用户密钥会让「我明明没配 Key 却在用别的地址」难以解释。
-  const byokAllowed = allowUserProviders() || (await isAdminUser(userId));
+  const byokAllowed = allowUserProviders() || (await isKeyOwner(userId));
   if (byokAllowed) {
     const own = await readOwnedCredentials(userId, providerId);
     if (own) {
@@ -228,7 +228,7 @@ export async function resolveProviderCredentials(
   await ensureProviderSecretsTable();
   if (!providerId) return { ok: false };
 
-  const byokAllowed = allowUserProviders() || (await isAdminUser(userId));
+  const byokAllowed = allowUserProviders() || (await isKeyOwner(userId));
   if (byokAllowed) {
     const own = await readOwnedCredentials(userId, providerId);
     if (own) {

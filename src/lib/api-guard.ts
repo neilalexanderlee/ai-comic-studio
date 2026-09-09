@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { characterAssets, characters, projects, shots, tasks } from "@/lib/db/schema";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { isAdminUser, isUserDisabled } from "@/lib/admin";
+import { isPlatformStaff, isUserDisabled } from "@/lib/admin";
 
 /**
  * API 路由的统一租户校验。
@@ -154,16 +154,17 @@ export async function requireTaskOwner(request: Request, taskId: string): Promis
 }
 
 /**
- * 要求当前请求者是管理员。
+ * 要求当前请求者能进管理后台（owner 或运营 admin）。
  *
- * 管理端接口（邀请码、用户停用、平台 Key）全部经这里。
+ * 管理端接口（邀请码、用户停用、用量看板）全部经这里。
+ * ⚠️ **这不代表能碰模型 Key** —— 那一类要另外过 `isKeyOwner`（见 lib/admin.ts）。
  * **非管理员一律 403 而不是 404**：这里不涉及「某个资源 id 是否存在」，
  * 没有可枚举的信息；说清楚「你不是管理员」才是对的（与套餐限制同理，见约定 8i）。
  */
 export async function requireAdmin(request: Request): Promise<Guard> {
   const id = await identify(request);
   if (!id.ok) return id;
-  if (!(await isAdminUser(id.userId))) {
+  if (!(await isPlatformStaff(id.userId))) {
     return deny(403, "需要管理员权限");
   }
   return id;

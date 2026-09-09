@@ -32,7 +32,8 @@
     "proxies:backfill": "tsx scripts/backfill-preview-proxies.ts",
     "local:prune": "tsx scripts/prune-local-after-migration.ts",
     "editor-state:repair": "tsx scripts/repair-editor-state-refs.ts",
-    "files:prune": "tsx scripts/prune-orphan-files.ts"
+    "files:prune": "tsx scripts/prune-orphan-files.ts",
+    "user:create": "tsx --conditions=react-server scripts/create-user.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.43",

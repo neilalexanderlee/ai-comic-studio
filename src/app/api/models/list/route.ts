@@ -5,7 +5,7 @@ import {
 } from "@/lib/ai/model-capabilities";
 import { requireUser } from "@/lib/api-guard";
 import { ensureArkApiV3BaseUrl } from "@/lib/ai/ark-base-url";
-import { allowUserProviders, isAdminUser } from "@/lib/admin";
+import { allowUserProviders, isKeyOwner } from "@/lib/admin";
 import { resolveProviderCredentials } from "@/lib/provider-secrets";
 import { assertUsableEndpoint, UntrustedEndpointError } from "@/lib/provider-endpoint";
 import { isBillingEnabled } from "@/lib/billing/gate";
@@ -35,7 +35,7 @@ async function resolveListCredentials(
   userId: string,
   body: ListRequest
 ): Promise<{ protocol: string; baseUrl: string; apiKey: string } | null> {
-  const mayUseInlineKey = allowUserProviders() || (await isAdminUser(userId));
+  const mayUseInlineKey = allowUserProviders() || (await isKeyOwner(userId));
   if (mayUseInlineKey && body.apiKey && body.baseUrl) {
     // 内联 Key 也要过一次端点校验：这是本进程唯一会向调用方指定地址发请求的地方
     assertUsableEndpoint(body.baseUrl, { allowPrivate: !isBillingEnabled() });

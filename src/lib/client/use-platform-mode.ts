@@ -6,9 +6,10 @@ import { apiFetch } from "@/lib/api-fetch";
 export interface PlatformMode {
   /** 加载完成前为 null —— 用它避免「先渲染出配置 UI 再闪掉」 */
   ready: boolean;
-  /** 平台托管模式：模型由管理员统一配置，本人不该再填 Key */
+  /** 平台托管模式：模型由平台统一配置，本人不该再填 Key */
   managed: boolean;
-  isAdmin: boolean;
+  /** 能进管理后台（owner 或运营 admin）—— 决定是否显示入口 */
+  isStaff: boolean;
 }
 
 /**
@@ -23,7 +24,7 @@ export interface PlatformMode {
 export function usePlatformMode(): PlatformMode {
   const [state, setState] = useState<Omit<PlatformMode, "ready">>({
     managed: false,
-    isAdmin: false,
+    isStaff: false,
   });
   const [ready, setReady] = useState(false);
 
@@ -35,10 +36,10 @@ export function usePlatformMode(): PlatformMode {
           apiFetch("/api/auth/me"),
           apiFetch("/api/platform/providers"),
         ]);
-        const me = (await meRes.json()) as { isAdmin?: boolean };
+        const me = (await meRes.json()) as { isStaff?: boolean };
         const platform = (await platformRes.json()) as { managed?: boolean };
         if (cancelled) return;
-        setState({ managed: !!platform?.managed, isAdmin: !!me?.isAdmin });
+        setState({ managed: !!platform?.managed, isStaff: !!me?.isStaff });
       } catch {
         // 取不到就按最宽松的「自部署 BYOK」渲染 —— 与改造前一致
       } finally {

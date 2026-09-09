@@ -8,7 +8,7 @@ import { desc } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { requireAdmin } from "@/lib/api-guard";
-import { getPlatformKeyOwnerId } from "@/lib/admin";
+import { getPlatformKeyOwnerId, roleOf } from "@/lib/admin";
 
 export async function GET(request: Request) {
   const guard = await requireAdmin(request);
@@ -30,5 +30,7 @@ export async function GET(request: Request) {
     /** 平台 Key 挂在谁名下 —— 界面上要标出来，避免误停用那个账号 */
     platformKeyOwnerId: await getPlatformKeyOwnerId(),
     currentUserId: guard.userId,
+    /** 当前操作者的角色 —— 前端据此决定显示哪些按钮（真正的准入在 PATCH 那边） */
+    currentUserRole: await roleOf(guard.userId),
   });
 }
