@@ -11,3 +11,6 @@ docs
 .env
 .env.*
 !.env.example
+
+# Local recordings and QA outputs are not application runtime assets.
+/output

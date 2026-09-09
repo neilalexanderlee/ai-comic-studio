@@ -25,6 +25,9 @@ import { uploadUrl } from "@/lib/utils/upload-url";
 import { fetchMedia } from "./utils/mediaCache";
 import { apiFetch } from "@/lib/api-fetch";
 
+import { NativeMediaPreview } from "./NativeMediaPreview";
+import { supportsWebAv } from "./utils/nativePlayback";
+
 const TRIM_MARGIN = 0.1; // 安全边界（秒），避免 split 边界报错
 
 // ─── 转场信息 ─────────────────────────────────────────────────────────────────
@@ -44,6 +47,8 @@ interface VideoPreviewProps {
 }
 
 export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
+  const [nativePreview, setNativePreview] = useState<boolean | null>(null);
+  useEffect(() => { setNativePreview(!supportsWebAv(window, navigator.storage)); }, []);
   const containerRef = useRef<HTMLDivElement>(null);
   const avCanvasRef = useRef<AVCanvas | null>(null);
 
@@ -131,7 +136,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   // ── 初始化 AVCanvas ──────────────────────────────────────────────────────────
   useEffect(() => {
     const el = containerRef.current;
-    if (!el) return;
+    if (!el || nativePreview !== false) return;
 
     const avCanvas = new AVCanvas(el, {
       bgColor: "#000000",
@@ -139,6 +144,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       height: canvasHeight,
     });
     avCanvasRef.current = avCanvas;
+    syncPromiseRef.current = syncSprites();
 
     const unsubTime = avCanvas.on("timeupdate", (t) => {
       avCanvasTimeRef.current = t / 1e6;
@@ -161,7 +167,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
       for (const frame of clipFrameCacheRef.current.values()) frame.close();
       clipFrameCacheRef.current.clear();
     };
-  }, [canvasWidth, canvasHeight]);
+  }, [canvasWidth, canvasHeight, nativePreview]);
 
   // ─── 转场检测 ──────────────────────────────────────────────────────────────
 
@@ -798,6 +804,12 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
 
   // ── 播放控制 ────────────────────────────────────────────────────────────────
   async function handlePlay() {
+    if (nativePreview) {
+      if (total === 0) return;
+      if (!isPlaying && playhead >= total) setPlayhead(0);
+      setPlaying(!isPlaying);
+      return;
+    }
     const avCanvas = avCanvasRef.current;
     if (!avCanvas || total === 0) return;
     userActionRef.current++;
@@ -830,6 +842,7 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
   }
 
   function handleSeek(time: number) {
+    if (nativePreview) { setPlaying(false); setPlayhead(time); return; }
     const avCanvas = avCanvasRef.current;
     if (!avCanvas) return;
     userActionRef.current++;
@@ -908,6 +921,8 @@ export function VideoPreview({ projectId, episodeId }: VideoPreviewProps) {
           className="max-h-full max-w-full"
           style={{ aspectRatio: `${canvasWidth}/${canvasHeight}` }}
         />
+
+        {nativePreview && <NativeMediaPreview muted={muted} />}
 
         {/* 字幕 DOM 叠加 */}
         {activeSubtitle?.text && (

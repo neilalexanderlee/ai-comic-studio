@@ -1,3 +1,4 @@
+import { normalizedClipArgs } from "@/lib/video/normalize-render-clip";
 import fs from "node:fs";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -280,16 +281,23 @@ export async function renderEpisodeTimeline(params: {
   try {
     await report("concat", `合并 ${videoClips.length} 个视频片段…`);
     const concatListPath = path.join(tmpDir, "concat.txt");
-    const concatLines = videoClips
-      .map((c) => {
-        const absPath = resolveLocalPath(c.url, materializedRefs);
-        const escaped = absPath.replace(/'/g, "'\\''");
-        const lines = [`file '${escaped}'`];
-        if ((c.trimStart ?? 0) > 0) lines.push(`inpoint ${c.trimStart}`);
-        if (c.trimEnd !== undefined && c.trimEnd > 0) lines.push(`outpoint ${c.trimEnd}`);
-        return lines.join("\n");
-      })
-      .join("\n");
+    const firstPath = resolveLocalPath(videoClips[0].url, materializedRefs);
+    const { stdout: dimensionsJson } = await execFileAsync("ffprobe", [
+      "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", firstPath,
+    ]);
+    const dimensions = JSON.parse(dimensionsJson).streams[0] as { width: number; height: number };
+    const concatEntries: string[] = [];
+    for (const [index, clip] of videoClips.entries()) {
+      const input = resolveLocalPath(clip.url, materializedRefs);
+      const normalized = path.join(tmpDir, `clip-${index}.mp4`);
+      await report("concat", `统一音视频格式（${index + 1}/${videoClips.length}）…`);
+      await execFileAsync("ffmpeg", normalizedClipArgs({
+        input, output: normalized, hasAudio: await videoHasAudioTrack(input),
+        duration: clip.duration, trimStart: clip.trimStart, ...dimensions,
+      }));
+      concatEntries.push(`file '${normalized.replace(/'/g, "'\\''")}'`);
+    }
+    const concatLines = concatEntries.join("\n");
     fs.writeFileSync(concatListPath, concatLines, "utf-8");
 
     // ── Step 2：concat → 临时视频（始终 libx264 重编码）─────────────────────
@@ -376,7 +384,7 @@ export async function renderEpisodeTimeline(params: {
       const mixLabels: string[] = [];
 
       if (hasOrigAudio) {
-        filterParts.push("[0:a]volume=1.0[orig]");
+        filterParts.push("[0:a]aresample=48000:async=1:first_pts=0,volume=1.0[orig]");
         mixLabels.push("[orig]");
       }
 
@@ -390,7 +398,7 @@ export async function renderEpisodeTimeline(params: {
         const clipDuration = clip.duration ?? 0;
 
         // atrim 先截断 → adelay 定位 → volume → afade → apad 填充到视频总时长
-        let chain = `[${inputIdx}:a]atrim=duration=${clipDuration.toFixed(3)},adelay=${delayMs}|${delayMs},volume=${vol}`;
+        let chain = `[${inputIdx}:a]atrim=duration=${clipDuration.toFixed(3)},asetpts=PTS-STARTPTS,aresample=48000,adelay=${delayMs}|${delayMs},volume=${vol}`;
         if (fadeIn > 0) chain += `,afade=t=in:st=${clipStart.toFixed(3)}:d=${fadeIn}`;
         if (fadeOut > 0 && clipDuration > fadeOut) {
           chain += `,afade=t=out:st=${(clipStart + clipDuration - fadeOut).toFixed(3)}:d=${fadeOut}`;
@@ -422,7 +430,9 @@ export async function renderEpisodeTimeline(params: {
         "-c:v", "copy",
         "-c:a", "aac",
         "-b:a", "192k",
-        "-shortest",
+        "-t", String(totalVideoDuration),
+        "-ar", "48000",
+        "-movflags", "+faststart",
         outputPath,
       ]);
     } else {
