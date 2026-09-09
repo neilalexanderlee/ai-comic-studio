@@ -65,3 +65,6 @@ docs/
 # 这些脚本随 deploy-ecs.sh 一起 rsync 到服务器，所以在那边有一份异地副本。
 deploy/
 .pnpm-store/
+
+# 其它工作流的产物目录（客户素材、QA 截图/录屏），不进公开仓库
+output/
