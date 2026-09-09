@@ -43,18 +43,34 @@ function applyPayload(data: ModelStorePersistPayload) {
   });
 }
 
+/** 默认模型指向的 provider 还在不在列表里 —— 不在就不能留 */
+function keepIfProviderExists(
+  ref: ModelStorePersistPayload["defaultTextModel"],
+  providers: ModelStorePersistPayload["providers"]
+) {
+  if (!ref) return null;
+  return providers.some((p) => p.id === ref.providerId) ? ref : null;
+}
+
 /**
  * 从服务端拉取 model-store 备份（密钥仍在 provider_secrets）；本地为空时合并；变更后防抖写回。
  *
- * 平台模式（`ALLOW_USER_PROVIDERS=0`）下的非管理员走另一条路：
- * **无条件采用管理员那份 provider 列表并停止写回**。
- * 「本地为空才合并」在这里是错的 —— 用户本地留着一份旧的（甚至是自己以前配的）
- * 列表时就不会更新，结果是管理员换了模型、用户这边还在用一个已经不存在的 providerId，
- * 而失败信息只会是「未配置 Key」。
+ * 平台模式（`ALLOW_USER_PROVIDERS=0`）下的非管理员：
+ *
+ * · **provider 列表无条件采用管理员那份**。「本地为空才合并」在这里是错的 ——
+ *   用户本地留着一份旧列表就不会更新，结果是管理员换了模型、用户还在用一个
+ *   已不存在的 providerId，而失败信息只会是「未配置 Key」。
+ * · **但「默认用哪个模型」仍然是用户自己的偏好**，照常保留并继续写回。
+ *   第一版把整个写回都关掉了，副作用是用户在设置页换了默认模型，
+ *   刷新/换设备就被管理员那份覆盖回去 —— 改了没反应，且看不出为什么。
+ *   指向已消失 provider 的默认值会被丢弃，回落到管理员的默认值。
+ *
+ * ⚠️ 把管理员的列表写进用户自己的 `user_client_prefs` 是安全的：平台模式下
+ * 非管理员根本不走「读自己的密钥」那条分支（`resolveOne` 的 `byokAllowed`），
+ * 平台 Key 的端点只从**管理员**的 prefs 取（约定 8p 的同源不变量）。
  */
 export function ModelStoreServerSync() {
   const allowRemoteSave = useRef(false);
-  const managedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -67,10 +83,42 @@ export function ModelStoreServerSync() {
           payload?: ModelStorePersistPayload | null;
         };
         if (cancelled) return;
+
         if (platform?.managed) {
-          managedRef.current = true;
-          if (platform.payload?.providers?.length) applyPayload(platform.payload);
-          return; // 托管：不再拉自己的备份，也不写回（finally 里 allowRemoteSave 保持 false）
+          const adminPayload = platform.payload;
+          if (!adminPayload?.providers?.length) return;
+
+          // 用户自己的默认模型选择（拿不到就用管理员的）
+          let mine: ModelStorePersistPayload | null = null;
+          try {
+            const mineRes = await apiFetch("/api/user-prefs/model-store");
+            mine = (await mineRes.json()) as ModelStorePersistPayload | null;
+          } catch {
+            // 取不到就退回管理员那份默认值，不影响 provider 列表本身
+          }
+          if (cancelled) return;
+
+          const providers = adminPayload.providers;
+          applyPayload({
+            providers,
+            defaultTextModel:
+              keepIfProviderExists(mine?.defaultTextModel ?? null, providers) ??
+              adminPayload.defaultTextModel ??
+              null,
+            defaultImageModel:
+              keepIfProviderExists(mine?.defaultImageModel ?? null, providers) ??
+              adminPayload.defaultImageModel ??
+              null,
+            defaultVideoModel:
+              keepIfProviderExists(mine?.defaultVideoModel ?? null, providers) ??
+              adminPayload.defaultVideoModel ??
+              null,
+            defaultMusicModel:
+              keepIfProviderExists(mine?.defaultMusicModel ?? null, providers) ??
+              adminPayload.defaultMusicModel ??
+              null,
+          });
+          return;
         }
 
         const res = await apiFetch("/api/user-prefs/model-store");
@@ -80,7 +128,7 @@ export function ModelStoreServerSync() {
       } catch {
         // ignore
       } finally {
-        if (!cancelled && !managedRef.current) allowRemoteSave.current = true;
+        if (!cancelled) allowRemoteSave.current = true;
       }
     }
 

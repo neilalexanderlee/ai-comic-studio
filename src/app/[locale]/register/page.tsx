@@ -8,6 +8,7 @@ import { AuthShell } from "@/components/auth/auth-shell";
 import { AuthForm } from "@/components/auth/auth-form";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { resolveRegistrationMode } from "@/lib/registration";
+import { hasAnyUser } from "@/lib/admin";
 
 /**
  * `/[locale]/register` —— 独立的注册页。
@@ -37,6 +38,9 @@ export default async function RegisterPage({
 
   const loginHref = `/${locale}/login${rawNext ? `?next=${encodeURIComponent(next)}` : ""}`;
   const mode = resolveRegistrationMode();
+  // 空库时不要求邀请码（那一刻没人发得出码，见 lib/admin.ts）——
+  // 界面也必须跟着，否则会显示一个必填却无从获取的输入框。
+  const needInvite = mode === "invite" && (await hasAnyUser());
 
   if (mode === "closed") {
     return (
@@ -61,9 +65,11 @@ export default async function RegisterPage({
   return (
     <AuthShell
       subtitle={
-        mode === "invite"
+        needInvite
           ? "本站为邀请制，注册需要一个邀请码"
-          : "创建账号后，数据存在服务器，换设备也在"
+          : mode === "invite"
+            ? "这是本站的第一个账号，将自动成为管理员"
+            : "创建账号后，数据保存在后端，换设备也在"
       }
       footer={
         <p>
@@ -77,7 +83,7 @@ export default async function RegisterPage({
         </p>
       }
     >
-      <AuthForm mode="register" next={next} requireInviteCode={mode === "invite"} />
+      <AuthForm mode="register" next={next} requireInviteCode={needInvite} />
     </AuthShell>
   );
 }

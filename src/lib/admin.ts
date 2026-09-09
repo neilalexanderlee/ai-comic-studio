@@ -67,6 +67,22 @@ export async function ensureBootstrapAdmins(): Promise<void> {
 }
 
 /**
+ * 库里是否已经有账号。
+ *
+ * ⚠️ 邀请制的**引导死锁**就靠它解开：空库 + `REGISTRATION_MODE=invite` 时，
+ * 注册要邀请码 → 码只能由管理员生成 → 管理员只能由注册产生 → 谁都进不去。
+ * 自部署用户第一天就设 invite 会直接卡死，且界面上只会显示「请填写邀请码」，
+ * 完全看不出是个死锁。
+ *
+ * 所以「库里一个用户都没有」时豁免邀请码要求 —— 那一刻**不可能**有人发过码，
+ * 这个要求本身就是空的。豁免窗口只存在于第一个账号创建之前。
+ */
+export async function hasAnyUser(): Promise<boolean> {
+  const [row] = await db.select({ id: users.id }).from(users).limit(1);
+  return !!row;
+}
+
+/**
  * 注册时决定新用户的角色。
  *
  * 只有「库里一个用户都没有」且「没设 ADMIN_USERNAMES」时才自动给 admin ——
@@ -74,8 +90,7 @@ export async function ensureBootstrapAdmins(): Promise<void> {
  */
 export async function roleForNewUser(): Promise<"admin" | "user"> {
   if (getAdminUsernames().length > 0) return "user";
-  const [any] = await db.select({ id: users.id }).from(users).limit(1);
-  return any ? "user" : "admin";
+  return (await hasAnyUser()) ? "user" : "admin";
 }
 
 // ─── 角色 / 停用状态查询（带短 TTL 缓存） ─────────────────────────────────────
@@ -86,6 +101,17 @@ export async function roleForNewUser(): Promise<"admin" | "user"> {
  * 会让走异步强校验的路径立刻掉线。对「切断正在烧钱的账号」这个诉求足够快。
  */
 const CACHE_TTL_MS = 30_000;
+
+/**
+ * 缓存条目上限。
+ *
+ * ⚠️ **这个 Map 的 key 是 `getUserIdFromRequest` 的结果，里面包含匿名指纹用户** ——
+ * 公网部署下每个访客都会产生一个新 id，只增不减就是一条内存耗尽的路径
+ * （而且是被外部请求驱动的，等于把它变成一个可以远程触发的资源耗尽入口）。
+ * `auth-rate-limit.ts` 里的 `MAX_ENTRIES` 是同一个道理，这里沿用同一套做法：
+ * **宁可短暂失去缓存（退化成每次查库，仍然正确），也不能让它无上限增长。**
+ */
+const MAX_CACHE_ENTRIES = 10_000;
 
 interface UserFlags {
   role: string;
@@ -114,6 +140,7 @@ async function readFlags(userId: string): Promise<UserFlags | null> {
   // 匿名指纹用户在 users 表里没有行 —— 那不是「被停用」，是「没有账号」，
   // 单机匿名使用必须继续可用，所以 null 一律按「正常的非管理员」处理。
   const flags = row ? { role: row.role, status: row.status } : null;
+  if (flagsCache.size >= MAX_CACHE_ENTRIES) flagsCache.clear();
   flagsCache.set(userId, { at: Date.now(), flags });
   return flags;
 }

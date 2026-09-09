@@ -110,6 +110,25 @@ describe("空库首用户", () => {
   });
 });
 
+describe("邀请制的引导死锁", () => {
+  it("空库时 hasAnyUser 为 false —— 注册路由据此豁免邀请码", async () => {
+    const { hasAnyUser } = await import("@/lib/admin");
+    expect(await hasAnyUser()).toBe(false);
+  });
+
+  it("有账号之后就不再豁免", async () => {
+    seed("u1", "neil");
+    const { hasAnyUser } = await import("@/lib/admin");
+    expect(await hasAnyUser()).toBe(true);
+  });
+
+  it("第一个账号仍然是管理员 —— 豁免掉的只是邀请码，不是角色规则", async () => {
+    const { roleForNewUser, hasAnyUser } = await import("@/lib/admin");
+    expect(await hasAnyUser()).toBe(false);
+    expect(await roleForNewUser()).toBe("admin");
+  });
+});
+
 describe("平台 Key 归属人", () => {
   it("默认取**最早创建**的管理员，结果稳定不飘移", async () => {
     seed("u_late", "late", "admin", 200);

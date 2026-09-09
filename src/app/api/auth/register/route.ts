@@ -20,7 +20,7 @@ import {
   clientIpOf,
   recordRegisterAttempt,
 } from "@/lib/auth-rate-limit";
-import { roleForNewUser } from "@/lib/admin";
+import { hasAnyUser, roleForNewUser } from "@/lib/admin";
 import { inviteRejectionMessage, redeemInviteCode } from "@/lib/invite-codes";
 import { registrationConflictHint, resolveRegistrationMode } from "@/lib/registration";
 
@@ -52,7 +52,12 @@ export async function POST(req: NextRequest) {
   // 邀请码是**唯一还立着的准入闸**（支付上线前平台 Key 没有计费闸门兜底），
   // 所以限速要在校验码之前 —— 放在后面等于提供一个免费的爆破接口。
   const ip = clientIpOf(req);
-  if (mode === "invite") {
+
+  // ⚠️ 空库豁免：那一刻不可能有人发过邀请码（发码要管理员，管理员要注册才有），
+  // 不豁免的话「空库 + invite」是个谁都进不去的死锁。详见 lib/admin.ts 的 hasAnyUser。
+  const needInvite = mode === "invite" && (await hasAnyUser());
+
+  if (needInvite) {
     const verdict = checkRegisterAllowed(ip);
     if (verdict.blocked) {
       return NextResponse.json(
@@ -80,7 +85,7 @@ export async function POST(req: NextRequest) {
 
   // 先占用邀请码再建号：反过来的话「码已用完」会留下一个建好却进不去的账号。
   // 占用失败不影响后续请求（码没被消耗），只记一次限速计数。
-  if (mode === "invite") {
+  if (needInvite) {
     const redeemed = await redeemInviteCode(body.inviteCode!, userId);
     if (!redeemed.ok) {
       recordRegisterAttempt(ip);
