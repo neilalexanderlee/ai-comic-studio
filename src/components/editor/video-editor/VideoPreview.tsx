@@ -159,15 +159,17 @@ export function VideoPreview({
       return;
     }
     try {
+      setPlaying(true);
+      setError("");
       if (playhead >= total) {
         el.currentTime = 0;
         setPlayhead(0);
       }
       await el.play();
-      setPlaying(true);
-      setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "播放失败");
+      // Seeking/pausing cancels a pending play promise as a normal operation.
+      if (!(e instanceof DOMException && e.name === "AbortError"))
+        setError(e instanceof Error ? e.message : "播放失败");
       setPlaying(false);
     }
   }
