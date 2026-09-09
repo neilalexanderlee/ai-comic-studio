@@ -809,7 +809,7 @@ APP_BIND=0.0.0.0:3007       # 默认 127.0.0.1:3007
 只按用户名则用不存在的用户名喷洒永远不触发。登录成功清零，避免正常用户把自己锁在外面。
 
 线上部署的现状、数据库权威副本在哪、以及**服务器停用时的操作步骤**，
-见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+见 `docs/DEPLOYMENT.md`（**维护者本机文档，不随仓库分发**）。
 
 
 ### 8l. 全新安装必须能建起库 —— 迁移基线 + 迁移锁
@@ -1585,7 +1585,7 @@ src/lib/evals/
 | 编辑器首次加载要等一分多钟，且每打开一次吃掉 125MB OSS 下行流量 | 两处叠加：① `initFromShots` 与存量时间线快照里 `clip.url` 存的是**源片**而不是 480p 代理（`MediaLibrary` 用了代理，时间线初始化没用），实测一集 15 条 = 源片 125.5MB vs 代理 12.5MB；② `syncSprites` 里十几个 clip 完全串行 `await buildSprite`，而 `MP4Clip.ready`（av-cliper 1.2.8）要等**整个流下载并解析完**才 resolve | ① `Clip` 拆成 `url`（导出源，永远是源片）+ `previewUrl`（浏览器解码源），存量快照在 `loadFromSnapshot` 前经 `healSnapshotMediaRefs` 自愈（顺带修掉「从素材库拖进来的 clip 导出会降级成 480p」）；② 改为 4 路并发 + 按离播放头距离排序 + 渐进可播（门只等播放头附近的素材）；③ 新增 `mediaCache.ts` 用 Cache Storage 按**稳定的存储引用**（不是签名 URL）缓存。实测：可播 70s → 2.5s（缓存命中 142ms），单次流量 125MB → 12.5MB → 0 |
 | 「首次点播放会跳回 0」的真正成因（此前靠 loading 门掩盖）| `syncSprites` 结尾 `if (!abort.signal.aborted && !isPlaying) previewFrame(playhead)` 用的是**这一轮 sync 开始时捕获的闭包值**。`previewFrame` 内部先 `pause()`（emit paused）再把时间强设为传入值 —— sync 期间用户点了播放，sync 结束时却以为自己还处在暂停态、还停在 0 秒 | 改读 `isPlayingRef.current` 与 `useEditorStore.getState().playhead`。这个修复是渐进可播的前提：门放开后 sync 必然在播放中结束 |
 | 取 OSS 产物偶发 `TypeError: Failed to fetch`，同一个 URL 一会儿好一会儿坏 | `/api/uploads/_oss/<key>` 是 302 跳到签名 URL，这一跳带 `Cache-Control: private, max-age=1800`。浏览器缓存的是**重定向本身**，于是会出现「缓存里的 302 还在、它指向的签名已经过期」—— OSS 对过期签名返回 403，而 **403 没有 CORS 头**，浏览器就把它报成一个毫无线索的 `Failed to fetch`（看起来像 CORS 没配，实际 CORS 是好的）。实测：默认 fetch 必失败，加 `cache:"reload"` 立刻 200，之后默认 fetch 又好了。另一类同样报这个错的情况是页面正忙的瞬间（打开 3D 导演台要同时创建两个 WebGL 上下文）请求直接挂掉 | 统一收进 `mediaCache.ts` 的 `fetchArtifact()`：最多 3 次、重试一律 `cache:"reload"`（这样才能拿到新的 302 和新签名）、带退避；403 与 5xx 才重试，404/401 不重试。**凡是取 OSS 产物一律走它，不要裸 fetch** |
-| 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)，`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
+| 姜离场景（画面外传来哭声→角色应先反应再冲刺）生成的视频里角色从第一帧就已经在跑，"听见才追"的因果转折在画面上消失 | `startFrameDesc` 被写成动作展开中段的姿态（"步幅已展开，两足悬于地面上方半寸"），而不是触发事件发生瞬间的静止反应姿态；`motionScript` 也把触发事件和已展开的动作压缩进同一时间段，没有独立的短促反应拍。`storyboard-supervision.ts` 原有的"因果时序铁律"未明确要求触发事件必须有独立反应拍、且 `startFrameDesc` 必须锁定在反应瞬间 | `STORYBOARD_REWRITE_SYSTEM`（`storyboard-supervision.ts`）和 `SHOT_SPLIT_MOTION_SCRIPT_RULES`/`SHOT_SPLIT_START_END_FRAME_RULES`（`registry.ts`，英文版，避免 shot_split 与 batch_storyboard_rewrite 两条路径再次漂移）新增"触发-反应铁律"+正反例+物理自检清单项。⚠️ 这是内容质量规则，非结构性 bug，没法用单测锁死，只能人工抽查验证；首版规则示例一度直接写了用户项目的真实角色名/场景（"姜离"/树林/小童哭声），已改用 `角色甲`/`角色乙` 占位符——修改默认模板前务必先看 `docs/PROMPT-TEMPLATE-AUTHORING.md`（本机文档），`prompt-templates-deplot.test.ts` 会扫描但只覆盖 `BANNED_PLOT_TERMS_IN_TEMPLATES` 里登记过的词，新项目的角色名不会自动被拦下 |
 | 迁移链**根本无法从零建库**，全新安装/CI 全都撞得上 | `0001` 之后某处断链。本地库是历史演进来的，从来没人从零跑过，所以一直没暴露；部署到服务器跑空库时才炸出来（worker 反复重启报 `no such table: character_assets`）。我一开始误判成「两个容器并发跑迁移的竞态」并跟用户这么说了，单进程复现后已更正 | 基线压缩：`drizzle/baseline/schema.sql` + `meta.json`（`throughTag`），`applyBaselineIfFresh()` 只在空库时应用并把该 tag 及之前标记为已应用。并发是另一个真实隐患，单独用 `__migration_lock` 修掉。见约定 8l |
 | 判「是不是空库」的 SQL 把**每一张表**都排除了，基线差点盖到生产库上 | `name NOT LIKE '__%'` —— SQL 的 `LIKE` 里 `_` 是单字符通配符，本意排除 `__drizzle_migrations`，实际匹配任意两字符开头的表名，于是任何库都被判成空库 | 改 `NOT LIKE '\_\_%' ESCAPE '\'`，加专门的回归测试。发现契机是对比脚本报「健康库 0 张表」这个明显不可能的数字 |
 | 公网暴露后**只加一个请求头就能读到别人全部项目** | `getUserIdFromRequest` 的回退链认未签名身份（`x-user-id` 请求头 / 裸 `ai_comic_uid` cookie）。这对单机单用户是合理便利，对公网等于完全没有认证 | `REQUIRE_AUTH=1` 关掉未签名回退；`ALLOW_REGISTRATION=0` 关自助注册；`AUTH_SECRET`（当时会回落到公开仓库里的默认值；现已改为自动生成并落盘，见下方那条）；登录加双维度限速。默认全部保持改造前行为，见约定 8k |
@@ -1651,7 +1651,7 @@ src/lib/evals/
 
 ## 开发工作流
 
-**修改系统提示词默认模板时**：遵守 [docs/PROMPT-TEMPLATE-AUTHORING.md](docs/PROMPT-TEMPLATE-AUTHORING.md)（禁止写入具体作品剧情；示例用角色甲/乙等占位符）。提交前运行 `pnpm test src/__tests__/unit/lib/ai/prompt-templates-deplot.test.ts`。
+**修改系统提示词默认模板时**：禁止写入具体作品剧情，示例一律用「角色甲/乙」等占位符（维护者另有本机文档 `docs/PROMPT-TEMPLATE-AUTHORING.md`；`docs/` 整个在 .gitignore 里，不随仓库分发）。提交前运行 `pnpm test src/__tests__/unit/lib/ai/prompt-templates-deplot.test.ts`。
 
 ```
 # 1. 修改 DB schema
