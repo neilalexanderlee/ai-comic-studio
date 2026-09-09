@@ -16,10 +16,12 @@ services:
     #        （隧道还顺带给明文 HTTP 套了一层加密，没有域名/证书时这是唯一的加密方式）
     #   "3007:3007"           —— 绑所有网卡，公网可直接访问。
     #
-    # 改成公网可访问之前，这三样必须先到位（否则等于把数据裸放在公网）：
-    #   REQUIRE_AUTH=1        只认签名 cookie，不再信 x-user-id 请求头
-    #   ALLOW_REGISTRATION=0  关掉自助注册
-    #   AUTH_SECRET=<随机值>   否则回落到代码里的默认值，而本仓库是公开的
+    # 改成公网可访问之前，这两样必须先到位（否则等于把数据裸放在公网）：
+    #   REQUIRE_AUTH=1            只认签名 cookie，不再信 x-user-id 请求头
+    #   REGISTRATION_MODE=invite  或 closed —— 否则任何人都能给自己开号
+    #                             （旧的 ALLOW_REGISTRATION=0 仍然有效，且冲突时更严者胜）
+    # AUTH_SECRET 可以不设：没设会自动生成一把随机密钥并落盘到数据目录，
+    # 不再有任何硬编码默认值。多实例共享会话时才需要显式指定。
     ports:
       - "${APP_BIND:-127.0.0.1:3007}:3007"
     volumes:
