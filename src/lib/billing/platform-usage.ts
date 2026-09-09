@@ -287,6 +287,15 @@ export interface PlatformUsageRow {
 
 export interface PlatformUsageSummary {
   windowHours: number;
+  /**
+   * 本次汇总的窗口是否就是刹车窗口。
+   *
+   * ⚠️ `limits` 里的每人上限是**按 24 小时**定义的（见 checkPlatformUsage）。
+   * 观察用的长窗口（例如最近 30 天）里，拿它当分母会得出「视频 640/120 秒」
+   * 这种既不真也不可执行的数字 —— 用户会以为自己早就被挡了，而实际并没有。
+   * 所以长窗口下前端必须只显示用量、不显示分母，由这个字段告诉它。
+   */
+  limitsApply: boolean;
   limits: PlatformLimits;
   /** 当前在飞的平台任务（按协议） */
   inflight: Array<{ protocol: string; count: number }>;
@@ -294,8 +303,17 @@ export interface PlatformUsageSummary {
   totals: { videoSeconds: number; imageCount: number; musicCount: number; estimatedYuan: number };
 }
 
-export async function summarizePlatformUsage(): Promise<PlatformUsageSummary> {
-  const since = new Date(Date.now() - WINDOW_MS);
+/**
+ * 汇总平台 Key 的开销。
+ *
+ * `windowMs` 只影响**这份报表看多长时间**，不影响刹车 —— `checkPlatformUsage`
+ * 永远只看最近 24 小时。两者刻意分开：观察窗口想拉多长都行，
+ * 而挡人的口径一旦跟着变，用户的每日额度就会随管理员在界面上点了什么而变化。
+ */
+export async function summarizePlatformUsage(
+  windowMs: number = WINDOW_MS
+): Promise<PlatformUsageSummary> {
+  const since = new Date(Date.now() - windowMs);
 
   const records = await db
     .select({
@@ -365,7 +383,8 @@ export async function summarizePlatformUsage(): Promise<PlatformUsageSummary> {
   const rows = [...byUser.values()].sort((a, b) => b.estimatedYuan - a.estimatedYuan);
 
   return {
-    windowHours: WINDOW_MS / 3_600_000,
+    windowHours: windowMs / 3_600_000,
+    limitsApply: windowMs === WINDOW_MS,
     limits: platformLimits(),
     inflight: [...inflight.entries()]
       .map(([protocol, count]) => ({ protocol, count }))
