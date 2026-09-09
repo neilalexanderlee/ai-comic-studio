@@ -54,6 +54,21 @@ export const RESOLUTION_MULTIPLIER: Record<string, number> = {
 };
 
 /**
+ * 分辨率字符串 → 可比较的数值（按高度）。
+ *
+ * 各家的写法并不统一：`480p` / `720P` / `768P` / `1080p` / `2K` / `4k` 都出现过。
+ * **认不出来的一律返回 0（= 永不触发限制）** —— 宁可漏挡也不要把人挡在门外。
+ */
+export function resolutionRank(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const s = String(raw).trim().toLowerCase();
+  if (s === "4k") return 2160;
+  if (s === "2k") return 1440;
+  const m = s.match(/^(\d+)\s*p$/);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
  * 分辨率相对 480p 的成本倍率。认不出来的写法按 1 计 —— 与 `resolutionRank` 同一条原则：
  * 各家写法不统一（`720P`/`768P`/`2K`），宁可少算也不要把人挡在门外。
  */

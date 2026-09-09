@@ -52,20 +52,11 @@ export function planLimitResponse(v: PlanLimitViolation): NextResponse {
 }
 
 /**
- * 分辨率字符串 → 可比较的数值（按高度）。
- *
- * 各家的写法并不统一：`480p` / `720P` / `768P` / `1080p` / `2K` / `4k` 都在能力表里出现过。
- * **认不出来的一律返回 0（= 永不触发限制）** —— 新加一个没见过的写法时，
- * 宁可漏挡也不要把付费用户挡在门外。
+ * 分辨率高低比较。实现挪到了纯模块 `pricing.ts` —— 客户端组件（画质增强按钮）
+ * 也要用它判断「还能升到哪些档」，而本文件是 `server-only` 的。
  */
-export function resolutionRank(raw: string | null | undefined): number {
-  if (!raw) return 0;
-  const s = String(raw).trim().toLowerCase();
-  if (s === "4k") return 2160;
-  if (s === "2k") return 1440;
-  const m = s.match(/^(\d+)\s*p$/);
-  return m ? Number(m[1]) : 0;
-}
+export { resolutionRank } from "./pricing";
+import { resolutionRank } from "./pricing";
 
 /** 纯函数部分：模型档位与分辨率。可离线测试，不碰数据库。 */
 export function checkVideoPlanLimits(

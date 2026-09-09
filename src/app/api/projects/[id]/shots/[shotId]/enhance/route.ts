@@ -2,7 +2,15 @@
  * POST /api/projects/[id]/shots/[shotId]/enhance
  *
  * 按需画质增强接口：对已生成的视频（通常是 480p）执行火山引擎 AI MediaKit 画质增强，
- * 将视频升级至 720p，并更新 shot.videoUrl 和 shot.videoResolution。
+ * 升级到指定分辨率，并更新 shot.videoUrl 和 shot.videoResolution。
+ *
+ * Body: { resolution?: "720p" | "1080p" | "4k" }（默认 1080p）
+ *
+ * ⚠️ 这里曾经有一个记账错误：路由调 `enhanceVideo()` 时**没传 resolution**，
+ * 于是走 provider 的默认值 —— 实际产出的一直是 **1080p**，
+ * 而 DB、界面文案、历史标签、额度折算全都按 720p 记。
+ * 结果是用户以为拿到 720p、实际拿到 1080p，而额度只按 2.25 倍扣（真实成本 5.06 倍）。
+ * 现在目标分辨率是显式参数，三处（落库/额度/文案）都跟着它走。
  *
  * 这是一个同步接口（会等待增强完成后再返回），
  * 因为增强任务通常在 1-3 分钟内完成，由 maxDuration = 300 秒限制保护。
@@ -15,6 +23,7 @@ import { VolcengineEnhanceProvider } from "@/lib/ai/providers/volcengine-enhance
 import { resolveProviderCredentials, type KeySource } from "@/lib/provider-secrets";
 import { saveVideoToHistory } from "@/lib/video/video-history";
 import { requireProjectOwner, requireShotInProject } from "@/lib/api-guard";
+import { resolutionRank } from "@/lib/billing/pricing";
 import {
   checkPlatformUsage,
   platformUsageResponse,
@@ -23,6 +32,10 @@ import {
 import path from "path";
 
 const AI_MEDIAKIT_PROVIDER_ID = "volcengine-ai-mediakit";
+
+/** provider 支持的目标档位（见 volcengine-enhance.ts） */
+const ENHANCE_TARGETS = ["720p", "1080p", "4k"] as const;
+type EnhanceTarget = (typeof ENHANCE_TARGETS)[number];
 
 export const maxDuration = 300;
 
@@ -63,8 +76,19 @@ export async function POST(
   if (!shot.videoUrl) {
     return NextResponse.json({ error: "Shot has no video to enhance" }, { status: 400 });
   }
-  if (shot.videoResolution === "720p") {
-    return NextResponse.json({ error: "Video is already at 720p" }, { status: 400 });
+
+  const body = (await request.json().catch(() => ({}))) as { resolution?: string };
+  const target: EnhanceTarget = ENHANCE_TARGETS.includes(body.resolution as EnhanceTarget)
+    ? (body.resolution as EnhanceTarget)
+    : "1080p";
+
+  // 只能往上升。原来是写死的「已经是 720p 就拒绝」，那样 720p 的片子
+  // 再也升不到 1080p —— 而 provider 本来就支持。
+  if (resolutionRank(shot.videoResolution) >= resolutionRank(target)) {
+    return NextResponse.json(
+      { error: `该视频已经是 ${shot.videoResolution}，不需要升到 ${target}` },
+      { status: 400 }
+    );
   }
 
   // 密钥：用户自己的 → 管理员的平台 Key → 环境变量（见下）。
@@ -98,7 +122,7 @@ export async function POST(
     kind: "video",
     keySource,
     durationSeconds: enhanceSeconds,
-    resolution: "720p", // 增强的产物就是 720p，额度按它折算
+    resolution: target, // 额度按**真实产物**折算：1080p 是 5.06 倍，不是 2.25 倍
     protocol: "volcengine-enhance",
   });
   if (usage) return platformUsageResponse(usage);
@@ -106,7 +130,7 @@ export async function POST(
     kind: "video",
     keySource,
     durationSeconds: enhanceSeconds,
-    resolution: "720p",
+    resolution: target,
     protocol: "volcengine-enhance",
     modelId: "ai-mediakit-enhance",
     projectId,
@@ -143,21 +167,23 @@ export async function POST(
     }
 
     console.log(`[EnhanceRoute] Using remoteVideoUrl for enhance: ${shot.remoteVideoUrl}`);
-    const enhancedPath = await enhancer.enhanceVideo(shot.remoteVideoUrl);
+    const enhancedPath = await enhancer.enhanceVideo(shot.remoteVideoUrl, {
+      resolution: target,
+    });
 
     // 把 480p 旧视频存入历史（超出 5 条时自动删除最旧文件）
-    await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, "增强↑720p 前");
+    await saveVideoToHistory(shotId, shot.videoUrl, shot.videoResolution, `增强↑${target} 前`);
 
     await db
       .update(shots)
       .set({
         videoUrl: enhancedPath,
-        videoResolution: "720p",
+        videoResolution: target,
         status: "completed",
       })
       .where(eq(shots.id, shotId));
 
-    return NextResponse.json({ videoUrl: enhancedPath, videoResolution: "720p" });
+    return NextResponse.json({ videoUrl: enhancedPath, videoResolution: target });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[EnhanceRoute] Enhancement failed for shot ${shotId}: ${msg}`);
