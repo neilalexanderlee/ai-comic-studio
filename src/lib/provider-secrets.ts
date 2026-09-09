@@ -9,6 +9,7 @@ import type { ProviderConfig } from "@/lib/ai/ai-sdk";
 import { getModelStorePrefs } from "@/lib/user-client-prefs";
 import { assertUsableEndpoint } from "@/lib/provider-endpoint";
 import { isBillingEnabled } from "@/lib/billing/gate";
+import { allowUserProviders, getPlatformKeyOwnerId, isAdminUser } from "@/lib/admin";
 
 type ProviderConfigWithId = ProviderConfig & {
   providerId?: string;
@@ -95,50 +96,165 @@ export async function resolveTrustedEndpoint(
   return { protocol: provider.protocol, baseUrl: provider.baseUrl };
 }
 
+/**
+ * 这次生成烧的是谁的 Key。
+ *
+ * `platform` 的请求受平台每日限额与全局并发约束（`billing/platform-usage.ts`），
+ * `user`（BYOK）的不受约束 —— 自部署用户永远是后者，因此行为一行不变。
+ */
+export type KeySource = "user" | "platform";
+
+/**
+ * 取出某个归属人名下这个 provider 的**密钥与端点**。
+ *
+ * ⚠️ **安全不变量：密钥和端点必须来自同一个归属人。**
+ *
+ * `providerId` 是**客户端生成的 ULID**，存在用户自己的 model-store 里；平台模式下
+ * 客户端还会拿到管理员的 provider 列表，也就知道了管理员的 providerId。
+ * 所以如果写成「地址取用户的 prefs、密钥取管理员的」，用户只要在自己这边建一条
+ * 同 id、baseUrl 指向自己服务器的 provider 记录，**一个请求就收到平台 Key** ——
+ * 正是约定 8n 想堵的那个洞换个姿势复活。
+ *
+ * 这个函数把两者绑在同一个 ownerId 上，是唯一允许读取平台 Key 的路径。
+ */
+async function readOwnedCredentials(ownerId: string, providerId: string) {
+  const secret = await readDecryptedSecret(ownerId, providerId);
+  if (!secret?.apiKey) return null;
+  // 服务端没有这个 provider 的记录 = 不知道该往哪发。**绝不退回用请求体里的地址** ——
+  // 那正是「密钥从服务端取、地址听客户端的」这个洞本身。
+  const trusted = await resolveTrustedEndpoint(ownerId, providerId);
+  if (!trusted) return null;
+  return { secret, trusted };
+}
+
 async function resolveOne(
   userId: string,
   config?: ProviderConfigWithId | null
-): Promise<ProviderConfig | null | undefined> {
+): Promise<{ config: ProviderConfig | null | undefined; keySource: KeySource }> {
   await ensureProviderSecretsTable();
-  if (!config) return config;
+  if (!config) return { config, keySource: "user" };
   const providerId = config.providerId;
-  if (!providerId) return config;
+  if (!providerId) return { config, keySource: "user" };
 
-  const secret = await readDecryptedSecret(userId, providerId);
+  const empty = { ...config, apiKey: "", secretKey: undefined };
 
-  if (!secret?.apiKey) {
-    return {
-      ...config,
-      apiKey: "",
-      secretKey: undefined,
-    };
+  // ① 用户自己的 Key 优先（BYOK）。
+  //    托管模式（ALLOW_USER_PROVIDERS=0）下非管理员跳过这一步：那边统一用平台 Key，
+  //    读到一条历史残留的用户密钥会让「我明明没配 Key 却在用别的地址」难以解释。
+  const byokAllowed = allowUserProviders() || (await isAdminUser(userId));
+  if (byokAllowed) {
+    const own = await readOwnedCredentials(userId, providerId);
+    if (own) {
+      return {
+        config: {
+          ...config,
+          protocol: own.trusted.protocol,
+          baseUrl: own.trusted.baseUrl,
+          apiKey: own.secret.apiKey,
+          secretKey: own.secret.secretKey ?? undefined,
+        },
+        keySource: "user",
+      };
+    }
   }
 
-  // 服务端没有这个 provider 的记录 = 不知道该往哪发。**绝不退回用请求体里的地址** ——
-  // 那正是「密钥从服务端取、地址听客户端的」这个洞本身。
-  const trusted = await resolveTrustedEndpoint(userId, providerId);
-  if (!trusted) {
-    return { ...config, apiKey: "", secretKey: undefined };
-  }
+  // ② 平台 Key 兜底：管理员在设置页配的那一份。
+  //    这就是「用户既要买积分又要自带 Key」这个矛盾的解法。
+  const ownerId = await getPlatformKeyOwnerId();
+  if (!ownerId || ownerId === userId) return { config: empty, keySource: "user" };
+
+  const platform = await readOwnedCredentials(ownerId, providerId);
+  if (!platform) return { config: empty, keySource: "user" };
 
   return {
-    ...config,
-    protocol: trusted.protocol,
-    baseUrl: trusted.baseUrl,
-    apiKey: secret.apiKey,
-    secretKey: secret.secretKey ?? undefined,
+    config: {
+      ...config,
+      protocol: platform.trusted.protocol,
+      baseUrl: platform.trusted.baseUrl,
+      apiKey: platform.secret.apiKey,
+      secretKey: platform.secret.secretKey ?? undefined,
+    },
+    keySource: "platform",
   };
 }
 
+export interface ResolvedModelConfig {
+  config: ModelConfigPayload | undefined;
+  /** 每种能力各自用的是谁的 Key —— 限额与（将来的）计费按这个判断 */
+  sources: { text: KeySource; image: KeySource; video: KeySource };
+}
+
+/**
+ * 注入密钥并**同时告知密钥来源**。生成入口（花钱的那条路）用这个。
+ *
+ * keySource 现在就必须一路传到用量闸门：等以后开计费再补，就是一次
+ * 「写入路径和读取路径不一致」的半途重构（约定 8d 警告过的那种）。
+ */
+export async function resolveModelConfigWithSource(
+  userId: string,
+  modelConfig?: ModelConfigPayload
+): Promise<ResolvedModelConfig> {
+  if (!modelConfig) {
+    return { config: modelConfig, sources: { text: "user", image: "user", video: "user" } };
+  }
+  const text = await resolveOne(userId, modelConfig.text);
+  const image = await resolveOne(userId, modelConfig.image);
+  const video = await resolveOne(userId, modelConfig.video);
+  return {
+    config: { text: text.config, image: image.config, video: video.config },
+    sources: { text: text.keySource, image: image.keySource, video: video.keySource },
+  };
+}
+
+/** 不关心密钥来源的调用方（剧本解析等纯文本路径）用这个薄封装 */
 export async function hydrateModelConfigSecrets(
   userId: string,
   modelConfig?: ModelConfigPayload
 ): Promise<ModelConfigPayload | undefined> {
-  if (!modelConfig) return modelConfig;
+  return (await resolveModelConfigWithSource(userId, modelConfig)).config;
+}
+
+/**
+ * 单个 provider 的密钥解析（BGM / 模型列表这类不走 modelConfig 的路径）。
+ * 与 `resolveOne` 同一套优先级和同一条安全不变量。
+ */
+export async function resolveProviderCredentials(
+  userId: string,
+  providerId: string
+): Promise<
+  | { ok: true; protocol: string; baseUrl: string; apiKey: string; secretKey?: string; keySource: KeySource }
+  | { ok: false }
+> {
+  await ensureProviderSecretsTable();
+  if (!providerId) return { ok: false };
+
+  const byokAllowed = allowUserProviders() || (await isAdminUser(userId));
+  if (byokAllowed) {
+    const own = await readOwnedCredentials(userId, providerId);
+    if (own) {
+      return {
+        ok: true,
+        protocol: own.trusted.protocol,
+        baseUrl: own.trusted.baseUrl,
+        apiKey: own.secret.apiKey,
+        secretKey: own.secret.secretKey ?? undefined,
+        keySource: "user",
+      };
+    }
+  }
+
+  const ownerId = await getPlatformKeyOwnerId();
+  if (!ownerId || ownerId === userId) return { ok: false };
+  const platform = await readOwnedCredentials(ownerId, providerId);
+  if (!platform) return { ok: false };
+
   return {
-    text: await resolveOne(userId, modelConfig.text),
-    image: await resolveOne(userId, modelConfig.image),
-    video: await resolveOne(userId, modelConfig.video),
+    ok: true,
+    protocol: platform.trusted.protocol,
+    baseUrl: platform.trusted.baseUrl,
+    apiKey: platform.secret.apiKey,
+    secretKey: platform.secret.secretKey ?? undefined,
+    keySource: "platform",
   };
 }
 

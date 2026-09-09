@@ -24,7 +24,13 @@ CREATE TABLE usage_records (
   protocol TEXT, model_id TEXT, params TEXT, credits_reserved INTEGER NOT NULL DEFAULT 0,
   credits_charged INTEGER NOT NULL DEFAULT 0, upstream_usage INTEGER,
   reserved_from_subscription INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'reserved',
+  key_source TEXT NOT NULL DEFAULT 'user',
   created_at INTEGER NOT NULL
+);
+CREATE TABLE users (
+  id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+  token_version INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL
 );
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, plan_code TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',

@@ -6,6 +6,7 @@ import { AUTH_COOKIE, parseCookieValue } from "@/lib/auth";
 import { isAuthRequired } from "@/lib/get-user-id";
 import { safeNext } from "@/lib/auth-next";
 import { AuthShell } from "@/components/auth/auth-shell";
+import { resolveRegistrationMode } from "@/lib/registration";
 import { AuthForm } from "@/components/auth/auth-form";
 
 /**
@@ -31,7 +32,7 @@ export default async function LoginPage({
   // 已登录就不该再看登录页，直接送回目的地
   if (authRaw && parseCookieValue(authRaw)) redirect(next);
 
-  const allowRegistration = process.env.ALLOW_REGISTRATION !== "0";
+  const allowRegistration = resolveRegistrationMode() !== "closed";
   const authRequired = isAuthRequired();
   const registerHref = `/${locale}/register${
     rawNext ? `?next=${encodeURIComponent(next)}` : ""

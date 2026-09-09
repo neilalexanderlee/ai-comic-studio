@@ -4,6 +4,12 @@ import { initializeProviders } from "@/lib/ai/setup";
 import { registerPipelineHandlers } from "@/lib/pipeline";
 import { startWorker, shouldRunWorkerInWeb } from "@/lib/task-queue";
 import { setupProxy } from "@/lib/proxy-setup";
+import { ensureBootstrapAdmins } from "@/lib/admin";
+import {
+  registrationConflictHint,
+  registrationModeIsUnrecognized,
+  resolveRegistrationMode,
+} from "@/lib/registration";
 
 let bootstrapped = false;
 
@@ -27,6 +33,26 @@ export async function bootstrap() {
   } catch (err) {
     console.warn("[Bootstrap] prompt_templates prune skipped:", err);
   }
+
+  // ADMIN_USERNAMES 里的人幂等提升为管理员。放在迁移之后（要 users.role 这一列），
+  // 失败不阻断启动 —— 管理员权限没授予只是少了个管理端，不该让整个服务起不来。
+  try {
+    await ensureBootstrapAdmins();
+  } catch (err) {
+    console.warn("[Bootstrap] ensureBootstrapAdmins 失败:", err);
+  }
+
+  // 注册准入模式：两个开关打架时必须显式说出来，否则「设了 REGISTRATION_MODE=invite
+  // 却还是注册不了」会毫无线索（见 lib/registration.ts 的 fail closed 说明）。
+  if (registrationModeIsUnrecognized()) {
+    console.warn(
+      `[Bootstrap] REGISTRATION_MODE 的值无法识别（只接受 open / invite / closed），` +
+        `已按旧开关 ALLOW_REGISTRATION 处理。`
+    );
+  }
+  const conflict = registrationConflictHint();
+  if (conflict) console.warn(`[Bootstrap] ${conflict}`);
+  console.log(`[Bootstrap] 注册准入模式：${resolveRegistrationMode()}`);
 
   console.log("[Bootstrap] Initializing AI providers...");
   initializeProviders();

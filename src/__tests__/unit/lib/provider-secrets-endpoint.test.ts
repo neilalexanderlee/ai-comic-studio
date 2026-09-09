@@ -22,6 +22,12 @@ vi.mock("@/lib/db", async () => {
     CREATE TABLE user_client_prefs (
       user_id TEXT PRIMARY KEY NOT NULL, model_store_json TEXT NOT NULL, updated_at INTEGER NOT NULL
     );
+    -- 解析不到用户自己的 Key 时会去找平台 Key 的归属人（lib/admin.ts），要读 users
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+      token_version INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT 'user',
+      status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL
+    );
   `);
   holder.sqlite = sqlite;
   return { db: drizzle(sqlite) };

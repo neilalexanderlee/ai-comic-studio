@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { Service } from "@volcengine/openapi";
 import { bootstrap } from "@/lib/bootstrap";
 import { getUserIdFromRequest } from "@/lib/get-user-id";
-import { getProviderSecret, resolveTrustedEndpoint } from "@/lib/provider-secrets";
+import { resolveProviderCredentials } from "@/lib/provider-secrets";
+import { checkPlatformUsage, platformUsageResponse } from "@/lib/billing/platform-usage";
 import { openBillingGate } from "@/lib/billing/gate";
 import { saveArtifact } from "@/lib/storage/artifact-store";
 
@@ -212,21 +213,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "providerId 为必填" }, { status: 400 });
   }
 
-  // 协议与地址一律以服务端存的 provider 记录为准，请求体里的同名字段不作数 ——
+  // 密钥与端点一律以服务端存的 provider 记录为准，请求体里的同名字段不作数 ——
   // 否则就是「密钥从服务端取、地址听客户端的」，把 baseUrl 换成自己的服务器即可收走密钥。
-  // 详见 lib/provider-endpoint.ts。
-  const endpoint = await resolveTrustedEndpoint(userId, providerId);
-  if (!endpoint) {
-    return NextResponse.json(
-      { error: "该 provider 未在设置里配置服务地址，请先在「设置 → 模型」保存一次" },
-      { status: 400 }
-    );
-  }
-  const { protocol, baseUrl } = endpoint;
-
-  // 从数据库读取密钥（不信任客户端传来的密钥）。火山音乐走 AK/SK，两者都必需。
-  const secret = await getProviderSecret(userId, providerId);
-  if (!secret?.apiKey || !secret?.secretKey) {
+  // 用户自己没配时 fallback 到管理员的平台 Key（两者的地址与密钥必然同源，
+  // 见 provider-secrets.ts 的安全不变量）。详见 lib/provider-endpoint.ts。
+  const creds = await resolveProviderCredentials(userId, providerId);
+  if (!creds.ok || !creds.apiKey || !creds.secretKey) {
     return NextResponse.json(
       {
         error:
@@ -235,13 +227,24 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
+  const { protocol, baseUrl, keySource } = creds;
 
-  // 计费闸门（BILLING_ENABLED=1 时生效，否则空操作）。必须在调用上游前预扣。
+  // 平台 Key 的音乐日额度 + 全局并发。BYOK 时直接放行且不查库。
+  const musicUsage = await checkPlatformUsage(userId, {
+    kind: "music",
+    keySource,
+    durationSeconds: typeof targetDuration === "number" ? targetDuration : undefined,
+    protocol,
+  });
+  if (musicUsage) return platformUsageResponse(musicUsage);
+
+  // 计费闸门（BILLING_ENABLED=1 时生效；关闭且用的是平台 Key 时只记账不扣费）。
+  // 必须在调用上游前预扣。
   const billing = await openBillingGate(userId, {
     kind: "music",
     modelId: modelId || "",
     durationSeconds: typeof targetDuration === "number" ? targetDuration : undefined,
-  }, { protocol });
+  }, { protocol, keySource });
   if (!billing.ok) return billing.response;
 
   let result: MusicGenerateResult;
@@ -250,8 +253,8 @@ export async function POST(request: NextRequest) {
       prompt: prompt.trim(),
       modelId: modelId || "",
       baseUrl,
-      accessKeyId: secret.apiKey,
-      secretAccessKey: secret.secretKey,
+      accessKeyId: creds.apiKey,
+      secretAccessKey: creds.secretKey,
       targetDuration: typeof targetDuration === "number" ? targetDuration : undefined,
     });
   } catch (err) {

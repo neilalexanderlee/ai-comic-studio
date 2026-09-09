@@ -27,7 +27,7 @@ const ALLOWED_AUDIO_TYPES: Record<string, string> = {
  */
 export async function POST(request: NextRequest) {
   // 无鉴权的写盘接口 = 任何人都能往服务器塞文件
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
 
   const formData = await request.formData();

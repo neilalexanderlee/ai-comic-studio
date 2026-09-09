@@ -423,7 +423,59 @@ export const users = sqliteTable("users", {
    * cookie 里带着签发时的版本号（见 lib/auth.ts），异步校验路径会比对这个字段。
    */
   tokenVersion: integer("token_version").notNull().default(0),
+  /**
+   * `user` | `admin`。管理员的 provider_secrets 就是**平台 Key**（见 lib/admin.ts）。
+   *
+   * 第一个管理员由 `ADMIN_USERNAMES` 环境变量幂等授予；空库且未设该变量时，
+   * 第一个注册的人自动是 admin（自部署装机即用）。环境变量**只授予不撤销** ——
+   * 「改了个变量把自己踢出去且看不出为什么」是最难排查的一类故障。
+   */
+  role: text("role").notNull().default("user"),
+  /**
+   * `active` | `disabled`。停用 = 置 disabled + 自增 token_version。
+   *
+   * 这是准入之外的**第二层**：准入挡不住「已进来的账号凭据泄露」。
+   * 支付上线前平台 Key 没有计费闸门兜底，所以停用必须能立刻切断 —— 执行点见
+   * `lib/admin.ts` 的 `isUserDisabled`（带 30 秒 TTL 缓存，接在 api-guard 里）。
+   */
+  status: text("status").notNull().default("active"),
   createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/**
+ * 邀请码 —— 注册准入。
+ *
+ * 选它而不是「管理员直接建号」是因为后者要把明文密码通过 IM 传给对方
+ * （在一个正要收缩密钥暴露面的改造里新开一个凭据泄露面）；
+ * 也不是「用户名白名单」，那个的秘密只是用户名本身、可被抢注。
+ *
+ * 这张表以后就是内测邀请 / 每用户 N 个名额 / 兑换码 / 渠道追踪的载体 ——
+ * 加列即可，不需要另起一套体系。
+ */
+export const inviteCodes = sqliteTable("invite_codes", {
+  id: text("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  /** 备注：发给谁了。泄露时靠它定位 */
+  note: text("note"),
+  createdBy: text("created_by").notNull(),
+  maxUses: integer("max_uses").notNull().default(1),
+  usedCount: integer("used_count").notNull().default(0),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  /** 作废时间。作废是**软删除**：删掉记录就查不出这个码带进来过谁 */
+  revokedAt: integer("revoked_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+/** 谁用了哪个码。顺着一个泄露的码把它带进来的账号全停掉时要用 */
+export const inviteCodeUses = sqliteTable("invite_code_uses", {
+  id: text("id").primaryKey(),
+  codeId: text("code_id").notNull(),
+  userId: text("user_id").notNull(),
+  usedAt: integer("used_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
@@ -666,6 +718,14 @@ export const usageRecords = sqliteTable("usage_records", {
   reservedFromSubscription: integer("reserved_from_subscription").notNull().default(0),
   /** reserved / settled / refunded */
   status: text("status").notNull().default("reserved"),
+  /**
+   * 这次生成烧的是谁的 Key：`user`（BYOK）还是 `platform`（管理员配的平台 Key）。
+   *
+   * 平台限额与全局并发**只作用于 platform** —— 自部署用户永远走 BYOK 分支，
+   * 因此行为一行不变（与 BILLING_ENABLED / WORKER_IN_WEB 同一条默认值原则）。
+   * 以后开计费时，它也是「用自己 Key 的人不该被扣积分」的判据。
+   */
+  keySource: text("key_source").notNull().default("user"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .$defaultFn(() => new Date()),

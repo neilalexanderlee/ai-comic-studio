@@ -6,6 +6,19 @@ vi.mock("@/lib/get-user-id", () => ({
 
 vi.mock("@/lib/provider-secrets", () => ({
   hydrateModelConfigSecrets: async (_userId: string, config: unknown) => config,
+  resolveModelConfigWithSource: async (_userId: string, config: unknown) => ({
+    config,
+    sources: { text: "user", image: "user", video: "user" },
+  }),
+}));
+
+// api-guard 现在会问「这个账号被停用了吗」（lib/admin.ts）—— 本测试的 db 是纯 mock，
+// 没有 users 表，所以把这层直接短路掉：本文件锁的是路由契约，不是停用逻辑。
+vi.mock("@/lib/admin", () => ({
+  isUserDisabled: async () => false,
+  isAdminUser: async () => false,
+  allowUserProviders: () => true,
+  getPlatformKeyOwnerId: async () => null,
 }));
 
 const ownerSelectWhere = vi.fn().mockResolvedValue([{ id: "proj-1" }]);

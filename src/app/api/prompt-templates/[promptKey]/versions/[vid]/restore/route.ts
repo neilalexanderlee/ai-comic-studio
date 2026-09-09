@@ -12,7 +12,7 @@ export async function POST(
   { params }: { params: Promise<{ promptKey: string; vid: string }> }
 ) {
   const { vid } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 

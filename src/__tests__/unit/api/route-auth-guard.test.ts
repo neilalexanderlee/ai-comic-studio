@@ -27,6 +27,7 @@ const AUTH_MARKERS = [
   "requireProjectOwner",
   "requireTaskOwner",
   "requireUser",
+  "requireAdmin",
   "getUserIdFromRequest",
   "getAuthUserIdFromRequest",
   "getFreshAuthUserId",
@@ -116,6 +117,62 @@ describe("API 路由鉴权守卫", () => {
       ).toEqual([]);
     }
   );
+
+  /**
+   * **身份 ≠ 归属。** 路径里带 `[id]`（projectId）的路由，光识别出「你是谁」不算数 ——
+   * 必须再回溯一次「这个项目是不是你的」。
+   *
+   * 起因是三条真实漏洞（2026-09-09 一次性发现并修掉）：
+   *   · `shots/[shotId]/enhance` —— 只用 `getUserIdFromRequest` 查了一下密钥，
+   *     知道 projectId + shotId 就能对别人的分镜跑一次画质增强（花的是 Key 的钱）
+   *   · `episodes/[episodeId]/editor-state` —— 能读走、还能覆盖别人整条剪辑时间线
+   *   · `characters/.../lock-to-ark` —— 能把别人的角色图注册进自己的方舟素材库，
+   *     顺带改掉对方那条资产的状态
+   *
+   * 三条**都通过了**上面两条测试：它们确实调了鉴权函数、返回值也确实被用了 ——
+   * 只是没有用来鉴权。所以标志词扫描这一层，对「带 projectId 的路由」必须更严。
+   *
+   * 认可的归属证明有两种：接 `requireProjectOwner` / `requireTaskOwner`，
+   * 或自己写一条带 `projects.userId` 的查询（`generate/route.ts` 等就是这么做的）。
+   */
+  const OWNERSHIP_MARKERS = ["requireProjectOwner", "requireTaskOwner", "projects.userId"];
+
+  /** 带 projectId 却确实不需要归属校验的，在这里登记理由。 */
+  const NO_OWNERSHIP_ALLOWLIST: Record<string, string> = {};
+
+  const projectScopedRoutes = routeFiles.filter((r) => r.rel.startsWith("projects/[id]/"));
+
+  it("扫描到了带 projectId 的路由（防止过滤条件本身失效导致空跑）", () => {
+    expect(projectScopedRoutes.length).toBeGreaterThan(20);
+  });
+
+  it.each(projectScopedRoutes.map((r) => [r.rel, r.abs] as const))(
+    "%s 校验了项目归属，而不只是识别身份",
+    (rel, abs) => {
+      const src = fs.readFileSync(abs, "utf-8");
+      if (!HTTP_HANDLER.test(src)) return;
+
+      if (rel in NO_OWNERSHIP_ALLOWLIST) {
+        expect(NO_OWNERSHIP_ALLOWLIST[rel].length).toBeGreaterThan(0);
+        return;
+      }
+
+      const proven = OWNERSHIP_MARKERS.some((m) => src.includes(m));
+      expect(
+        proven,
+        `路由 ${rel} 只识别了身份，没有回溯「这个项目属不属于当前用户」。\n` +
+          `请接 requireProjectOwner(request, projectId)，或在查询里带上 projects.userId；\n` +
+          `路径里还带子资源 id 的（characterId / shotId / assetId），再过一次 requireXxxInProject。`
+      ).toBe(true);
+    }
+  );
+
+  it("归属豁免名单里的每一条都必须仍然存在", () => {
+    const all = new Set(routeFiles.map((r) => r.rel));
+    for (const rel of Object.keys(NO_OWNERSHIP_ALLOWLIST)) {
+      expect(all.has(rel), `豁免名单里的 ${rel} 已不存在，请移除`).toBe(true);
+    }
+  });
 
   it("白名单里的每一条都必须仍然存在（防止豁免项变成僵尸配置）", () => {
     const all = new Set(routeFiles.map((r) => r.rel));

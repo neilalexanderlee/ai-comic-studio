@@ -15,6 +15,7 @@ import {
   recordLoginFailure,
   recordLoginSuccess,
 } from "@/lib/auth-rate-limit";
+import { ensureBootstrapAdmins } from "@/lib/admin";
 
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as {
@@ -60,7 +61,26 @@ export async function POST(req: NextRequest) {
   // 成功即清零：否则自己打错几次密码会把自己锁在外面
   recordLoginSuccess(ip, username);
 
-  const res = NextResponse.json({ ok: true, userId: user.id, username: user.username });
+  // 停用的账号必须在**发 cookie 之前**挡下 —— 这是准入之外的第二层：
+  // 内部账号凭据泄露时，管理员点一下停用就能立刻切断它继续消耗平台 Key。
+  if (user.status === "disabled") {
+    return NextResponse.json({ error: "该账号已被停用" }, { status: 403 });
+  }
+
+  // ADMIN_USERNAMES 里的人可能是「变量先设、人后注册」，所以登录时也补一次授予。
+  // 幂等，失败不影响登录本身。
+  try {
+    await ensureBootstrapAdmins();
+  } catch (err) {
+    console.warn("[login] ensureBootstrapAdmins 失败（不影响登录）:", err);
+  }
+
+  const res = NextResponse.json({
+    ok: true,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
+  });
   // 带上当前会话版本号：之后自增该字段即可让这张 cookie 失效
   res.headers.set("Set-Cookie", makeSetCookieHeader(user.id, user.tokenVersion, req));
   return res;

@@ -42,6 +42,10 @@ import type { QuoteInput } from "@/lib/billing/pricing";
  */
 
 import { NextResponse } from "next/server";
+import { ulid } from "ulid";
+import { eq } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { usageRecords } from "@/lib/db/schema";
 
 export function isBillingEnabled(): boolean {
   return process.env.BILLING_ENABLED === "1";
@@ -69,12 +73,66 @@ const NOOP_GATE: Extract<BillingGate, { ok: true }> = {
   refund: async () => {},
 };
 
-export async function openBillingGate(
+/**
+ * 计费关闭、但这次烧的是**平台 Key** 时的「只记账不扣费」闸门。
+ *
+ * 为什么仍要写一行：平台限额与全局并发都是数 `usage_records`
+ * （见 `platform-usage.ts`）。不写这一行，刹车就没有轮子可数。
+ *
+ * 为什么不让 `platform-usage.ts` 自己写：那样一次生成会出现两条记录，
+ * 开了计费之后并发就会按实际的两倍算。**一次生成一条记录，单一归属。**
+ */
+async function openTrackingOnlyGate(
   userId: string,
   input: QuoteInput,
   ctx?: { projectId?: string; shotId?: string; protocol?: string }
+): Promise<Extract<BillingGate, { ok: true }>> {
+  const id = ulid();
+  await db.insert(usageRecords).values({
+    id,
+    userId,
+    projectId: ctx?.projectId ?? null,
+    shotId: ctx?.shotId ?? null,
+    kind: input.kind,
+    protocol: ctx?.protocol ?? null,
+    modelId: input.modelId ?? null,
+    params: JSON.stringify(input),
+    creditsReserved: 0,
+    creditsCharged: 0,
+    status: "reserved",
+    keySource: "platform",
+    createdAt: new Date(),
+  });
+
+  const finish = async (status: "settled" | "refunded") => {
+    await db.update(usageRecords).set({ status }).where(eq(usageRecords.id, id));
+  };
+
+  return {
+    ok: true,
+    credits: 0,
+    explain: "",
+    settle: () => finish("settled"),
+    refund: () => finish("refunded"),
+  };
+}
+
+export async function openBillingGate(
+  userId: string,
+  input: QuoteInput,
+  ctx?: {
+    projectId?: string;
+    shotId?: string;
+    protocol?: string;
+    /** 这次烧的是谁的 Key。缺省 "user" —— 自部署 BYOK 行为一行不变 */
+    keySource?: "user" | "platform";
+  }
 ): Promise<BillingGate> {
-  if (!isBillingEnabled()) return NOOP_GATE;
+  if (!isBillingEnabled()) {
+    return ctx?.keySource === "platform"
+      ? openTrackingOnlyGate(userId, input, ctx)
+      : NOOP_GATE;
+  }
 
   try {
     const reservation = await reserveCredits(userId, input, ctx);

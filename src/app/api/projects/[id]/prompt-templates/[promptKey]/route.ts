@@ -12,7 +12,7 @@ export async function PUT(
   { params }: { params: Promise<{ id: string; promptKey: string }> }
 ) {
   const { id, promptKey } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 
@@ -157,7 +157,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string; promptKey: string }> }
 ) {
   const { id, promptKey } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 

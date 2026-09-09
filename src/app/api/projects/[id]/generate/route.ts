@@ -53,7 +53,12 @@ import { decidePrevizReference } from "@/lib/storyboard/previz-reference";
 import { resolveArtifactUrlForUpstream, isOssRef } from "@/lib/storage/artifact-store";
 import { assembleVideo } from "@/lib/video/ffmpeg";
 import { saveVideoToHistory } from "@/lib/video/video-history";
-import { hydrateModelConfigSecrets } from "@/lib/provider-secrets";
+import { resolveModelConfigWithSource, type KeySource } from "@/lib/provider-secrets";
+import {
+  checkPlatformUsage,
+  platformUsageResponse,
+  recordPlatformUsage,
+} from "@/lib/billing/platform-usage";
 import {
   extractProviderErrorMessage as extractErrorMessage,
   mapUpstreamErrorHttpStatus,
@@ -281,7 +286,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id: projectId } = await params;
-  const guard = requireUser(request);
+  const guard = await requireUser(request);
   if (!guard.ok) return guard.response;
   const userId = guard.userId;
 
@@ -302,10 +307,12 @@ export async function POST(
   };
 
   const { action, payload, modelConfig, episodeId } = body;
-  const resolvedModelConfig = (await hydrateModelConfigSecrets(
-    userId,
-    modelConfig
-  )) as ModelConfig | undefined;
+  // 除了注入密钥，还要知道**这次烧的是谁的 Key** —— 平台限额与全局并发只作用于
+  // 平台 Key（见 lib/billing/platform-usage.ts），BYOK 一行行为都不变。
+  const resolved = await resolveModelConfigWithSource(userId, modelConfig);
+  const resolvedModelConfig = resolved.config as ModelConfig | undefined;
+  const videoKeySource = resolved.sources.video;
+  const imageKeySource = resolved.sources.image;
 
   if (action === "script_generate") {
     return handleScriptGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
@@ -320,11 +327,11 @@ export async function POST(
   }
 
   if (action === "single_character_image") {
-    return handleSingleCharacterImage(projectId, userId, payload, resolvedModelConfig);
+    return handleSingleCharacterImage(projectId, userId, payload, resolvedModelConfig, imageKeySource);
   }
 
   if (action === "batch_character_image") {
-    return handleBatchCharacterImage(projectId, userId, resolvedModelConfig, episodeId);
+    return handleBatchCharacterImage(projectId, userId, resolvedModelConfig, episodeId, imageKeySource);
   }
 
   if (action === "shot_split") {
@@ -368,15 +375,15 @@ export async function POST(
   }
 
   if (action === "single_frame_generate") {
-    return handleSingleFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId);
+    return handleSingleFrameGenerate(projectId, userId, payload, resolvedModelConfig, episodeId, imageKeySource);
   }
 
   if (action === "single_video_generate") {
-    return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig);
+    return handleSingleVideoGenerate(projectId, userId, payload, resolvedModelConfig, videoKeySource);
   }
 
   if (action === "previz_generate") {
-    return handlePrevizGenerate(projectId, userId, payload, resolvedModelConfig);
+    return handlePrevizGenerate(projectId, userId, payload, resolvedModelConfig, videoKeySource);
   }
 
   if (action === "single_video_prompt") {
@@ -705,7 +712,8 @@ async function handleSingleCharacterImage(
   projectId: string,
   userId: string,
   payload?: Record<string, unknown>,
-  modelConfig?: ModelConfig
+  modelConfig?: ModelConfig,
+  keySource: KeySource = "user",
 ) {
   const characterId = payload?.characterId as string;
   const assetId = payload?.assetId as string; // Optional: target asset for saving
@@ -720,6 +728,22 @@ async function handleSingleCharacterImage(
   if (!modelConfig?.image) {
     return NextResponse.json({ error: "No image model configured" }, { status: 400 });
   }
+
+  const charImgUsage = await checkPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: count,
+    protocol: modelConfig.image.protocol,
+  });
+  if (charImgUsage) return platformUsageResponse(charImgUsage);
+  await recordPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: count,
+    protocol: modelConfig.image.protocol,
+    modelId: modelConfig.image.modelId,
+    projectId,
+  });
 
   const [character] = await db
     .select()
@@ -827,7 +851,8 @@ async function handleBatchCharacterImage(
   projectId: string,
   userId: string,
   modelConfig?: ModelConfig,
-  episodeId?: string
+  episodeId?: string,
+  keySource: KeySource = "user",
 ) {
   if (!modelConfig?.image) {
     return NextResponse.json(
@@ -848,6 +873,22 @@ async function handleBatchCharacterImage(
   } else {
     allCharacters = await db.select().from(characters).where(eq(characters.projectId, projectId));
   }
+
+  const batchImgUsage = await checkPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: Math.max(1, allCharacters.length),
+    protocol: modelConfig.image.protocol,
+  });
+  if (batchImgUsage) return platformUsageResponse(batchImgUsage);
+  await recordPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: Math.max(1, allCharacters.length),
+    protocol: modelConfig.image.protocol,
+    modelId: modelConfig.image.modelId,
+    projectId,
+  });
 
   // 项目画风：用于画风硬锁与真人写实锚点注入（CLAUDE.md 核心约定 #3）
   const [batchCharImgProject] = await db
@@ -2201,6 +2242,7 @@ async function handleSingleFrameGenerate(
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
   episodeId?: string,
+  keySource: KeySource = "user",
 ) {
   const shotId = payload?.shotId as string;
   if (!shotId) {
@@ -2214,6 +2256,25 @@ async function handleSingleFrameGenerate(
   if (!shot) {
     return NextResponse.json({ error: "Shot not found" }, { status: 404 });
   }
+
+  // 平台 Key 的图片日额度。BYOK 时 checkPlatformUsage 直接放行且不查库。
+  const imgUsage = await checkPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: 1,
+    protocol: modelConfig.image.protocol,
+  });
+  if (imgUsage) return platformUsageResponse(imgUsage);
+  await recordPlatformUsage(userId, {
+    kind: "image",
+    keySource,
+    imageCount: 1,
+    protocol: modelConfig.image.protocol,
+    modelId: modelConfig.image.modelId,
+    projectId,
+    shotId,
+  });
+
 
   const versionedUploadDir = await getVersionedUploadDir(shot.versionId);
 
@@ -2540,6 +2601,7 @@ async function handlePrevizGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
+  keySource: KeySource = "user",
 ) {
   const shotId = payload?.shotId as string;
   if (!shotId) {
@@ -2592,6 +2654,15 @@ async function handlePrevizGenerate(
   if (previzLimit) return planLimitResponse(previzLimit);
 
   // 预演也走计费闸门：它同样消耗上游算力。480p + flex 的报价本来就低。
+  // 白模预演走的是同一个模型、同一把 Key，所以受同一份平台额度约束
+  const previzUsage = await checkPlatformUsage(userId, {
+    kind: "video",
+    keySource,
+    durationSeconds: effectiveDuration,
+    protocol: videoProtocol,
+  });
+  if (previzUsage) return platformUsageResponse(previzUsage);
+
   const billing = await openBillingGate(
     userId,
     {
@@ -2600,7 +2671,7 @@ async function handlePrevizGenerate(
       durationSeconds: effectiveDuration,
       resolution: "480p",
     },
-    { projectId, shotId, protocol: videoProtocol }
+    { projectId, shotId, protocol: videoProtocol, keySource }
   );
   if (!billing.ok) return billing.response;
 
@@ -2718,6 +2789,7 @@ async function handleSingleVideoGenerate(
   userId: string,
   payload?: Record<string, unknown>,
   modelConfig?: ModelConfig,
+  keySource: KeySource = "user",
 ) {
   const shotId = payload?.shotId as string;
   if (!shotId) {
@@ -2815,15 +2887,24 @@ async function handleSingleVideoGenerate(
   // ── 计费闸门（BILLING_ENABLED=1 时生效，否则完全空操作）──────────────────
   // 必须在调用上游之前预扣：视频生成是数分钟的长任务，生成完再扣费时，
   // 余额不足的钱已经花在上游了，追不回来。
+  const videoSeconds = Math.min(shot.duration ?? 10, videoCapability.duration.max);
+  const videoUsage = await checkPlatformUsage(userId, {
+    kind: "video",
+    keySource,
+    durationSeconds: videoSeconds,
+    protocol: videoProtocol,
+  });
+  if (videoUsage) return platformUsageResponse(videoUsage);
+
   const billing = await openBillingGate(
     userId,
     {
       kind: "video",
       modelId: modelConfig?.video?.modelId,
-      durationSeconds: Math.min(shot.duration ?? 10, videoCapability.duration.max),
+      durationSeconds: videoSeconds,
       resolution: (payload?.resolution as string) ?? "480p",
     },
-    { projectId, shotId, protocol: videoProtocol }
+    { projectId, shotId, protocol: videoProtocol, keySource }
   );
   if (!billing.ok) return billing.response;
 

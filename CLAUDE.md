@@ -191,7 +191,7 @@ VideoProvider    // generateVideo
 
 **Boolean 列**：统一用 `integer("col_name").notNull().default(0)`（0/1），不用 SQLite 的 BOOLEAN。
 
-**当前最新迁移索引**：`idx 62` — `0062_task_progress`
+**当前最新迁移索引**：`idx 63` — `0063_admin_invite_usage`
 
 ### 关键表
 
@@ -203,6 +203,8 @@ VideoProvider    // generateVideo
 | `shots` | 单个分镜；帧字段：`anchorFirst`、`anchorLastAi`、`cutPoint`；`previewUrl`/`posterUrl`（480p 预览代理与封面，migration 0058）；`previzSelectedId`（已选用的白模预演，migration 0059）；`track`（`emotion`/`framing`/`lightingAtm`/`sceneId` 已全部移除，三列由 migration `0057` 补删完成）|
 | `episodes.previz_scene` | 3D 导演台的**场景**（JSON）：一集搭好的景 + 出场演员身形，跨镜共用。只有数字，不内嵌素材路径 |
 | `shots.previz_blocking` / `previz_layout_url` | 本镜的走位与机位（JSON，参数化机位：主体/方位角/距离/高度/焦距）；以及导演台导出的构图参考图 |
+| `users` | 账号。`role`（`user`/`admin`，管理员的 `provider_secrets` 即平台 Key）、`status`（`active`/`disabled`，停用是撤销层的开关）、`tokenVersion`（自增即批量失效 cookie）|
+| `invite_codes` / `invite_code_uses` | 邀请码与「谁用了哪个码」。作废是软删除 —— 删掉记录就查不出这个码带进来过谁 |
 | `subscriptions` | 订阅（一用户一条）。周期滚动是**惰性**的：`ensureSubscriptionPeriod()` 在闸门与余额读取处调用，发现周期已过就当场滚动，不用 cron |
 | `orders` | 订单。状态机 `pending → paid / closed → refunded`；价格与积分在下单时快照，改价不影响历史；`UNIQUE(channel, channel_trade_no)` 是回调幂等的数据库兜底 |
 | `shot_previz` | 白模预演 take（一个分镜可多条）；`videoUrl`/`posterUrl`/`prompt`/`modelId`/`duration`/`resolution`。选中的那条由 `shots.previzSelectedId` 指向，正式生成时作为 `reference_video` 传给 Seedance 2.5 |
@@ -466,6 +468,20 @@ getUserIdFromRequest(request); // ❌ 注释写着 auth check，实际返回值�
 **注意 `getUserIdFromRequest` 包含匿名指纹用户**（`src/proxy.ts` 下发的 `ai_comic_uid`），
 所以本地匿名使用不受影响，被挡住的只有跨租户访问。
 
+⚠️ **身份 ≠ 归属，而按标志词扫描分不出这两者。** 一条路由可以老老实实调用
+`getUserIdFromRequest` 并使用它的返回值 —— 只是拿去**查密钥**而不是**校验归属**，
+于是两条守卫测试全绿、洞照样在。2026-09-09 一次性发现三条这种形状的：
+
+| 路由 | 后果 |
+|---|---|
+| `shots/[shotId]/enhance` | 知道 projectId + shotId 就能对别人的分镜跑画质增强（花 Key 的钱）|
+| `episodes/[episodeId]/editor-state` | 读走**并覆盖**别人整条剪辑时间线，不可逆 |
+| `characters/.../assets/.../lock-to-ark` | 把别人的角色图注册进自己的方舟素材库，顺带改掉对方资产状态 |
+
+所以守卫测试补了第三条断言：**`projects/[id]/**` 下的路由必须证明归属** ——
+接 `requireProjectOwner` / `requireTaskOwner`，或自己写一条带 `projects.userId`
+的查询（`generate/route.ts` 就是后者）。只识别身份直接判红。
+
 ### 8c. 计费闸门 — 默认关闭，三段式扣费
 
 **`BILLING_ENABLED` 未设为 `"1"` 时，`src/lib/billing/gate.ts` 全部退化为空操作**，
@@ -668,12 +684,12 @@ P3（运镜时间线 + 本地渲染运镜视频）、背景板均已完成。
 `src/lib/billing/plans.ts`（套餐是**代码常量，不建表**，与 `VIDEO_CAPABILITIES` 同一套做法；
 可审计性由订单快照保证）、`subscription.ts`、`orders.ts`。
 
-⚠️ **积分体系假设「平台出 Key、用户花积分」，而生成链路目前是 BYOK（用户自带 Key）——
-两者尚未对接。** `provider_secrets` 按用户存，全仓没有管理员概念（`admin`/`role` 零命中），
-所以今天真有人注册，他会**既付积分又要自带 API Key**。
-对接需要：管理员概念 + 平台 Key 解析 + 锁设置页 + `models/list` 改读管理员配置 + 全局并发调度；
-前提（上游地址只能来自服务端）见约定 8n，已完成。**建议与支付接入一起做** ——
-没有支付渠道用户充不了值，先做完只会让平台 Key 的暴露面提前存在几个月。
+⚠️ **「平台出 Key」那半边已于 2026-09-09 落地（约定 8p），但支付仍未接入。**
+管理员概念、平台 Key 解析、锁设置页、`models/list` 改读服务端配置、全局并发调度都已完成；
+前提（上游地址只能来自服务端）见约定 8n。
+**还缺的是支付渠道** —— 没有它用户充不了值，所以 `BILLING_ENABLED` 保持关闭，
+平台 Key 的开销靠约定 8p 的用量刹车（每人每 24 小时的秒数/张数上限 + 全局并发）兜住，
+而不是靠积分。这段「有平台 Key、没有计费」的暴露期是**主动接受**的，不是遗漏。
 清单见 `docs/PLAN-2026-09-SEEDANCE25-SAAS.md` 的「待办清单」B 节。
 
 **产品前提**：这门生意几乎是纯成本转嫁（2.5 · 720p 上游 ¥1.51/秒），**积分本身就是商品**，
@@ -931,6 +947,119 @@ URL 上贴 `x-oss-process` 会让签名失效，直接 403。
 **本地引用（未配 OSS 的自部署）不做缩略图**：文件就在本机磁盘上，不产生流量也不产生费用，
 为它引入一个图片处理依赖不划算。与 `BILLING_ENABLED` / `WORKER_IN_WEB` 同一条原则：
 **默认值要让单机装机即用**。
+
+### 8p. 平台统一 Key —— 三层防线，以及「谁能注册」为什么是其中最弱的一层
+
+约定 8i 原话是「建议与支付接入一起做 —— 没有支付渠道用户充不了值，先做完只会让
+平台 Key 的暴露面提前存在几个月」。2026-09-09 主动决定**不等支付先做**（内部小范围使用），
+也就是主动接受了这段暴露期。
+
+**准入、撤销、止损是三件不同的事，缺哪层都补不上另一层：**
+
+| 层 | 回答的问题 | 落在哪 |
+|---|---|---|
+| **准入** | 谁能拿到账号 | `REGISTRATION_MODE` + `invite_codes` |
+| **撤销** | 已有账号怎么立刻切断 | `users.status='disabled'` + `bumpUserTokenVersion` |
+| **止损** | 前两层都失效时最多烧掉多少钱 | `billing/platform-usage.ts` |
+
+选邀请码而不是「管理员直接建号」：后者要把明文密码经 IM 传给对方，在一个正要
+**收缩**密钥暴露面的改造里新开一个凭据泄露面。也不是「用户名白名单」：那个的秘密
+只是用户名本身、可被抢注。`invite_codes` 这张表以后就是内测邀请 / 每用户 N 个名额 /
+兑换码 / 渠道追踪的载体，加列即可，不需要另起体系。
+
+⚠️ **`REGISTRATION_MODE` 与 `ALLOW_REGISTRATION` 冲突时 fail closed。**
+后者是别人当安全措施设下的，被一个后加的开关静默重新打开，正是已知陷阱表里
+反复出现的那类故障（「部署成功了跑的却是旧代码」「安全组放行了容器只绑回环」——
+都是两道闸里只开了一道却以为全开了）。冲突时打一条明确告警说清楚怎么改。
+
+**第一个管理员**：`ADMIN_USERNAMES`（逗号分隔）在 bootstrap 与每次登录时**幂等授予**；
+空库且未设该变量时，第一个注册的人自动是 admin。
+为什么不只用后者：**它在已有库上永远不触发** —— 要让它生效就得写一条「把最早创建的
+用户设为 admin」的迁移，等于把策略判断固化进迁移，且可能授权给错误的账号。
+环境变量**只授予不撤销**（「改了个变量把自己踢出去且看不出为什么」最难排查），
+它同时是逃生通道：丢了权限就改一行重启。
+
+#### ⚠️ 唯一必须记住的安全不变量：密钥和端点必须来自同一个归属人
+
+`providerId` 是**客户端生成的 ULID**，存在用户自己的 model-store 里；平台模式下
+客户端还会拿到管理员那份 provider 列表，也就知道了管理员的 providerId。
+所以只要实现写成「地址取用户的 prefs、密钥取管理员的」，用户建一条同 id、
+`baseUrl` 指向自己服务器的记录，**一个请求就收到平台 Key** ——
+正是约定 8n 想堵的洞换个姿势复活。
+
+`provider-secrets.ts` 的 `readOwnedCredentials(ownerId, providerId)` 把两者绑在同一个
+ownerId 上，是**唯一允许读取平台 Key 的路径**；
+`platform-key-resolution.test.ts` 有一条用例专门复现这个攻击面。
+
+解析顺序：**用户自己的 Key → 平台 Key → 都没有则不注入**（不注入 ≠ 退回用请求体地址）。
+`ALLOW_USER_PROVIDERS=0`（托管）时非管理员跳过第一步。
+
+#### keySource 现在就要一路传下去
+
+`resolveModelConfigWithSource` 返回 `sources: { text, image, video }`。
+等以后开计费再补这个字段，就是一次「写入路径和读取路径不一致」的半途重构
+（约定 8d 警告过的那种）。今天它决定限额是否生效，将来它决定「用自己 Key 的人不扣积分」。
+
+#### 用量刹车与 BILLING_ENABLED 解耦
+
+`BILLING_ENABLED` 保持关闭意味着 `openBillingGate` 是空操作、`checkConcurrency`
+直接 return null —— **从生成入口到上游之间一个计数器都没有**。而 Seedance 2.5 · 720p
+是 ¥1.51/秒：一个 7 秒分镜 ≈ ¥10.6，一集 15 镜 ≈ ¥159，凭据泄露挂一夜四位数起。
+
+所以 `platform-usage.ts` 独立于计费存在，**但只作用于 `keySource === "platform"` 的请求**：
+自部署永远走 BYOK 分支，行为一行不变（与 8c/8j/8k 同一条默认值原则）。
+
+- 视频按**秒**算不按条算（钱按秒烧）：`PLATFORM_DAILY_VIDEO_SECONDS`（默认 120）
+- 窗口是**滚动 24 小时**不是自然日 —— 容器 UTC、宿主机 CST，「今天」从哪刻算起
+  会变成一个需要换算的问题（已知陷阱表有一条 8 小时偏移的教训），滚动窗口也顺带
+  堵掉「卡零点重置刷两倍」。文案要写「最近 24 小时」，不能写「今日」
+- 全局并发数 `usage_records` 里 `status='reserved'` 且 `key_source='platform'` 的条数，
+  按协议分组，超了**直接 429 拒绝不排队**（排队要改 SSE 契约、接任务队列，不值得）
+- 认不出来的环境变量值**回落到默认值而不是 0** —— 这个开关的失效方式应当是
+  「没省到钱」，不是「谁都用不了」
+- 计费关闭 + 平台 Key 时，`openBillingGate` 退化为**只记账不扣费**的闸门：
+  仍写一条 `credits=0` 的记录。不写就没有轮子可数；而**让 `platform-usage.ts` 自己写**
+  会导致一次生成两条记录，开了计费之后并发按两倍算
+
+#### 客户端怎么知道有哪些模型
+
+`GET /api/platform/providers`：平台模式下非管理员从这里拿管理员那份 provider 列表
+（脱敏，无 Key），`ModelStoreServerSync` **无条件覆盖**本地列表。
+「本地为空才合并」在这里是错的 —— 用户本地留着一份旧列表就不会更新，
+结果是管理员换了模型、用户还在用一个已不存在的 providerId，而报错只会是「未配置 Key」。
+
+#### 刹车必须看得见 —— `GET /api/admin/usage`
+
+支付没接、`BILLING_ENABLED` 关着，于是 `credit_accounts` 全是 0，
+**平台 Key 到底烧了多少钱，账面上完全看不出来**。管理后台的「平台 Key 用量」
+面板按最近 24 小时汇总每个人的秒数/张数/条数，并用 `quoteCredits().upstreamCostYuan`
+反推**估算**金额（与生成时同一套纯函数，不会出现「报价一套、对账另一套」）。
+
+这条是本项目自己的教训：**监控要在需要它之前就验证过一次** ——
+sysstat 装了却是 `ENABLED="false"`，事故当下一个指标都拿不到。
+
+⚠️ 汇总口径必须与 `checkPlatformUsage` 完全一致（退还的不算、24 小时窗口、
+15 分钟残骸不计入在飞）。两处不一致的话，界面显示的和实际挡人的就对不上，
+而这种偏差只会在用户抱怨「我明明没用满」的时候才暴露。
+
+#### 平台 Key 要覆盖**所有**花钱的路径，不只是生成三件套
+
+画质增强（`shots/[shotId]/enhance`，AI MediaKit）原来只查用户自己的密钥。
+托管模式下非管理员的设置页**不显示** MediaKit 配置区 —— 于是必然查不到，
+而报错还写着「请前往设置填写」，指向一个根本不存在的入口。
+已改为走 `resolveProviderCredentials`（同一套「用户 → 平台」优先级），
+并按镜头时长计入同一份视频额度：**额度的语义是「这个人每天最多花多少钱」，
+不是「最多生成多少条」。**
+
+⚠️ `VOLCENGINE_ENHANCE_API_KEY` 这类**环境变量兜底本质上也是一把平台 Key**，
+但它记为 `keySource: "user"`、不受限额约束 —— 因为自部署用户设它就是在用自己的 Key。
+托管部署要让限额生效，就把 Key 配在管理员设置页里（那才是平台 Key 的标准路径）。
+
+#### `/api/models/list` 的那半边（约定 8n 的遗留项）
+
+已改为按 `providerId` 从服务端解析。唯一例外：**有权自己配 Key 的人**
+（自部署默认全员、平台模式下的管理员）仍可带内联 apiKey ——
+设置页「保存前先测一下这把 Key」必须能用，否则新用户根本没法完成配置。
 
 ### 9. Drizzle null 比较
 
@@ -1441,6 +1570,10 @@ src/lib/evals/
 | 差点误判「每天的定时备份从来没成功过」 | **容器跑 UTC，宿主机跑 CST，差 8 小时**。备份文件名由容器内的 `stamp()` 生成，所以是 UTC；而 cron 时刻（`30 4 * * *`）是宿主机的 CST。于是 04:30 CST 的那次备份落地成 `aicomic-20260904-203003.db.gz`（= 09-04 20:30 UTC），拿文件名去对 cron 时刻**四份全对不上**，看起来就像定时任务从未产出过东西。实际它一直正常 —— 日志 mtime `04:30:03.435` 与该文件精确吻合 | **看备份时间一律先换算**：文件名 UTC + 8h = 北京时间。验证「昨晚的备份跑了没」的可靠做法是比对 `journalctl \| grep CRON` 的执行记录与日志文件 mtime，而不是读文件名。⚠️ 事故排查时这类 8 小时偏移最容易导致错误结论，因为它让「有」看起来像「没有」，而人在压力下倾向于相信坏消息 |
 | 事故后想查内存/IO，却发现**监控从来没在采集** | 服务器装了 sysstat、cron 里也确实每 10 分钟调 `debian-sa1`，但 `/etc/default/sysstat` 里是 **`ENABLED="false"`**（Debian/Ubuntu 的出厂默认），`/var/log/sysstat/` 一直是空的。于是 2026-09-05 那次冻结事后**一个指标都拿不到**。⚠️ 更麻烦的是方法论层面：**若冻结源于 I/O 卡死，journald 自己就写不进日志** —— 「没有 hung task 记录」在该假设下本来就是预期结果，**不能拿它去排除该假设** | `sed -i 's/^ENABLED="false"/ENABLED="true"/' /etc/default/sysstat && systemctl enable --now sysstat`，并**当场采一个样读回来验证**（`debian-sa1 1 1` 后 `sar -r`）—— 装了不等于在跑，在跑不等于读得出来。**监控要在需要它之前就验证过一次**，否则事故当下才发现是空的，那次事故就永远查不出来了 |
 | `next build` 在小内存机器上不设防，失败方式极差 | 不是「构建失败」，而是**把整台机器拖到无法响应**：内核还能完成 TCP 握手、用户态起不了新进程、连日志都写不进去，事后毫无证据。而且 `docker compose build` 期间**旧容器还在跑**（实测约 638 MB），构建实际可用的内存比 `free -m` 看到的少 | `NODE_BUILD_MEMORY` build arg → builder 阶段的 `NODE_OPTIONS=--max-old-space-size`。**默认为空 = 不设限**，与改造前一致（自部署机器通常更宽裕，硬塞上限只会拖慢构建，与 `NPM_REGISTRY` / `ALPINE_MIRROR` 同一条原则）；那台 2c4g 在 `.env` 里设 2048。意义不是「防 OOM」而是**换一种失败方式**：最坏变成「构建自己 OOM 失败、机器活着」。⚠️ 只在 builder 阶段设 `ENV`，runner 是独立 stage 不会继承 —— **部署后要验一次运行容器里 `NODE_OPTIONS` 确实未设置**，否则会把线上应用的堆一起限死 |
+| `requireUser` 从同步改成异步之后，漏掉 `await` 不会报错 | `guard.ok` 变成读一个 Promise 的属性 = `undefined`（falsy），于是路由**整体拒绝**而不是整体放行 | 这是刻意选的失效方向：错法会立刻暴露（功能全坏），而不是静默放行。24 个调用点已全部改为 `await requireUser(...)`，`tsc` 也能挡住大部分 |
+| 计费相关单测在加了 `users` 表查询之后集体炸 `Database.prepare` | 那些测试的内存库只建了计费五张表；而 `lib/admin.ts` 会问「这个用户是不是管理员 / 平台 Key 挂在谁名下」 | `__tests__/helpers/billing-schema.ts` 补 `users` 表与 `usage_records.key_source`。**凡是被生成/计费链路调用的新模块，都要检查共享测试 DDL 是否跟得上** |
+| `baseline-schema.test.ts` 会在**每次新增迁移**时误报 | 它断言 `已应用条数 === 基线覆盖条数`，等于假设 `throughTag` 永远是 journal 的最后一条。而设计本来就是「基线覆盖的标记为已应用、之后的增量执行」 | 改断言 `已应用条数 === journal.entries.length`。基线本身不需要每次重导 —— `pnpm baseline:dump` 只在基线明显过期时才跑 |
+| 三条路由「调了鉴权函数、返回值也用了」，却仍然是 IDOR | 它们把 `getUserIdFromRequest` 的结果拿去**查密钥**而不是**校验归属**（`enhance` / `editor-state` / `lock-to-ark`）。守卫测试的两条断言（标志词存在、返回值没被丢弃）**全都满足**，所以三条洞在绿灯下活了很久。平台 Key 上线后代价从「改别人数据」升级成「花平台的钱」 | 三条都补 `requireProjectOwner` + 对应的 `requireXxxInProject`；守卫测试新增第三条断言：`projects/[id]/**` 必须有归属证明（助手或 `projects.userId` 查询），只识别身份判红。**已反向验证该断言不是空跑**（临时摘掉 enhance 的守卫 → 精确报红，还原 → 绿）|
 | 本机跑 `docs:backup`/`db:backup` 偶发 OSS 上传超时（`ResponseTimeoutError`），看着像配置或密钥出了问题 | **这不是上一条「VPN 伪造连接成功」的同一现象，是它的反面**：上一条是连接被伪造成「成功」，这次是本地 VPN 状态不好时**真实的 HTTPS 请求**（握手能建立，但数据传输不畅）在应用层超时失败。实测同一份 0.33MB 的包连续失败 4 次，**什么都没改**、只是换个时间点重试，第一次就成功 | **先用控制端口对照测试判断本机网络当前是否可信**（连一个没放行的端口，`成功`说明不可信），若不可信就**直接重试那个失败的操作本身**（不是重试对照测试）——过去多次证实间隔几分钟重试 1–2 次即可，不需要改配置、怀疑密钥或改代码。**偶发的 OSS 上传超时先当网络问题重试，不要当成代码/密钥问题去排查**，真信号是「反复重试仍然失败」而不是「失败过一次」|
 | 两端 sqlite3 / 哈希工具版本不同，指纹恒报「不一致」 | 本地 3.50、服务器 3.37，`.dump` 文本格式可能有差异；`shasum`（mac）与 `sha256sum`（linux）输出也不通用 | 比 `SELECT *` 的行数据而非 dump 文本（本库全是 TEXT/INTEGER，跨版本稳定）；哈希改用 POSIX `cksum`；按表算 CRC 后整库指纹只有 700 字节，还能直接说出是哪张表不同 |
 
@@ -1507,3 +1640,7 @@ pnpm dev
 - [ ] 关键函数有对应单测
 - [ ] **空库能建起来**：加了迁移之后跑一次 `baseline-schema.test.ts`（约定 8l）
 - [ ] 新 API 路由接了 `api-guard`，或在 `route-auth-guard.test.ts` 白名单里登记了理由（约定 8b）
+- [ ] 管理端路由用 `requireAdmin`（约定 8p）
+- [ ] 新的花钱路径传了 `keySource`，并在调用上游前过 `checkPlatformUsage`（约定 8p）
+- [ ] 读平台 Key 只经 `readOwnedCredentials` —— 密钥与端点必须同源（约定 8p）
+- [ ] `projects/[id]/**` 的新路由证明了**归属**而不只是识别身份（约定 8b）

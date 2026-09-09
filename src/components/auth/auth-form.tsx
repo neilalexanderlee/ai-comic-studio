@@ -15,6 +15,8 @@ interface Props {
   mode: AuthMode;
   /** 成功后回到哪里。已由服务端的 safeNext 校验过是站内相对路径 */
   next: string;
+  /** 邀请制注册：多要一个邀请码。由服务端页面按 REGISTRATION_MODE 传入 */
+  requireInviteCode?: boolean;
 }
 
 /**
@@ -27,14 +29,16 @@ interface Props {
  *
  * 匿名数据迁移走 `lib/client/anon-session`，与设置页共用一份实现。
  */
-export function AuthForm({ mode, next }: Props) {
+export function AuthForm({ mode, next, requireInviteCode = false }: Props) {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [inviteCode, setInviteCode] = useState("");
   const [loading, setLoading] = useState(false);
 
   const isRegister = mode === "register";
+  const needInvite = isRegister && requireInviteCode;
   const [anonId, setAnonId] = useState<string | null>(null);
 
   // ⚠️ **必须在 effect 里读，不能在 render 里读。**
@@ -53,7 +57,11 @@ export function AuthForm({ mode, next }: Props) {
       const res = await fetch(isRegister ? "/api/auth/register" : "/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({
+          username: username.trim(),
+          password,
+          ...(needInvite ? { inviteCode: inviteCode.trim() } : {}),
+        }),
       });
       const data = (await res.json()) as { ok?: boolean; error?: string; username?: string };
 
@@ -115,6 +123,20 @@ export function AuthForm({ mode, next }: Props) {
         </div>
       </div>
 
+      {needInvite && (
+        <div className="space-y-1.5">
+          <Label className="text-xs">邀请码</Label>
+          <Input
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+            placeholder="向管理员索取"
+            autoComplete="off"
+            disabled={loading}
+            className="font-mono tracking-wider"
+          />
+        </div>
+      )}
+
       {anonId && (
         <p className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
           检测到浏览器中有旧数据，注册后将自动迁移到新账号。
@@ -127,7 +149,11 @@ export function AuthForm({ mode, next }: Props) {
         主 CTA 的文字本身已经足够明确，全站因此只保留 `LogOut` 一个箭头类图标，
         不会再出现两个相似图标同时存在的情况。
       */}
-      <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password}>
+      <Button
+        type="submit"
+        className="w-full"
+        disabled={loading || !username.trim() || !password || (needInvite && !inviteCode.trim())}
+      >
         {loading && <Loader2 className="h-4 w-4 animate-spin" />}
         {isRegister ? "创建账号" : "登录"}
       </Button>

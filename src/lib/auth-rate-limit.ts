@@ -103,9 +103,35 @@ export function recordLoginSuccess(ip: string, username: string): void {
   buckets.delete(`user:${username}`);
 }
 
+// ─── 注册（邀请码）限速 ───────────────────────────────────────────────────────
+
+/**
+ * 邀请码窗口内允许的失败次数。比登录宽松一点（码比密码长、熵更高），
+ * 但仍要有 —— 邀请制下这个接口就是准入闸本身，不限速等于送一个免费爆破入口。
+ */
+const MAX_INVITE_ATTEMPTS = 12;
+
+/** 校验邀请码**之前**调用 */
+export function checkRegisterAllowed(ip: string, now = Date.now()): RateLimitVerdict {
+  prune(now);
+  const n = peek(`reg:${ip}`, now);
+  if (n < MAX_INVITE_ATTEMPTS) return { blocked: false, retryAfterSeconds: 0 };
+  const b = buckets.get(`reg:${ip}`);
+  const elapsed = b ? now - b.since : 0;
+  return {
+    blocked: true,
+    retryAfterSeconds: Math.max(1, Math.ceil((WINDOW_MS - elapsed) / 1000)),
+  };
+}
+
+/** 邀请码校验失败时调用 */
+export function recordRegisterAttempt(ip: string, now = Date.now()): void {
+  hit(`reg:${ip}`, now);
+}
+
 /** 仅供测试 */
 export function __resetLoginRateLimit(): void {
   buckets.clear();
 }
 
-export const LOGIN_RATE_LIMIT = { WINDOW_MS, MAX_FAILURES } as const;
+export const LOGIN_RATE_LIMIT = { WINDOW_MS, MAX_FAILURES, MAX_INVITE_ATTEMPTS } as const;

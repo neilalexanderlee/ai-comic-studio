@@ -24,7 +24,16 @@ CREATE TABLE usage_records (
   kind TEXT NOT NULL, protocol TEXT, model_id TEXT, params TEXT,
   credits_reserved INTEGER NOT NULL DEFAULT 0, credits_charged INTEGER NOT NULL DEFAULT 0,
   upstream_usage INTEGER, reserved_from_subscription INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL DEFAULT 'reserved', created_at INTEGER NOT NULL
+  status TEXT NOT NULL DEFAULT 'reserved',
+  key_source TEXT NOT NULL DEFAULT 'user',
+  created_at INTEGER NOT NULL
+);
+-- 计费链路会问「这个用户是不是管理员 / 平台 Key 挂在谁名下」（lib/admin.ts），
+-- 所以哪怕本组测试不关心账号，users 表也必须存在
+CREATE TABLE users (
+  id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+  token_version INTEGER NOT NULL DEFAULT 0, role TEXT NOT NULL DEFAULT 'user',
+  status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL
 );
 CREATE TABLE subscriptions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL UNIQUE, plan_code TEXT NOT NULL,
@@ -49,4 +58,5 @@ export const BILLING_TABLES = [
   "usage_records",
   "subscriptions",
   "orders",
+  "users",
 ] as const;
