@@ -29,6 +29,7 @@ const USER = "u1";
 function seedUsage(opts: {
   kind: string;
   seconds?: number;
+  resolution?: string;
   images?: number;
   status?: string;
   keySource?: string;
@@ -48,7 +49,11 @@ function seedUsage(opts: {
       opts.userId ?? USER,
       opts.kind,
       opts.protocol ?? "seedance",
-      JSON.stringify({ durationSeconds: opts.seconds, imageCount: opts.images }),
+      JSON.stringify({
+        durationSeconds: opts.seconds,
+        resolution: opts.resolution,
+        imageCount: opts.images,
+      }),
       opts.status ?? "settled",
       opts.keySource ?? "platform",
       Math.floor((Date.now() - (opts.ageMs ?? 0)) / 1000)
@@ -122,6 +127,51 @@ describe("视频按秒计", () => {
     vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "120");
     seedUsage({ kind: "video", seconds: 119, keySource: "user" });
     expect(await check({ kind: "video", keySource: "platform", durationSeconds: 100 })).toBeNull();
+  });
+});
+
+describe("⚠️ 视频额度是 480p 等效秒，不是裸秒数", () => {
+  // 按裸秒算的话，同一份额度选 4K 就能烧掉 20 倍的钱 ——
+  // 额度就从「每天最多花多少钱」退化成「最多生成多长的片子」。
+  it("720p 一秒按 2.25 秒计", async () => {
+    vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "10");
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 4, resolution: "720p" })
+    ).toBeNull(); // 4 × 2.25 = 9 ≤ 10
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 5, resolution: "720p" })
+    ).not.toBeNull(); // 5 × 2.25 = 11.25 > 10
+  });
+
+  it("1080p 与 4K 折算更狠", async () => {
+    vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "20");
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 5, resolution: "1080p" })
+    ).not.toBeNull(); // 5 × 5.06 = 25.3 > 20
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 2, resolution: "4k" })
+    ).not.toBeNull(); // 2 × 20.25 = 40.5 > 20
+  });
+
+  it("历史用量也按分辨率折算", async () => {
+    vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "30");
+    seedUsage({ kind: "video", seconds: 10, resolution: "720p" }); // 记 22.5
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 8, resolution: "480p" })
+    ).not.toBeNull(); // 22.5 + 8 > 30
+  });
+
+  it("认不出来的分辨率按 1 倍计 —— 宁可少算也不要把人挡在门外", async () => {
+    vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "10");
+    expect(
+      await check({ kind: "video", keySource: "platform", durationSeconds: 9, resolution: "奇怪的写法" })
+    ).toBeNull();
+  });
+
+  it("不传分辨率时按 480p（不放大也不少挡）", async () => {
+    vi.stubEnv("PLATFORM_DAILY_VIDEO_SECONDS", "10");
+    expect(await check({ kind: "video", keySource: "platform", durationSeconds: 9 })).toBeNull();
+    expect(await check({ kind: "video", keySource: "platform", durationSeconds: 11 })).not.toBeNull();
   });
 });
 

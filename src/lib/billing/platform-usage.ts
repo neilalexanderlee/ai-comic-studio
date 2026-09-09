@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, count, eq, gte } from "drizzle-orm";
 import { ulid } from "ulid";
 import { users } from "@/lib/db/schema";
-import { quoteCredits } from "./pricing";
+import { quoteCredits, resolutionMultiplier } from "./pricing";
 import { db } from "@/lib/db";
 import { usageRecords } from "@/lib/db/schema";
 import type { KeySource } from "@/lib/provider-secrets";
@@ -34,7 +34,17 @@ import type { KeySource } from "@/lib/provider-secrets";
  * 代价是文案要写清楚是「最近 24 小时」，不能写「今日」。
  */
 
-/** 视频按**秒**计，不按条 —— 钱是按秒烧的 */
+/**
+ * 视频额度：**480p 等效秒**。
+ *
+ * ⚠️ 不能按裸秒数计。成本随分辨率放大得很厉害（720p ×2.25、1080p ×5.06、4K ×20.25），
+ * 按裸秒算的话，同一份「120 秒」用户选 4K 就能烧掉 20 倍的钱 ——
+ * 那这个额度就不再是「每天最多花多少钱」，而退化成「最多生成多长的片子」，
+ * 而后者恰恰不是我们想限制的东西。
+ *
+ * 所以一律折算成 480p 等效：120 表示「相当于 120 秒 480p」，
+ * 换成 720p 就是约 53 秒真实时长。
+ */
 const DEFAULT_DAILY_VIDEO_SECONDS = 120;
 const DEFAULT_DAILY_IMAGE_COUNT = 200;
 const DEFAULT_DAILY_MUSIC_COUNT = 20;
@@ -77,6 +87,8 @@ export interface PlatformUsageRequest {
   keySource: KeySource;
   /** 视频/音乐：本次的秒数 */
   durationSeconds?: number;
+  /** 视频：分辨率 —— 额度按 480p 等效秒计，必须传，否则高分辨率会被少算 */
+  resolution?: string | null;
   /** 图片：本次张数，默认 1 */
   imageCount?: number;
   /** 并发按协议分组统计 */
@@ -123,6 +135,7 @@ export async function recordPlatformUsage(
     params: JSON.stringify({
       kind: req.kind,
       durationSeconds: req.durationSeconds,
+      resolution: req.resolution,
       imageCount: req.imageCount,
     }),
     creditsReserved: 0,
@@ -133,17 +146,22 @@ export async function recordPlatformUsage(
   });
 }
 
-/** 一条 usage_record 折算成的「用量单位」（视频=秒，其余=次） */
+/** 一条 usage_record 折算成的「用量单位」（视频=480p 等效秒，其余=次） */
 function unitsOf(kind: PlatformUsageKind, params: string | null): number {
-  let parsed: { durationSeconds?: number; imageCount?: number } = {};
+  let parsed: { durationSeconds?: number; imageCount?: number; resolution?: string } = {};
   try {
     parsed = params ? JSON.parse(params) : {};
   } catch {
     // 解析不了就按最小单位计 1，不要因为一条脏数据放开整个闸门
   }
-  if (kind === "video") return Math.max(1, Math.ceil(parsed.durationSeconds ?? 1));
+  if (kind === "video") return videoUnits(parsed.durationSeconds, parsed.resolution);
   if (kind === "image") return Math.max(1, Math.ceil(parsed.imageCount ?? 1));
   return 1;
+}
+
+/** 秒数 × 分辨率倍率，向上取整；至少 1 */
+function videoUnits(seconds?: number | null, resolution?: string | null): number {
+  return Math.max(1, Math.ceil((seconds ?? 1) * resolutionMultiplier(resolution)));
 }
 
 function dailyLimitFor(kind: PlatformUsageKind, limits: PlatformLimits): number {
@@ -154,7 +172,8 @@ function dailyLimitFor(kind: PlatformUsageKind, limits: PlatformLimits): number 
 }
 
 function unitLabel(kind: PlatformUsageKind): string {
-  return kind === "video" ? "秒视频" : kind === "image" ? "张图片" : "条音乐";
+  // 视频写清楚是「480p 等效秒」—— 否则用户按 720p 生成时会觉得额度扣多了
+  return kind === "video" ? "秒视频（480p 等效）" : kind === "image" ? "张图片" : "条音乐";
 }
 
 /**
@@ -222,7 +241,7 @@ export async function checkPlatformUsage(
 
   const want =
     req.kind === "video"
-      ? Math.max(1, Math.ceil(req.durationSeconds ?? 1))
+      ? videoUnits(req.durationSeconds, req.resolution)
       : req.kind === "image"
         ? Math.max(1, Math.ceil(req.imageCount ?? 1))
         : 1;

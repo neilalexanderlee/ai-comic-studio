@@ -44,7 +44,7 @@ const VIDEO_COST_PER_SECOND_YUAN: { match: string; cost: number }[] = [
 ];
 
 /** 分辨率对成本的倍率（token 量与像素数成正比） */
-const RESOLUTION_MULTIPLIER: Record<string, number> = {
+export const RESOLUTION_MULTIPLIER: Record<string, number> = {
   "480p": 1,
   "720p": 2.25,   // (1280×720) / (854×480)
   "1080p": 5.06,  // (1920×1080) / (854×480)
@@ -52,6 +52,21 @@ const RESOLUTION_MULTIPLIER: Record<string, number> = {
   "2K": 9,
   "4k": 20.25,    // (3840×2160) / (854×480)
 };
+
+/**
+ * 分辨率相对 480p 的成本倍率。认不出来的写法按 1 计 —— 与 `resolutionRank` 同一条原则：
+ * 各家写法不统一（`720P`/`768P`/`2K`），宁可少算也不要把人挡在门外。
+ */
+export function resolutionMultiplier(resolution?: string | null): number {
+  if (!resolution) return 1;
+  const raw = String(resolution).trim();
+  return (
+    RESOLUTION_MULTIPLIER[raw] ??
+    RESOLUTION_MULTIPLIER[raw.toLowerCase()] ??
+    RESOLUTION_MULTIPLIER[raw.toUpperCase()] ??
+    1
+  );
+}
 
 /** 单张图片的上游成本（元） */
 const IMAGE_COST_YUAN = 0.25;

@@ -2659,6 +2659,7 @@ async function handlePrevizGenerate(
     kind: "video",
     keySource,
     durationSeconds: effectiveDuration,
+    resolution: "480p", // 白模预演固定 480p，见约定 8g
     protocol: videoProtocol,
   });
   if (previzUsage) return platformUsageResponse(previzUsage);
@@ -2892,6 +2893,8 @@ async function handleSingleVideoGenerate(
     kind: "video",
     keySource,
     durationSeconds: videoSeconds,
+    // 额度是 480p 等效秒 —— 不传分辨率的话 720p/1080p 会被按 480p 少算
+    resolution: (payload?.resolution as string) ?? "480p",
     protocol: videoProtocol,
   });
   if (videoUsage) return platformUsageResponse(videoUsage);

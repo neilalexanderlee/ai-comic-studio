@@ -98,6 +98,7 @@ export async function POST(
     kind: "video",
     keySource,
     durationSeconds: enhanceSeconds,
+    resolution: "720p", // 增强的产物就是 720p，额度按它折算
     protocol: "volcengine-enhance",
   });
   if (usage) return platformUsageResponse(usage);
@@ -105,6 +106,7 @@ export async function POST(
     kind: "video",
     keySource,
     durationSeconds: enhanceSeconds,
+    resolution: "720p",
     protocol: "volcengine-enhance",
     modelId: "ai-mediakit-enhance",
     projectId,
