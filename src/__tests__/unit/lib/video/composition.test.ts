@@ -88,6 +88,15 @@ it("renders every offered transition and effect, preserves duration and composit
         }),
       );
       expect(fs.statSync(output).size, effectType).toBeGreaterThan(500);
+      // Effects that composite onto a generated canvas can change the timebase.
+      // Exercise their output through a transition, not only in isolation.
+      ff(timelineRenderArgs({
+        videos: [{ ...videos[0], effectType }, videos[1]],
+        audio: [], output, width: 64, height: 64, fps: 24, duration: 2,
+        transitions: [{ track: 0, startTime: 0.75, endTime: 1.25, transitionType: "pixelate" }],
+      }));
+      const combined = ff(["-i", output, "-an", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"]);
+      expect(combined.length / (64 * 64 * 3), effectType).toBe(48);
     }
     const output = path.join(dir, "overlap.mp4");
     ff(

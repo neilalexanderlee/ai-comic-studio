@@ -92,7 +92,9 @@ export function timelineRenderArgs(options: {
         t.before === i || t.after === i ? [`[v${i}t${n}]`] : [],
       ),
     ];
-    filters.push(`[effect${i}]split=${branches.length}${branches.join("")}`);
+    // Canvas-based effects inherit their canvas clock; normalize at the
+    // effect boundary so either side of an xfade uses the same timebase.
+    filters.push(`[effect${i}]fps=${fps},settb=AVTB,split=${branches.length}${branches.join("")}`);
   });
   filters.push(
     `color=c=black:s=${width}x${height}:r=${fps}:d=${duration},format=rgba[canvas0]`,
