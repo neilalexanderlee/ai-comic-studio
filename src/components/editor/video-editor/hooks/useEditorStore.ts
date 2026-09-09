@@ -7,6 +7,8 @@ import { generateClipId, generateTrackId, getTrackLabel } from "../utils/clipMet
 interface EditorState {
   // ── 轨道数据 ────────────────────────────────────
   tracks: Track[];
+  output: {fps?:number;width?:number;height?:number};
+  setOutput: (output: {fps?:number;width?:number;height?:number}) => void;
   // ── 全局字幕样式 ─────────────────────────────────
   globalSubtitleStyle: SubtitleStyle;
   // ── 播放状态 ────────────────────────────────────
@@ -110,7 +112,9 @@ function ratioToCanvasSize(ratio: string): { canvasWidth: number; canvasHeight: 
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   tracks: [],
+  setOutput: (output) => set({output}),
   globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE },
+  output: {},
   playhead: 0,
   isPlaying: false,
   selectedClipId: null,
@@ -262,9 +266,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const prevClip = get().getClipById(prevClipId);
     const nextClip = get().getClipById(nextClipId);
     if (!prevClip || !nextClip || prevClip.trackId !== nextClip.trackId) return;
+    const center = (prevClip.endTime + nextClip.startTime) / 2;
+    duration = Math.min(duration, 2 * (center - prevClip.startTime), 2 * (nextClip.endTime - center));
+    if (!Number.isFinite(duration) || duration <= 0) return;
     const half = duration / 2;
-    const transitionStart = prevClip.endTime - half;
-    const transitionEnd = nextClip.startTime + half;
+    const transitionStart = center - half;
+    const transitionEnd = center + half;
     const transitionClip: Clip = {
       id: generateClipId(),
       trackId: prevClip.trackId,
@@ -274,6 +281,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       endTime: transitionEnd,
       duration,
       transitionType: type,
+      beforeClipId: prevClipId,
+      afterClipId: nextClipId,
     };
     set((s) => ({
       tracks: s.tracks.map((t) =>
@@ -329,7 +338,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         tracks: s.tracks.map((t) => ({
           ...t,
           clips: t.clips.map((c) =>
-            c.type === "subtitle" ? { ...c, subtitleStyle: { ...next } } : c
+            c.type === "subtitle" ? { ...c, subtitleStyle: { ...next }, subtitleStyleOverride:false } : c
           ),
         })),
       };
@@ -444,6 +453,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   loadFromSnapshot: (tracks) => set({ tracks, playhead: 0, selectedClipId: null, selectedClipIds: [] }),
 
   reset: () => set({
+    output: {},
     tracks: [],
     globalSubtitleStyle: { ...DEFAULT_GLOBAL_SUBTITLE_STYLE },
     playhead: 0,

@@ -47,9 +47,10 @@ export async function enqueueTask(params: {
   maxRetries?: number;
   scheduledAt?: Date;
   episodeId?: string;
+  dedupKey?: string;
 }) {
   const id = ulid();
-  const [task] = await db
+  const insert = db
     .insert(tasks)
     .values({
       id,
@@ -59,9 +60,17 @@ export async function enqueueTask(params: {
       maxRetries: params.maxRetries ?? 3,
       scheduledAt: params.scheduledAt,
       episodeId: params.episodeId ?? null,
-    })
-    .returning();
-  return task;
+      ...(params.dedupKey ? {dedupKey:params.dedupKey} : {}),
+    });
+  const [task] = params.dedupKey
+    ? await insert.onConflictDoNothing({target:tasks.dedupKey}).returning()
+    : await insert.returning();
+  if (task) return task;
+  if (params.dedupKey) {
+    const [existing] = await db.select().from(tasks).where(eq(tasks.dedupKey,params.dedupKey));
+    if (existing) return existing;
+  }
+  throw new Error("任务创建失败，请重试");
 }
 
 export async function dequeueTask(): Promise<typeof tasks.$inferSelect | null> {
@@ -149,6 +158,7 @@ export async function failTask(id: string, error: string) {
       .update(tasks)
       .set({
         status: "failed",
+        dedupKey: null,
         retries: newRetries,
         error,
       })

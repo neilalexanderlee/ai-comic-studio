@@ -92,6 +92,7 @@ export function PropertyPanel() {
 
   function updateStyle(key: keyof SubtitleStyle, value: unknown) {
     updateClip(selectedClip!.id, {
+      subtitleStyleOverride: true,
       subtitleStyle: { ...(selectedClip!.subtitleStyle ?? {}), [key]: value },
     });
   }

@@ -481,6 +481,7 @@ export const inviteCodeUses = sqliteTable("invite_code_uses", {
 });
 
 export const tasks = sqliteTable("tasks", {
+  dedupKey: text("dedup_key").unique(),
   id: text("id").primaryKey(),
   projectId: text("project_id").references(() => projects.id, {
     onDelete: "cascade",

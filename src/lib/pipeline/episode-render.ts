@@ -1,4 +1,13 @@
-import { timelineRenderArgs, type RenderMedia } from "@/lib/video/render-timeline";
+import { inspectMedia, type MediaMetadata } from "@/lib/video/media-metadata";
+import {
+  COMPOSITION_VERSION,
+  type EffectName,
+  type RenderTransition,
+} from "@/lib/video/composition";
+import {
+  timelineRenderArgs,
+  type RenderMedia,
+} from "@/lib/video/render-timeline";
 import { mediaTiming } from "@/lib/video/timeline";
 import fs from "node:fs";
 import path from "node:path";
@@ -7,7 +16,10 @@ import { promisify } from "node:util";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { episodes } from "@/lib/db/schema";
-import { materializeArtifacts, saveArtifactFromFile } from "@/lib/storage/artifact-store";
+import {
+  materializeArtifacts,
+  saveArtifactFromFile,
+} from "@/lib/storage/artifact-store";
 import type { ProgressReporter, Task } from "@/lib/task-queue/types";
 
 /**
@@ -61,7 +73,8 @@ interface VideoClip {
   volume?: number;
   fadeIn?: number;
   fadeOut?: number;
-  effectType?: string;
+  effectType?: EffectName;
+  track?: number;
 }
 
 interface SubtitleClip {
@@ -71,12 +84,13 @@ interface SubtitleClip {
   endTime: number;
   duration: number;
   subtitleStyle?: SubtitleStyle;
+  subtitleStyleOverride?: boolean;
 }
 
 interface AudioClip {
   type: "audio" | "bgm";
-  url?: string;       // 旧格式兼容
-  audioUrl?: string;  // MediaLibrary 存的是 audioUrl
+  url?: string; // 旧格式兼容
+  audioUrl?: string; // MediaLibrary 存的是 audioUrl
   startTime: number;
   endTime: number;
   duration: number;
@@ -87,7 +101,16 @@ interface AudioClip {
   trimEnd?: number;
 }
 
-type Clip = VideoClip | SubtitleClip | AudioClip;
+interface TransitionClip {
+  beforeClipId?: string;
+  afterClipId?: string;
+  type: "transition";
+  startTime: number;
+  endTime: number;
+  duration: number;
+  transitionType: RenderTransition["transitionType"];
+}
+type Clip = VideoClip | SubtitleClip | AudioClip | TransitionClip;
 
 interface Track {
   type: "video" | "subtitle" | "bgm" | "audio";
@@ -102,6 +125,8 @@ interface TimelinePayload {
   canvasHeight?: number;
   /** 全局字幕样式，用于 ASS Default 样式层 */
   globalSubtitleStyle?: SubtitleStyle;
+  output?: { width?: number; height?: number; fps?: number };
+  compositionVersion?: number;
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -113,7 +138,10 @@ interface TimelinePayload {
  * 刻意不做成模块级变量：并发渲染会互相污染 —— 请求 A 结束后清掉临时目录，
  * 请求 B 却还持有指向已删文件的映射。
  */
-function resolveLocalPath(filePath: string, materialized?: Map<string, string>): string {
+function resolveLocalPath(
+  filePath: string,
+  materialized?: Map<string, string>,
+): string {
   // OSS 引用必须走物化后的临时文件；查不到说明上游漏了物化，
   // 与其拼出一个不存在的路径让 ffmpeg 报晦涩错误，不如直接说清楚
   if (filePath.startsWith("oss://")) {
@@ -123,38 +151,82 @@ function resolveLocalPath(filePath: string, materialized?: Map<string, string>):
   }
   const normalized = filePath.replace(/\\/g, "/");
   const stripped = normalized.replace(/^.*uploads\//, "");
-  return path.resolve(uploadDir, stripped);
-}
-
-
-/** Probe errors are errors, not evidence that the source has no audio. */
-async function probeMedia(input: string) {
-  const { stdout } = await execFileAsync("ffprobe", [
-    "-v", "error", "-show_streams", "-of", "json", input,
-  ]);
-  return JSON.parse(stdout).streams as Array<{
-    codec_type: string; width?: number; height?: number; avg_frame_rate?: string;
-  }>;
+  const resolved = path.resolve(uploadDir, stripped);
+  const relative = path.relative(path.resolve(uploadDir), resolved);
+  if (relative.startsWith("..") || path.isAbsolute(relative))
+    throw new Error("素材路径超出存储目录");
+  return resolved;
 }
 
 /** Verify actual decoded samples, not just a declared container duration. */
-async function validateRender(input: string, duration: number) {
-  await execFileAsync("ffmpeg", ["-v", "error", "-xerror", "-i", input, "-map", "0:v:0", "-an", "-f", "null", "-" ]);
+async function validateRender(input: string, duration: number, fps: number) {
+  const { stdout: streamJson } = await execFileAsync("ffprobe", [
+    "-v",
+    "error",
+    "-show_entries",
+    "stream=codec_type,duration,nb_frames",
+    "-of",
+    "json",
+    input,
+  ]);
+  const streams = JSON.parse(streamJson).streams as Array<{
+    codec_type: string;
+    duration?: string;
+    nb_frames?: string;
+  }>;
+  const picture = streams.find((s) => s.codec_type === "video");
+  if (
+    !picture ||
+    !Number.isFinite(Number(picture.duration)) ||
+    Math.abs(Number(picture.duration) - duration) > 1 / fps + 0.02 ||
+    !Number.isFinite(Number(picture.nb_frames)) ||
+    Number(picture.nb_frames) < Math.floor(duration * fps) - 1
+  ) {
+    throw new Error("导出画面时长或帧数不完整");
+  }
+  await execFileAsync("ffmpeg", [
+    "-v",
+    "error",
+    "-xerror",
+    "-i",
+    input,
+    "-map",
+    "0:v:0",
+    "-an",
+    "-f",
+    "null",
+    "-",
+  ]);
   const { stdout } = await execFileAsync("ffmpeg", [
-    "-v", "error", "-xerror", "-i", input, "-map", "0:a:0", "-vn",
-    "-af", "asetpts=N/SR/TB", "-progress", "pipe:1", "-f", "null", "-",
+    "-v",
+    "error",
+    "-xerror",
+    "-i",
+    input,
+    "-map",
+    "0:a:0",
+    "-vn",
+    "-af",
+    "asetpts=N/SR/TB",
+    "-progress",
+    "pipe:1",
+    "-f",
+    "null",
+    "-",
   ]);
   const times = [...stdout.matchAll(/out_time_us=(\d+)/g)];
   const decoded = Number(times.at(-1)?.[1] ?? 0) / 1e6;
-  if (Math.abs(decoded - duration) > 0.1) throw new Error(`导出音频不完整：预期 ${duration}s，实际解码 ${decoded}s`);
+  if (Math.abs(decoded - duration) > 0.1)
+    throw new Error(`导出音频不完整：预期 ${duration}s，实际解码 ${decoded}s`);
 }
 
 /** 秒数 → ASS 时间戳格式 H:MM:SS.cc */
 function toAssTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = Math.floor(seconds % 60);
-  const cs = Math.round((seconds % 1) * 100);
+  const centiseconds = Math.round(seconds * 100);
+  const h = Math.floor(centiseconds / 360000);
+  const m = Math.floor((centiseconds % 360000) / 6000);
+  const s = Math.floor((centiseconds % 6000) / 100);
+  const cs = centiseconds % 100;
   return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
 }
 
@@ -181,12 +253,13 @@ function buildAssFile(
 
   const gs = globalStyle ?? {};
   // ASS Default Style 字段
-  const fontSize  = gs.fontSize  ?? 32;
-  const color     = gs.color     ? hexToAssColor(gs.color) : "&H00FFFFFF";
+  const fontSize = gs.fontSize ?? 32;
+  const color = gs.color ? hexToAssColor(gs.color) : "&H00FFFFFF";
   // 垂直边距：y∈[0,1] → MarginV 像素（从底部算，按实际画布高度换算，竖屏 9:16 也要正确定位）
-  const marginV   = gs.y !== undefined ? Math.round((1 - gs.y) * canvasHeight) : 80;
+  const marginV =
+    gs.y !== undefined ? Math.round((1 - gs.y) * canvasHeight) : 80;
   // 对齐：左1 / 中2（默认） / 右3，位于底部（ASS alignment 1-3 = 底部行）
-  const align     = gs.textAlign === "left" ? 1 : gs.textAlign === "right" ? 3 : 2;
+  const align = gs.textAlign === "left" ? 1 : gs.textAlign === "right" ? 3 : 2;
 
   const header = [
     "[Script Info]",
@@ -203,13 +276,28 @@ function buildAssFile(
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ].join("\n");
 
-  // 全局字幕样式作为 ASS Default 基础；单条 clip 不再注入 override tags，
-  // 避免 clip 初始化时写死的 subtitleStyle 覆盖全局设置。
+  // Legacy per-clip defaults never override the global style accidentally.
+  // New explicit per-clip edits opt in through subtitleStyleOverride.
   const dialogues = clips
     .sort((a, b) => a.startTime - b.startTime)
     .map((clip) => {
-      const text = (clip.text ?? "").replace(/\n/g, "\\N");
-      return `Dialogue: 0,${toAssTime(clip.startTime)},${toAssTime(clip.endTime)},Default,,0,0,0,,${text}`;
+      const style = clip.subtitleStyleOverride
+        ? { ...gs, ...clip.subtitleStyle }
+        : gs;
+      const alignment =
+        style.textAlign === "left" ? 1 : style.textAlign === "right" ? 3 : 2;
+      const x = Math.round(
+        (style.x ?? (alignment === 1 ? 0.05 : alignment === 3 ? 0.95 : 0.5)) *
+          canvasWidth,
+      );
+      const y = Math.round((style.y ?? 0.92) * canvasHeight);
+      const tags = `{\\an${alignment}\\pos(${x},${y})\\fs${style.fontSize ?? 32}\\c${hexToAssColor(style.color ?? "#ffffff")}}`;
+      const text = (clip.text ?? "")
+        .replace(/\\/g, "\\\\")
+        .replace(/{/g, "\\{")
+        .replace(/}/g, "\\}")
+        .replace(/\r?\n/g, "\\N");
+      return `Dialogue: 0,${toAssTime(clip.startTime)},${toAssTime(clip.endTime)},Default,,0,0,0,,${tags}${text}`;
     })
     .join("\n");
 
@@ -218,11 +306,12 @@ function buildAssFile(
   return assPath;
 }
 
-
 // ── 核心：把一条时间线渲染成一个 mp4 ──────────────────────────────────────────
 
 export interface RenderResult {
   outputUrl: string;
+  manifestUrl: string;
+  compositionVersion: number;
 }
 
 export async function renderEpisodeTimeline(params: {
@@ -230,6 +319,7 @@ export async function renderEpisodeTimeline(params: {
   episodeId: string;
   timeline: TimelinePayload;
   onProgress?: ProgressReporter;
+  mode?: "preview" | "export";
 }): Promise<RenderResult> {
   const { projectId, episodeId, timeline } = params;
   const report = async (stage: string, message: string) => {
@@ -240,10 +330,16 @@ export async function renderEpisodeTimeline(params: {
   // ── 按轨道类型拆分（支持多条同类轨道） ──────────────────────────────────
 
   const videoClips = timeline.tracks
-    .filter((t) => t.type === "video")
-    .flatMap((t) =>
-      t.clips.filter((c): c is VideoClip => c.type === "video" && !!c.url)
-        .map(c => ({ ...c, volume: t.muted ? 0 : (c.volume ?? 1) * (t.volume ?? 1) }))
+    .flatMap((t, track) =>
+      t.type !== "video"
+        ? []
+        : t.clips
+            .filter((c): c is VideoClip => c.type === "video" && !!c.url)
+            .map((c) => ({
+              ...c,
+              track,
+              volume: t.muted ? 0 : (c.volume ?? 1) * (t.volume ?? 1),
+            })),
     )
     .sort((a, b) => a.startTime - b.startTime);
 
@@ -254,22 +350,27 @@ export async function renderEpisodeTimeline(params: {
   const subtitleClips = timeline.tracks
     .filter((t) => t.type === "subtitle")
     .flatMap((t) =>
-      t.clips.filter((c): c is SubtitleClip => c.type === "subtitle" && !!c.text)
+      t.clips.filter(
+        (c): c is SubtitleClip => c.type === "subtitle" && !!c.text,
+      ),
     );
 
   const bgmClips = timeline.tracks
     .filter((t) => (t.type === "bgm" || t.type === "audio") && !t.muted)
     .flatMap((t) =>
-      t.clips.filter(
-        (c): c is AudioClip =>
-          (c.type === "bgm" || c.type === "audio") && !!(c.audioUrl || c.url)
-      ).map(c => ({ ...c, volume: (c.volume ?? 1) * (t.volume ?? 1) }))
+      t.clips
+        .filter(
+          (c): c is AudioClip =>
+            (c.type === "bgm" || c.type === "audio") && !!(c.audioUrl || c.url),
+        )
+        .map((c) => ({ ...c, volume: (c.volume ?? 1) * (t.volume ?? 1) })),
     );
 
-  // Fail explicitly instead of silently discarding preview-only effects.
-  if (timeline.tracks.some(t => t.clips.some(c => String(c.type) === "transition" || (c.type === "video" && c.effectType)))) {
-    throw new Error("当前 MP4 导出尚不支持转场和画面特效，请先移除这些效果后导出");
-  }
+  const transitions: RenderTransition[] = timeline.tracks.flatMap((t, track) =>
+    t.clips
+      .filter((c): c is TransitionClip => c.type === "transition")
+      .map((c) => ({ ...c, track })),
+  );
   [...videoClips, ...bgmClips].forEach(mediaTiming);
 
   // ── 物化 OSS 素材 ────────────────────────────────────────────────────────
@@ -292,42 +393,97 @@ export async function renderEpisodeTimeline(params: {
   const tmpDir = path.join(rendersDir, `tmp_${Date.now()}`);
   fs.mkdirSync(tmpDir, { recursive: true });
 
-  const outputPath = path.join(rendersDir, `${projectId}_${episodeId}_${Date.now()}.mp4`);
+  const outputPath = path.join(
+    rendersDir,
+    `${projectId}_${episodeId}_${Date.now()}.mp4`,
+  );
 
   // ── SSE 流式返回进度 ──────────────────────────────────────────────────────
   try {
     await report("prepare", "检查素材并编译时间线…");
     const videos: RenderMedia[] = [];
+    const metadata: MediaMetadata[] = [];
     let fps = 24;
     for (const clip of videoClips) {
       const input = resolveLocalPath(clip.url, materializedRefs);
-      const streams = await probeMedia(input);
-      const video = streams.find(s => s.codec_type === "video");
-      if (!video?.width || !video.height) throw new Error("视频素材缺少有效画面流");
+      const info = await inspectMedia(input);
+      metadata.push(info);
+      const streams = info.streams;
+      const video = streams.find((s) => s.codec_type === "video");
+      if (!video?.width || !video.height)
+        throw new Error("视频素材缺少有效画面流");
       if (!videos.length) {
         const [n, d] = (video.avg_frame_rate ?? "24/1").split("/").map(Number);
         fps = n / d;
         if (!Number.isFinite(fps) || fps <= 0) throw new Error("视频帧率无效");
       }
-      videos.push({ ...clip, input, width: video.width, height: video.height,
-        hasAudio: streams.some(s => s.codec_type === "audio") });
+      videos.push({
+        ...clip,
+        input,
+        width: video.width,
+        height: video.height,
+        hasAudio: streams.some((s) => s.codec_type === "audio"),
+      });
     }
     const audio: RenderMedia[] = [];
     for (const clip of bgmClips) {
-      const input = resolveLocalPath(clip.audioUrl ?? clip.url ?? "", materializedRefs);
-      if (!(await probeMedia(input)).some(s => s.codec_type === "audio")) throw new Error("音频素材没有有效音轨");
+      const input = resolveLocalPath(
+        clip.audioUrl ?? clip.url ?? "",
+        materializedRefs,
+      );
+      const info = await inspectMedia(input);
+      metadata.push(info);
+      if (!info.streams.some((s) => s.codec_type === "audio"))
+        throw new Error("音频素材没有有效音轨");
       audio.push({ ...clip, input, hasAudio: true });
     }
-    const duration = Math.max(...timeline.tracks.flatMap(t => t.clips.map(c => c.endTime)));
-    const assPath = buildAssFile(subtitleClips, tmpDir, globalSubtitleStyle,
-      timeline.canvasWidth ?? 1920, timeline.canvasHeight ?? 1080);
+    const duration = Math.max(
+      ...timeline.tracks.flatMap((t) => t.clips.map((c) => c.endTime)),
+    );
+    const assPath = buildAssFile(
+      subtitleClips,
+      tmpDir,
+      globalSubtitleStyle,
+      timeline.canvasWidth ?? 1920,
+      timeline.canvasHeight ?? 1080,
+    );
     await report("render", "合成画面、字幕与音轨…");
-    await execFileAsync("ffmpeg", timelineRenderArgs({
-      videos, audio, output: path.resolve(outputPath), width: videos[0].width!, height: videos[0].height!,
-      fps, duration, subtitles: !!assPath,
-    }), { cwd: tmpDir });
+    const requested = timeline.output;
+    let width = requested?.width ?? videos[0].width!;
+    let height = requested?.height ?? videos[0].height!;
+    fps = requested?.fps ?? fps;
+    if (
+      ![width, height].every(
+        (n) => Number.isInteger(n) && n >= 2 && n <= 4096 && n % 2 === 0,
+      ) ||
+      !Number.isFinite(fps) ||
+      fps < 1 ||
+      fps > 60
+    )
+      throw new Error("输出规格无效");
+    // Preview is derived from originals with the same composition at a smaller canvas.
+    if (params.mode === "preview" && Math.max(width, height) > 640) {
+      const scale = 640 / Math.max(width, height);
+      width = Math.max(2, Math.round((width * scale) / 2) * 2);
+      height = Math.max(2, Math.round((height * scale) / 2) * 2);
+    }
+    await execFileAsync(
+      "ffmpeg",
+      timelineRenderArgs({
+        videos,
+        audio,
+        output: path.resolve(outputPath),
+        width,
+        height,
+        transitions,
+        fps,
+        duration,
+        subtitles: !!assPath,
+      }),
+      { cwd: tmpDir },
+    );
     await report("validate", "验证画面解码与完整音轨…");
-    await validateRender(outputPath, duration);
+    await validateRender(outputPath, duration, fps);
 
     // ── Step 5：产物入库 ──────────────────────────────────────────────
     //
@@ -337,19 +493,45 @@ export async function renderEpisodeTimeline(params: {
     await report("upload", "保存成片…");
     const stored = await saveArtifactFromFile(
       `renders/${path.basename(outputPath)}`,
-      outputPath
+      outputPath,
     );
 
-    await db
-      .update(episodes)
-      .set({ finalVideoUrl: stored })
-      .where(eq(episodes.id, episodeId));
+    const manifestPath = path.join(tmpDir, "manifest.json");
+    fs.writeFileSync(
+      manifestPath,
+      JSON.stringify(
+        {
+          compositionVersion: COMPOSITION_VERSION,
+          mode: params.mode ?? "export",
+          output: { width, height, fps, duration },
+          sources: metadata,
+          timeline,
+        },
+        null,
+        2,
+      ),
+    );
+    const manifestUrl = await saveArtifactFromFile(
+      `renders/${path.basename(outputPath)}.json`,
+      manifestPath,
+    );
+    if (params.mode !== "preview")
+      await db
+        .update(episodes)
+        .set({ finalVideoUrl: stored })
+        .where(eq(episodes.id, episodeId));
 
     fs.rmSync(tmpDir, { recursive: true, force: true });
 
-    return { outputUrl: stored };
+    return {
+      outputUrl: stored,
+      manifestUrl,
+      compositionVersion: COMPOSITION_VERSION,
+    };
   } catch (err) {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
     fs.rmSync(outputPath, { force: true });
     console.error("[render] ffmpeg error:", err);
     // 必须往外抛：任务的成败由 handler 是否抛异常决定。
@@ -360,9 +542,7 @@ export async function renderEpisodeTimeline(params: {
     // 一集几十个片段，漏清理很快就是几个 GB 的临时占用。
     materialized.cleanup();
   }
-
 }
-
 
 // ── 队列 handler ──────────────────────────────────────────────────────────────
 
@@ -370,9 +550,13 @@ interface RenderPayload {
   projectId: string;
   episodeId: string;
   timeline: TimelinePayload;
+  mode?: "preview" | "export";
 }
 
-export async function handleEpisodeRender(task: Task, onProgress: ProgressReporter) {
+export async function handleEpisodeRender(
+  task: Task,
+  onProgress: ProgressReporter,
+) {
   const payload = task.payload as RenderPayload | null;
   if (!payload?.timeline || !payload.episodeId) {
     throw new Error("episode_render 任务缺少 timeline 或 episodeId");
@@ -381,6 +565,7 @@ export async function handleEpisodeRender(task: Task, onProgress: ProgressReport
     projectId: payload.projectId,
     episodeId: payload.episodeId,
     timeline: payload.timeline,
+    mode: payload.mode,
     onProgress,
   });
 }

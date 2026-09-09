@@ -42,12 +42,12 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const guard = await requireProjectOwner(req, projectId);
   if (!guard.ok) return guard.response;
 
-  const body = await req.json() as { tracks?: unknown; globalSubtitleStyle?: unknown };
+  const body = await req.json() as { tracks?: unknown; globalSubtitleStyle?: unknown; output?: unknown; compositionVersion?: number };
   if (!body.tracks) return NextResponse.json({ error: "tracks required" }, { status: 400 });
 
   await db
     .update(episodes)
-    .set({ editorState: JSON.stringify({ tracks: body.tracks, globalSubtitleStyle: body.globalSubtitleStyle ?? null }) })
+    .set({ editorState: JSON.stringify({ tracks: body.tracks, globalSubtitleStyle: body.globalSubtitleStyle ?? null, output: body.output, compositionVersion:body.compositionVersion ?? 1 }) })
     .where(and(eq(episodes.id, episodeId), eq(episodes.projectId, projectId)));
 
   return NextResponse.json({ ok: true });

@@ -1,4 +1,4 @@
-FROM node:22-alpine AS base
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS base
 
 # If apk fetch fails (e.g. exit 46) due to slow/unstable link to dl-cdn, build with:
 #   docker compose build --build-arg ALPINE_MIRROR=https://mirrors.aliyun.com
@@ -13,7 +13,7 @@ RUN sed -i "s#https://dl-cdn.alpinelinux.org#${ALPINE_MIRROR}#g" /etc/apk/reposi
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # Install ffmpeg with libass for subtitle burn-in, and fonts for CJK subtitles
-RUN apk add --no-cache ffmpeg font-noto-cjk
+RUN apk add --no-cache ffmpeg=8.1.2-r0 font-noto-cjk=0_git20220127-r1
 
 # --- Dependencies ---
 FROM base AS deps

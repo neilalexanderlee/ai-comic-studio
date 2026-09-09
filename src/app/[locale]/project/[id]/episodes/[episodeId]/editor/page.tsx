@@ -178,6 +178,8 @@ export default function EditorPage({
   const tracks = useEditorStore((s) => s.tracks);
   const reset = useEditorStore((s) => s.reset);
   const setCanvasSize = useEditorStore((s) => s.setCanvasSize);
+  const output = useEditorStore(s=>s.output);
+  const setOutput = useEditorStore(s=>s.setOutput);
   const globalSubtitleStyle = useEditorStore((s) => s.globalSubtitleStyle);
   const setGlobalSubtitleStyle = useEditorStore((s) => s.setGlobalSubtitleStyle);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
@@ -203,7 +205,8 @@ export default function EditorPage({
         if (snapshotData.editorState) {
           const parsed = JSON.parse(snapshotData.editorState) as
             | Track[]                                                       // 旧格式（兼容）
-            | { tracks: Track[]; globalSubtitleStyle?: unknown };           // 新格式
+            | { tracks: Track[]; globalSubtitleStyle?: unknown; output?: typeof output };           // 新格式
+          if(!Array.isArray(parsed) && parsed.output)setOutput(parsed.output);
           const savedTracks = Array.isArray(parsed) ? parsed : parsed.tracks;
           loadFromSnapshot(healSnapshotMediaRefs(savedTracks, projectData.shots ?? []));
           // 恢复全局字幕样式（新格式才有）
@@ -252,7 +255,7 @@ export default function EditorPage({
         await apiFetch(`/api/projects/${projectId}/episodes/${episodeId}/editor-state`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tracks, globalSubtitleStyle }),
+          body: JSON.stringify({ tracks, globalSubtitleStyle, output, compositionVersion: 2 }),
         });
         setSaveStatus("saved");
         setTimeout(() => setSaveStatus("idle"), 2000);
@@ -260,7 +263,7 @@ export default function EditorPage({
         setSaveStatus("idle");
       }
     }, 1500);
-  }, [tracks, globalSubtitleStyle]);
+  }, [tracks, globalSubtitleStyle, output]);
 
 
   if (loading) {

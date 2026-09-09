@@ -64,9 +64,12 @@ export interface Clip {
   // 字幕 clip
   text?: string;
   subtitleStyle?: SubtitleStyle;
+  subtitleStyleOverride?: boolean;
 
   // 转场 clip（夹在两个视频 clip 之间）
   transitionType?: TransitionType;
+  beforeClipId?: string;
+  afterClipId?: string;
 
   // 画面特效（应用于视频 clip 整个时长）
   effectType?: "fadeIn" | "fadeOut" | "flash" | "shake" | "zoomIn" | "zoomOut" | "pulse" | "rotateIn";

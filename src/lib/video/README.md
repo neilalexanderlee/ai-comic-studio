@@ -1,18 +1,26 @@
-# Timeline rendering contract
+# Composition v2
 
-- `timeline.ts` owns source trim bounds and clip/track gain semantics. Timeline endpoints define duration; explicit `trimEnd` is respected.
-- `render-timeline.ts` builds a single FFmpeg filter graph. Every media input has a separate decoder; heterogeneous compressed audio packets are never concatenated. PCM is mixed at 48 kHz stereo. Intentional silence has an explicit finite bed.
-- Output uses the first source's dimensions and frame rate (the legacy source-sized output policy), not a hardcoded 30 fps. Differently sized inputs are contained in that output frame. Subtitle coordinates use the editor canvas's ASS PlayRes. Video, subtitles and audio are encoded in one pass.
-- Gaps are black/silent. Explicitly shortened sources are not frozen to cover missing footage. Clip and track volumes multiply; fades are local to the clip, before timeline delay.
-- Unsupported overlapping video layers, transitions and visual effects fail explicitly instead of being silently discarded. Full preview/export parity for these features is not claimed.
-- The pipeline verifies decoding and actual decoded audio duration before publishing or updating the episode. Broken media must fail, not be treated as an intentionally silent source.
+Preview and export now use **one server renderer**. The browser plays a rendered MP4 rather than interpreting effects independently. This works on HTTP without WebCodecs/OPFS. The tradeoff is an explicit render step on first preview or after composition edits; scrubbing and playback are immediate once ready. HTTPS remains a deployment concern outside this module.
 
-## Preview
+## Timeline contract
 
-WebAV remains the full browser engine. Public HTTP uses an explicitly labelled basic HTML-media preview; it does not claim effects/transition parity. Its clock follows a playing video, gain uses Web Audio, and background tabs pause. Both paths report media failures. Completing a load attempt must never imply successful readiness.
+- `canonicalTimeline` validates and removes UI-only data. Legacy snapshots remain readable; endpoints define duration. Output settings are persisted in the editor snapshot, not localStorage. First-source dimensions/fps remain the default; explicit output settings override them.
+- Video tracks are composited in array order, later tracks on top; overlapping clips within a track use start-time order. Empty regions are transparent within a layer, black on the final canvas. Muting a video track mutes its sound, not its picture.
+- Transitions belong to a video track and connect the closest pair around their midpoint. They occupy their stored interval without shortening the episode or shifting other tracks. Missing transition handles hold the adjacent endpoint frame *only within the transition*. Audio stays at its original timeline position; audio crossfades are explicit clip fades.
+- `composition.ts` defines all 13 offered transitions and eight effects. FFmpeg-native transitions replace legacy Canvas approximations, including the formerly unimplemented pixelate option. Preview and export use those same definitions.
+- Source trim bounds are applied before effects. Clip/track gains multiply, fades are local to the clip and precede timeline delay. Each input has a separate decoder; mixed AAC packets are never concatenated.
+- Subtitles are burned once in both preview and export. Global styling applies to old snapshots; explicit new per-clip edits opt in via `subtitleStyleOverride`, so historical default styles do not silently change old projects.
 
-## Regression tests
+## Derived artifacts and reproducibility
 
-`render-timeline.test.ts` generates heterogeneous AAC sources, reproduces the old failure, then verifies decoded samples, intentional silence, gain, trim, gaps and 24 fps output. `episode-render.test.ts` executes the production pipeline and ensures broken media is not published. `native-playback.test.ts` covers capability, gain and trim mapping.
+Originals are immutable. `inspectMedia` records content SHA256, streams/codecs/timebases/sample rates/channel layouts/durations and the full FFmpeg runtime version. A private content-addressed metadata cache is stored under `data/media-metadata` (override with `MEDIA_METADATA_DIR`). Each output has an adjacent JSON provenance manifest containing metadata, timeline, composition version and output settings.
 
-Run `pnpm test` and `npx tsc --noEmit`. Deployment verification must additionally exercise the actual browser and production FFmpeg; record the runtime version with the release evidence.
+Preview renders at a maximum dimension of 640 pixels from the same originals. The queue's unique `dedup_key` shares concurrent and completed previews for the same project/episode/day/normalized composition. Terminal failure releases the key; explicit refresh invalidates only a completed preview. Preview never changes `episodes.finalVideoUrl`. Export is a new task and publishes only after validation. Cache buckets bound stale legacy in-place file replacement; generated content refs are immutable.
+
+Docker pins the verified Node base image digest, FFmpeg and CJK font package versions. A changed toolchain must rerun media regression and update the composition/cache revision before deployment. Missing pinned packages cause a build failure, never an implicit upgrade.
+
+## Validation
+
+Real FFmpeg tests reproduce heterogeneous AAC failure and verify continuous audio, trim, silence, gaps, gain, every offered transition/effect, overlap ordering, duration and preserved fps. A production-pipeline test compares preview/export decoded frame hashes at equal resolution and checks preview does not publish a final video. SQLite tests cover concurrent deduplication, completion reuse and retry. Baseline/migration tests cover existing and new databases.
+
+Before upload the pipeline fully decodes video and audio, verifies video duration/frame count and decoded audio sample duration. Intentional black/silence are valid; decode failure is not. Browser release QA must include preview generation, cached reuse, playback, scrubbing, invalidation after an edit and export on production FFmpeg.

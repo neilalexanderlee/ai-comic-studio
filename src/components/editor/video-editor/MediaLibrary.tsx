@@ -5,7 +5,7 @@ import { uploadUrl } from "@/lib/utils/upload-url";
 import { useEditorStore } from "./hooks/useEditorStore";
 import { getTrackEndTime, hasSpaceInTrack } from "./utils/trackHelper";
 import { TRANSITION_OPTIONS } from "./utils/transitionHelper";
-import { FILTER_OPTIONS, EFFECT_OPTIONS } from "./utils/filterEffect";
+import { EFFECT_OPTIONS } from "./utils/filterEffect";
 import { formatTime } from "./utils/clipMeta";
 import type { Clip, TransitionType } from "./utils/clipMeta";
 import { Film, Music, Type, Zap, Shuffle, ChevronRight, Loader2 } from "lucide-react";

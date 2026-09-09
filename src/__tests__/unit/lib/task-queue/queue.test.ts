@@ -16,6 +16,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const DDL = `
 CREATE TABLE tasks (
   id TEXT PRIMARY KEY,
+  dedup_key TEXT UNIQUE,
   project_id TEXT,
   type TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
@@ -192,5 +193,19 @@ describe("进度回报", () => {
       stage: "concat",
       message: "合并 12 个视频片段…",
     });
+  });
+});
+
+
+describe("预览任务去重", () => {
+  it("并发请求共享任务，完成后复用，失败后允许重新生成", async () => {
+    const {enqueueTask,completeTask,failTask}=await q();
+    const args={type:"episode_render" as const,dedupKey:"preview:project:episode:hash",maxRetries:1};
+    const [a,b]=await Promise.all([enqueueTask(args),enqueueTask(args)]);
+    expect(a.id).toBe(b.id);
+    await completeTask(a.id,{outputUrl:"oss://preview.mp4"});
+    expect((await enqueueTask(args)).id).toBe(a.id);
+    await failTask(a.id,"missing artifact");
+    expect((await enqueueTask(args)).id).not.toBe(a.id);
   });
 });

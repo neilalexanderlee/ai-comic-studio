@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+import { canonicalTimeline } from "@/lib/video/timeline-contract";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { episodes } from "@/lib/db/schema";
+import { episodes, tasks } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { requireProjectOwner } from "@/lib/api-guard";
 import { enqueueTask } from "@/lib/task-queue";
@@ -38,8 +40,11 @@ export async function POST(
   // 与项目内其他路由一致：找不到和不属于都返回 404
   if (!episode) return NextResponse.json({ error: "Episode not found" }, { status: 404 });
 
-  const body = (await request.json()) as { timeline?: TimelinePayload };
-  const timeline = body.timeline;
+  const body = (await request.json()) as { timeline?: TimelinePayload; mode?: "preview" | "export"; refresh?: boolean };
+  let timeline: TimelinePayload;
+  try { timeline=canonicalTimeline(body.timeline) as unknown as TimelinePayload; }
+  catch(error) { return NextResponse.json({error:error instanceof Error ? error.message : "时间线无效"},{status:400}); }
+  if(body.mode && body.mode!=="preview" && body.mode!=="export")return NextResponse.json({error:"渲染模式无效"},{status:400});
   if (!timeline?.tracks?.length) {
     return NextResponse.json({ error: "Empty timeline" }, { status: 400 });
   }
@@ -56,11 +61,18 @@ export async function POST(
     return NextResponse.json({ error: "时间线里没有视频片段" }, { status: 400 });
   }
 
+  const dedupKey=body.mode === "preview" ? `preview:${projectId}:${episodeId}:${new Date().toISOString().slice(0,10)}:${createHash("sha256").update(serialized).digest("hex")}` : undefined;
+  if (dedupKey && body.refresh === true) {
+    await db.update(tasks).set({dedupKey:null}).where(and(eq(tasks.dedupKey,dedupKey),eq(tasks.status,"completed")));
+  }
   const task = await enqueueTask({
     type: "episode_render",
     projectId,
     episodeId,
-    payload: { projectId, episodeId, timeline },
+    payload: { projectId, episodeId, timeline, mode:body.mode ?? "export" },
+    // A DB unique key shares concurrent preview requests, including across web processes.
+    // Daily buckets bound reuse when an administrator replaces a legacy local asset in place.
+    dedupKey,
     // 导出失败几乎都是素材或参数问题，重试同样的输入不会有不同结果 ——
     // 自动重跑只会白烧一遍 CPU 和 OSS 流量。留给用户改完再点。
     maxRetries: 1,
