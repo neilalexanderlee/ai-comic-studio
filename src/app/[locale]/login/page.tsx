@@ -62,7 +62,7 @@ export default async function LoginPage({
           {!authRequired && (
             // 匿名可用的部署（自部署单机）不该把人堵在登录页上
             <p>
-              <Link href={home} className="underline underline-offset-2 hover:text-[--text-primary]">
+              <Link href={home} className="underline underline-offset-2 hover:text-(--text-primary)">
                 先不登录，直接使用
               </Link>
             </p>

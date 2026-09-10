@@ -107,32 +107,32 @@ export function AuthSection() {
   }
 
   return (
-    <div className="space-y-4 rounded-2xl border border-[--border-subtle] bg-white p-5">
-      <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+    <div className="space-y-4 rounded-2xl border border-(--border-subtle) bg-white p-5">
+      <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
         <Shield className="h-3.5 w-3.5" />
         账号
       </h3>
 
       {checking ? (
         <div className="flex items-center justify-center py-6">
-          <Loader2 className="h-5 w-5 animate-spin text-[--text-muted]" />
+          <Loader2 className="h-5 w-5 animate-spin text-(--text-muted)" />
         </div>
       ) : me?.loggedIn ? (
         <div className="space-y-4">
-          <div className="flex items-center gap-3 rounded-xl bg-[--surface] px-4 py-3">
+          <div className="flex items-center gap-3 rounded-xl bg-(--surface) px-4 py-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-primary">
               <User className="h-4 w-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-[--text-primary]">{me.username}</span>
+                <span className="text-sm font-semibold text-(--text-primary)">{me.username}</span>
                 {me.role && ROLE_LABEL[me.role] && (
                   <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">
                     {ROLE_LABEL[me.role]}
                   </span>
                 )}
               </div>
-              <div className="text-xs text-[--text-muted]">
+              <div className="text-xs text-(--text-muted)">
                 已登录 · 数据存储在数据库，清除缓存不影响数据
               </div>
             </div>
@@ -140,7 +140,7 @@ export function AuthSection() {
 
           {/* 修改密码 */}
           {pwOpen ? (
-            <div className="space-y-3 rounded-xl border border-[--border-subtle] p-4">
+            <div className="space-y-3 rounded-xl border border-(--border-subtle) p-4">
               <div className="space-y-1.5">
                 <Label className="text-xs">当前密码</Label>
                 <Input
@@ -172,7 +172,7 @@ export function AuthSection() {
                   disabled={pwSaving}
                 />
               </div>
-              <p className="text-[11px] text-[--text-muted]">
+              <p className="text-[11px] text-(--text-muted)">
                 修改后，你在<b>其他设备</b>上的登录会立即失效，需要用新密码重新登录。
               </p>
               <div className="flex justify-end gap-2">
@@ -201,7 +201,7 @@ export function AuthSection() {
             </div>
           ) : null}
 
-          <div className="flex justify-between border-t border-[--border-subtle] pt-3">
+          <div className="flex justify-between border-t border-(--border-subtle) pt-3">
             {!pwOpen && (
               <Button variant="outline" size="sm" onClick={() => setPwOpen(true)}>
                 <KeyRound className="h-3.5 w-3.5" />
@@ -214,7 +214,7 @@ export function AuthSection() {
               size="sm"
               onClick={handleLogout}
               disabled={loading}
-              className="text-[--text-secondary] hover:border-destructive/40 hover:text-destructive"
+              className="text-(--text-secondary) hover:border-destructive/40 hover:text-destructive"
             >
               {loading ? (
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -227,7 +227,7 @@ export function AuthSection() {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-xs text-[--text-muted]">
+          <p className="text-xs text-(--text-muted)">
             当前未登录。登录后数据直接存在服务器数据库，清除浏览器缓存也不会丢失。
           </p>
           {/* 用 ArrowRight 而不是 LogIn：后者与上面「退出登录」的 LogOut 是镜像箭头，容易混 */}

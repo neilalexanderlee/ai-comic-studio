@@ -152,10 +152,10 @@ export default function EpisodeCharactersPage() {
             <Users className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {t("project.characters")}
             </h2>
-            <p className="text-xs text-[--text-muted]">
+            <p className="text-xs text-(--text-muted)">
               {project.characters.length} characters
             </p>
           </div>
@@ -178,15 +178,15 @@ export default function EpisodeCharactersPage() {
                   className="fixed inset-0 z-20"
                   onClick={() => setAddPopoverOpen(false)}
                 />
-                <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-[--border-subtle] bg-white shadow-lg">
+                <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-xl border border-(--border-subtle) bg-white shadow-lg">
                   <div className="p-2">
                     {unlinkedChars.length === 0 ? (
-                      <p className="py-4 text-center text-sm text-[--text-muted]">
+                      <p className="py-4 text-center text-sm text-(--text-muted)">
                         所有角色已在本集中
                       </p>
                     ) : (
                       <div className="max-h-72 overflow-y-auto space-y-1">
-                        <p className="px-2 pb-1 text-xs text-[--text-muted]">
+                        <p className="px-2 pb-1 text-xs text-(--text-muted)">
                           点击将角色添加到本集
                         </p>
                         {unlinkedChars.map((char) => (
@@ -205,7 +205,7 @@ export default function EpisodeCharactersPage() {
                             <div className="min-w-0 flex-1">
                               <p className="truncate font-medium">{char.name}</p>
                               {char.visualHint && (
-                                <p className="truncate text-xs text-[--text-muted]">{char.visualHint}</p>
+                                <p className="truncate text-xs text-(--text-muted)">{char.visualHint}</p>
                               )}
                             </div>
                             {linkingId === char.id && (
@@ -275,7 +275,7 @@ export default function EpisodeCharactersPage() {
           }
         </button>
         {guideOpen && (
-          <div className="px-4 pb-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs text-[--text-secondary] leading-relaxed border-t border-blue-100 pt-3">
+          <div className="px-4 pb-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs text-(--text-secondary) leading-relaxed border-t border-blue-100 pt-3">
             <div className="rounded-xl bg-white/80 border border-blue-100 p-3">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-blue-700">
                 <Sparkles className="h-3 w-3" />{t("character.assetGuideMorphTitle")}
@@ -316,14 +316,14 @@ export default function EpisodeCharactersPage() {
       </div>
 
       {project.characters.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-24">
+        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-(--border-subtle) bg-(--surface)/50 py-24">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-accent/10">
             <Users className="h-7 w-7 text-primary" />
           </div>
-          <h3 className="font-display text-lg font-semibold text-[--text-primary]">
+          <h3 className="font-display text-lg font-semibold text-(--text-primary)">
             {t("project.characters")}
           </h3>
-          <p className="mt-2 max-w-sm text-center text-sm text-[--text-secondary]">
+          <p className="mt-2 max-w-sm text-center text-sm text-(--text-secondary)">
             {t("character.noCharacters")}
           </p>
         </div>

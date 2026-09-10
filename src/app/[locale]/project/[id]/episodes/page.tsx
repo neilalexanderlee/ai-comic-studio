@@ -146,14 +146,14 @@ export default function EpisodesPage({
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          <p className="text-sm text-[--text-muted]">{tc("loading")}</p>
+          <p className="text-sm text-(--text-muted)">{tc("loading")}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
+    <div className="flex-1 overflow-y-auto bg-(--surface) p-6 pb-24 lg:pb-6">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -161,10 +161,10 @@ export default function EpisodesPage({
             <Layers className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {t("title")}
             </h2>
-            <p className="text-xs text-[--text-muted]">
+            <p className="text-xs text-(--text-muted)">
               {episodes.length} {t("count")}
             </p>
           </div>
@@ -172,7 +172,7 @@ export default function EpisodesPage({
         <div className="flex items-center gap-2">
           <button
             onClick={() => setCoverImageOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-(--border-subtle) bg-white px-3.5 py-2 text-sm font-medium text-(--text-secondary) shadow-sm transition-all hover:border-primary/20 hover:text-primary"
           >
             <ImageIcon className="h-4 w-4" />
             生成封面图
@@ -180,7 +180,7 @@ export default function EpisodesPage({
           <button
             onClick={handleRecalcDuration}
             disabled={recalculating || episodes.length === 0}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-(--border-subtle) bg-white px-3.5 py-2 text-sm font-medium text-(--text-secondary) shadow-sm transition-all hover:border-primary/20 hover:text-primary disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {recalculating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -191,14 +191,14 @@ export default function EpisodesPage({
           </button>
           <Link
             href={`/${locale}/project/${projectId}/import`}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-(--border-subtle) bg-white px-3.5 py-2 text-sm font-medium text-(--text-secondary) shadow-sm transition-all hover:border-primary/20 hover:text-primary"
           >
             <FileUp className="h-4 w-4" />
             {t("importRecord")}
           </Link>
           <Link
             href={`/${locale}/project/${projectId}/characters`}
-            className="inline-flex items-center gap-1.5 rounded-[10px] border border-[--border-subtle] bg-white px-3.5 py-2 text-sm font-medium text-[--text-secondary] shadow-sm transition-all hover:border-primary/20 hover:text-primary"
+            className="inline-flex items-center gap-1.5 rounded-[10px] border border-(--border-subtle) bg-white px-3.5 py-2 text-sm font-medium text-(--text-secondary) shadow-sm transition-all hover:border-primary/20 hover:text-primary"
           >
             <Users className="h-4 w-4" />
             {t("characters")}
@@ -227,14 +227,14 @@ export default function EpisodesPage({
 
       {/* Episode grid */}
       {episodes.length === 0 ? (
-        <div className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border border-dashed border-[--border-subtle] bg-white/50 p-8 text-center">
+        <div className="flex min-h-[400px] flex-col items-center justify-center rounded-3xl border border-dashed border-(--border-subtle) bg-white/50 p-8 text-center">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-accent/10">
             <Layers className="h-7 w-7 text-primary" />
           </div>
-          <h3 className="font-display text-lg font-semibold text-[--text-primary]">
+          <h3 className="font-display text-lg font-semibold text-(--text-primary)">
             {t("title")}
           </h3>
-          <p className="mt-2 max-w-sm text-sm text-[--text-secondary]">
+          <p className="mt-2 max-w-sm text-sm text-(--text-secondary)">
             {t("noEpisodes")}
           </p>
           <div className="mt-6 flex items-center gap-3">
@@ -270,12 +270,12 @@ export default function EpisodesPage({
           {!selectionMode && (
             <button
               onClick={() => setCreateOpen(true)}
-              className="flex min-h-[200px] flex-col items-center justify-center rounded-[14px] border-[1.5px] border-dashed border-[--border-subtle] bg-white transition-all hover:border-primary hover:bg-primary/[0.02]"
+              className="flex min-h-[200px] flex-col items-center justify-center rounded-[14px] border-[1.5px] border-dashed border-(--border-subtle) bg-white transition-all hover:border-primary hover:bg-primary/[0.02]"
             >
-              <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-[--surface] text-[--text-muted] transition-all group-hover:bg-primary/8 group-hover:text-primary">
+              <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-[10px] bg-(--surface) text-(--text-muted) transition-all group-hover:bg-primary/8 group-hover:text-primary">
                 <Plus className="h-[18px] w-[18px]" />
               </div>
-              <span className="text-xs font-medium text-[--text-muted]">{t("create")}</span>
+              <span className="text-xs font-medium text-(--text-muted)">{t("create")}</span>
             </button>
           )}
         </div>
@@ -283,8 +283,8 @@ export default function EpisodesPage({
 
       {/* Floating selection action bar */}
       {selectionMode && (
-        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-[--border-subtle] bg-white px-5 py-3 shadow-xl">
-          <span className="text-sm font-medium text-[--text-secondary]">
+        <div className="fixed bottom-6 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-2xl border border-(--border-subtle) bg-white px-5 py-3 shadow-xl">
+          <span className="text-sm font-medium text-(--text-secondary)">
             {t("mergeSelected", { count: selectedIds.size })}
           </span>
           <Button

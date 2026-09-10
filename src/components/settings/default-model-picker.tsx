@@ -30,14 +30,14 @@ function PickerRow({
   const currentValue = value ? `${value.providerId}:${value.modelId}` : "";
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/50 px-3 py-2.5">
+    <div className="flex items-center gap-3 rounded-xl border border-(--border-subtle) bg-(--surface)/50 px-3 py-2.5">
       <div
         className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${color}`}
       >
         {icon}
       </div>
       <div className="min-w-0 flex-1">
-        <Label className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[--text-muted]">
+        <Label className="text-[10px] font-semibold uppercase tracking-[0.1em] text-(--text-muted)">
           {label}
         </Label>
         <select
@@ -51,7 +51,7 @@ function PickerRow({
             const modelId = rest.join(":");
             onChange({ providerId, modelId });
           }}
-          className="mt-0.5 block w-full rounded-lg border-0 bg-transparent py-0 text-sm font-medium text-[--text-primary] outline-none"
+          className="mt-0.5 block w-full rounded-lg border-0 bg-transparent py-0 text-sm font-medium text-(--text-primary) outline-none"
         >
           <option value="">--</option>
           {options.map((opt) => (

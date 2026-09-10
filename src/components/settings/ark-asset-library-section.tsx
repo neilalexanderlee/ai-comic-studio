@@ -107,15 +107,15 @@ export function ArkAssetLibrarySection() {
   }
 
   return (
-    <div className="rounded-2xl border border-[--border-subtle] bg-white p-5 space-y-4">
+    <div className="rounded-2xl border border-(--border-subtle) bg-white p-5 space-y-4">
       {/* Section header */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+          <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
             <ShieldCheck className="h-3.5 w-3.5" />
             私域虚拟人像素材资产库 · 真人形象视频解锁
           </h3>
-          <p className="mt-1 text-xs text-[--text-muted] max-w-md">
+          <p className="mt-1 text-xs text-(--text-muted) max-w-md">
             将角色定妆图注册进火山方舟私域素材库后可绕过 Seedance 2.0 的真人人脸拦截，
             且与分镜静图用同一张脸。需先在控制台购买「Seedance 2.0 高级创作权益包」并创建 IAM 访问密钥。
           </p>
@@ -124,7 +124,7 @@ export function ArkAssetLibrarySection() {
           href="https://console.volcengine.com/iam/keymanage/"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-[--border-subtle] px-2.5 py-1.5 text-xs text-[--text-secondary] transition-colors hover:border-primary hover:text-primary"
+          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-(--border-subtle) px-2.5 py-1.5 text-xs text-(--text-secondary) transition-colors hover:border-primary hover:text-primary"
         >
           <ExternalLink className="h-3 w-3" />
           访问密钥
@@ -168,7 +168,7 @@ export function ArkAssetLibrarySection() {
           <button
             type="button"
             onClick={() => setShowSecret(!showSecret)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
           >
             {showSecret ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
@@ -201,16 +201,16 @@ export function ArkAssetLibrarySection() {
         </div>
       </div>
 
-      <p className="text-[11px] text-[--text-muted]">
+      <p className="text-[11px] text-(--text-muted)">
         方舟项目名需与视频生成用的 API Key 所属项目一致，否则注册的素材无法被引用。
       </p>
 
       {/* Actions */}
-      <div className="flex items-center justify-between border-t border-[--border-subtle] pt-3">
+      <div className="flex items-center justify-between border-t border-(--border-subtle) pt-3">
         <button
           onClick={handleDelete}
           disabled={loading || !hasCredentials}
-          className="text-xs text-[--text-muted] transition-colors hover:text-destructive disabled:opacity-40"
+          className="text-xs text-(--text-muted) transition-colors hover:text-destructive disabled:opacity-40"
         >
           清除凭证
         </button>

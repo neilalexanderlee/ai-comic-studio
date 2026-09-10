@@ -172,7 +172,7 @@ export function PrevizBench({
   return (
     <section>
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">
           预演台 · 白模验运镜
         </p>
         {selectedId && supportsReferenceVideo && (
@@ -190,7 +190,7 @@ export function PrevizBench({
               <div
                 key={take.id}
                 className={`group relative h-16 w-24 overflow-hidden rounded-lg border-2 bg-black ${
-                  isSelected ? "border-emerald-500" : "border-[--border-subtle]"
+                  isSelected ? "border-emerald-500" : "border-(--border-subtle)"
                 }`}
               >
                 <button
@@ -255,14 +255,14 @@ export function PrevizBench({
           <button
             type="button"
             onClick={() => onPreview(uploadUrl(layoutUrl))}
-            className="h-10 overflow-hidden rounded border border-[--border-subtle]"
+            className="h-10 overflow-hidden rounded border border-(--border-subtle)"
             title="3D 导演台导出的构图参考图"
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={uploadUrl(layoutUrl, { w: 160 })} alt="构图参考" className="h-full w-auto object-cover" />
           </button>
         )}
-        <span className="text-[10px] text-[--text-muted]">
+        <span className="text-[10px] text-(--text-muted)">
           先摆机位与走位（免费、即时），再决定要不要花钱验
         </span>
       </div>
@@ -282,7 +282,7 @@ export function PrevizBench({
           )}
           {generating ? "预演中…" : takes.length > 0 ? "再演一条" : "白模预演"}
         </Button>
-        <span className="text-[10px] text-[--text-muted]">
+        <span className="text-[10px] text-(--text-muted)">
           480p · 无声 · 只验机位与运镜
         </span>
       </div>

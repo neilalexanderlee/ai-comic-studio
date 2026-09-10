@@ -280,20 +280,20 @@ export default function EditorPage({
   const finalVideoUrl = project?.finalVideoUrl;
 
   return (
-    <div className="flex h-screen flex-col bg-white text-[--text-primary] overflow-hidden">
+    <div className="flex h-screen flex-col bg-white text-(--text-primary) overflow-hidden">
       {/* ── 顶部导航 ── */}
-      <header className="flex h-10 shrink-0 items-center gap-3 border-b border-[--border-subtle] bg-white px-4">
+      <header className="flex h-10 shrink-0 items-center gap-3 border-b border-(--border-subtle) bg-white px-4">
         <Link
           href={`/${locale}/project/${projectId}/episodes/${episodeId}/storyboard`}
-          className="flex items-center gap-1 text-[--text-muted] hover:text-[--text-primary] text-[12px] transition-colors"
+          className="flex items-center gap-1 text-(--text-muted) hover:text-(--text-primary) text-[12px] transition-colors"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           返回分镜
         </Link>
-        <div className="h-4 w-px bg-[--border-subtle]" />
-        <span className="text-[13px] font-semibold text-[--text-primary]">{project?.title} · 剪辑导出</span>
+        <div className="h-4 w-px bg-(--border-subtle)" />
+        <span className="text-[13px] font-semibold text-(--text-primary)">{project?.title} · 剪辑导出</span>
         {saveStatus === "saving" && (
-          <span className="flex items-center gap-1 text-[10px] text-[--text-muted]">
+          <span className="flex items-center gap-1 text-[10px] text-(--text-muted)">
             <Loader2 className="h-2.5 w-2.5 animate-spin" />保存中…
           </span>
         )}
@@ -311,7 +311,7 @@ export default function EditorPage({
           <a
             href={uploadUrl(finalVideoUrl)}
             download
-            className="ml-auto flex items-center gap-1.5 rounded-lg border border-[--border-subtle] bg-[--surface] px-2.5 py-1 text-[11px] text-[--text-secondary] hover:border-primary/40 hover:text-primary transition-colors"
+            className="ml-auto flex items-center gap-1.5 rounded-lg border border-(--border-subtle) bg-(--surface) px-2.5 py-1 text-[11px] text-(--text-secondary) hover:border-primary/40 hover:text-primary transition-colors"
           >
             <Download className="h-3 w-3" />
             上次导出

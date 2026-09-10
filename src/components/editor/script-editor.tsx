@@ -137,7 +137,7 @@ export function ScriptEditor() {
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/8">
             <FileText className="h-4 w-4 text-primary" />
           </div>
-          <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+          <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
             {t("project.script")}
           </h2>
         </div>
@@ -145,7 +145,7 @@ export function ScriptEditor() {
           <PromptEditButton promptKeys="script_generate" projectId={project.id} />
           <InlineModelPicker capability="text" />
           {saving && (
-            <span className="flex items-center gap-1.5 text-xs text-[--text-muted]">
+            <span className="flex items-center gap-1.5 text-xs text-(--text-muted)">
               <Loader2 className="h-3 w-3 animate-spin" />
               {t("common.saving")}
             </span>
@@ -166,10 +166,10 @@ export function ScriptEditor() {
       </div>
 
       {/* Idea input */}
-      <div className="rounded-2xl border border-[--border-subtle] bg-white p-1.5">
+      <div className="rounded-2xl border border-(--border-subtle) bg-white p-1.5">
         <div className="flex items-center gap-2 px-5 pt-3 pb-1">
           <Lightbulb className="h-3.5 w-3.5 text-amber-500" />
-          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
             {t("project.idea")}
           </span>
         </div>
@@ -180,7 +180,7 @@ export function ScriptEditor() {
           placeholder={t("project.scriptIdeaPlaceholder")}
           rows={4}
           disabled={generating}
-          className={`h-[30vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
+          className={`h-[30vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-(--text-muted) focus-visible:ring-0 ${
             generating ? "opacity-40" : ""
           }`}
         />
@@ -188,11 +188,11 @@ export function ScriptEditor() {
 
       {/* Generated script */}
       {project.script && (
-        <div className="rounded-2xl border border-[--border-subtle] bg-white p-1.5">
+        <div className="rounded-2xl border border-(--border-subtle) bg-white p-1.5">
           <div className="flex items-center justify-between px-5 pt-3 pb-1">
             <div className="flex items-center gap-2">
               <FileText className="h-3.5 w-3.5 text-primary" />
-              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
                 {t("project.generatedScript")}
               </span>
             </div>
@@ -206,7 +206,7 @@ export function ScriptEditor() {
                 a.click();
                 URL.revokeObjectURL(url);
               }}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium text-[--text-muted] hover:bg-gray-100 hover:text-[--text-primary] transition-colors"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-medium text-(--text-muted) hover:bg-gray-100 hover:text-(--text-primary) transition-colors"
               title="导出 Markdown"
             >
               <Download className="h-3 w-3" />
@@ -220,7 +220,7 @@ export function ScriptEditor() {
             onBlur={() => { if (!generating) handleSave(); }}
             rows={16}
             disabled={generating}
-            className={`h-[55vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-[--text-muted] focus-visible:ring-0 ${
+            className={`h-[55vh] resize-none overflow-y-auto rounded-xl border-0 bg-transparent px-5 pb-4 font-mono text-sm leading-relaxed placeholder:text-(--text-muted) focus-visible:ring-0 ${
               generating ? "opacity-40" : ""
             }`}
           />

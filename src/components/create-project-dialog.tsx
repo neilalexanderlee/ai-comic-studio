@@ -212,20 +212,20 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-[--primary]" />
+            <Sparkles className="h-4 w-4 text-(--primary)" />
             {t("dashboard.newProject")}
           </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-5 pt-2">
           {/* Mode tabs */}
-          <div className="flex rounded-xl border border-[--border-subtle] p-1 gap-1 bg-[--surface]">
+          <div className="flex rounded-xl border border-(--border-subtle) p-1 gap-1 bg-(--surface)">
             <button
               onClick={() => setMode("whole")}
               className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
                 mode === "whole"
                   ? "bg-white text-primary shadow-sm"
-                  : "text-[--text-muted] hover:text-[--text-secondary]"
+                  : "text-(--text-muted) hover:text-(--text-secondary)"
               }`}
             >
               <Wand2 className="h-3.5 w-3.5" />
@@ -235,8 +235,8 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
               onClick={() => setMode("blank")}
               className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all ${
                 mode === "blank"
-                  ? "bg-white text-[--text-primary] shadow-sm"
-                  : "text-[--text-muted] hover:text-[--text-secondary]"
+                  ? "bg-white text-(--text-primary) shadow-sm"
+                  : "text-(--text-muted) hover:text-(--text-secondary)"
               }`}
             >
               <FileText className="h-3.5 w-3.5" />
@@ -256,12 +256,12 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                     className={`rounded-xl border px-2.5 py-3 text-left transition-all ${
                       sourceType === value
                         ? "border-primary/35 bg-primary/5 text-primary"
-                        : "border-[--border-subtle] bg-white text-[--text-secondary] hover:border-primary/20"
+                        : "border-(--border-subtle) bg-white text-(--text-secondary) hover:border-primary/20"
                     }`}
                   >
                     <Icon className="mb-2 h-4 w-4" />
                     <div className="text-xs font-semibold">{label}</div>
-                    <div className="mt-0.5 text-[10px] leading-tight text-[--text-muted]">{desc}</div>
+                    <div className="mt-0.5 text-[10px] leading-tight text-(--text-muted)">{desc}</div>
                   </button>
                 ))}
               </div>
@@ -272,14 +272,14 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                   （顶部已有画风选择器），再手动去角色页点"提取角色"，中间有充分机会切换画风。 */}
               <div className="space-y-1.5">
                 <Label htmlFor="proj-visual-style" className="flex items-center gap-1.5">
-                  <Palette className="h-3.5 w-3.5 shrink-0 text-[--text-muted]" />
+                  <Palette className="h-3.5 w-3.5 shrink-0 text-(--text-muted)" />
                   <span className="shrink-0">项目画风</span>
                 </Label>
                 <select
                   id="proj-visual-style"
                   value={visualStyle}
                   onChange={(e) => setVisualStyle(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-[--border-subtle] bg-white px-3.5 text-sm text-[--text-primary] outline-none transition-all duration-200 hover:border-[--border-hover] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
+                  className="h-10 w-full rounded-xl border border-(--border-subtle) bg-white px-3.5 text-sm text-(--text-primary) outline-none transition-all duration-200 hover:border-(--border-hover) focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
                 >
                   {Object.entries(VISUAL_STYLE_PRESETS).map(([value, preset]) => (
                     <option key={value} value={value}>
@@ -287,7 +287,7 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                     </option>
                   ))}
                 </select>
-                <p className="text-[10px] text-[--text-muted]">
+                <p className="text-[10px] text-(--text-muted)">
                   角色提取与分镜生成将直接使用此画风，创建后仍可在项目页顶部切换
                 </p>
               </div>
@@ -321,7 +321,7 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
             <div className="space-y-2">
               <Label htmlFor="proj-outline">
                 {sourceCopy.label}
-                <span className="ml-1 text-[10px] font-normal text-[--text-muted]">
+                <span className="ml-1 text-[10px] font-normal text-(--text-muted)">
                   （{sourceCopy.hint}）
                 </span>
               </Label>
@@ -336,11 +336,11 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                 placeholder={sourceCopy.placeholder}
                 className="min-h-[130px] resize-none text-sm leading-relaxed disabled:opacity-50"
               />
-              <p className="text-[10px] text-[--text-muted]">
+              <p className="text-[10px] text-(--text-muted)">
                 {outline.length} 字 · {sourceCopy.footer}
               </p>
               {sourceType !== "idea" && (
-                <div className="rounded-xl border border-dashed border-[--border-subtle] bg-[--surface]/60 p-3">
+                <div className="rounded-xl border border-dashed border-(--border-subtle) bg-(--surface)/60 p-3">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -356,15 +356,15 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                     <div className="flex items-center gap-2">
                       <FileText className="h-4 w-4 shrink-0 text-primary" />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-medium text-[--text-primary]">{sourceFile.name}</p>
-                        <p className="text-[10px] text-[--text-muted]">
+                        <p className="truncate text-xs font-medium text-(--text-primary)">{sourceFile.name}</p>
+                        <p className="text-[10px] text-(--text-muted)">
                           {(sourceFile.size / 1024).toFixed(1)} KB · 创建后自动解析
                         </p>
                       </div>
                       <button
                         type="button"
                         onClick={() => setSourceFile(null)}
-                        className="rounded-md p-1 text-[--text-muted] hover:bg-red-50 hover:text-red-500"
+                        className="rounded-md p-1 text-(--text-muted) hover:bg-red-50 hover:text-red-500"
                         aria-label="移除文件"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -374,7 +374,7 @@ export function CreateProjectDialog({ triggerId }: { triggerId: string }) {
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="flex w-full items-center justify-center gap-2 text-xs text-[--text-secondary] hover:text-primary"
+                      className="flex w-full items-center justify-center gap-2 text-xs text-(--text-secondary) hover:text-primary"
                     >
                       <Upload className="h-3.5 w-3.5" />
                       或上传 TXT、Markdown、DOCX、PDF（最大 20MB）

@@ -116,7 +116,7 @@ export function AuthForm({ mode, next, requireInviteCode = false }: Props) {
             type="button"
             onClick={() => setShowPw(!showPw)}
             aria-label={showPw ? "隐藏密码" : "显示密码"}
-            className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+            className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
           >
             {showPw ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>

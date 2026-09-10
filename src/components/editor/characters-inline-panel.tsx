@@ -108,15 +108,15 @@ export function CharactersInlinePanel({
     <div className={`rounded-xl border transition-colors ${
       needsAttention && open
         ? "border-amber-300 bg-amber-50/60"
-        : "border-[--border-subtle] bg-[--surface]/50"
+        : "border-(--border-subtle) bg-(--surface)/50"
     }`}>
       {/* Header toggle */}
       <button
         className="flex w-full items-center gap-2 px-3 py-2 text-left"
         onClick={toggle}
       >
-        <Users className="h-3.5 w-3.5 text-[--text-muted]" />
-        <span className="flex-1 text-[13px] font-medium text-[--text-secondary]">
+        <Users className="h-3.5 w-3.5 text-(--text-muted)" />
+        <span className="flex-1 text-[13px] font-medium text-(--text-secondary)">
           {t("charactersPanel")}
         </span>
         {needsAttention && (
@@ -125,15 +125,15 @@ export function CharactersInlinePanel({
           </span>
         )}
         {open ? (
-          <ChevronUp className="h-3.5 w-3.5 text-[--text-muted]" />
+          <ChevronUp className="h-3.5 w-3.5 text-(--text-muted)" />
         ) : (
-          <ChevronDown className="h-3.5 w-3.5 text-[--text-muted]" />
+          <ChevronDown className="h-3.5 w-3.5 text-(--text-muted)" />
         )}
       </button>
 
       {/* Body */}
       {open && (
-        <div className="border-t border-[--border-subtle] px-3 pb-3 pt-2.5">
+        <div className="border-t border-(--border-subtle) px-3 pb-3 pt-2.5">
           {/* Model picker */}
           <div className="mb-3">
             <InlineModelPicker capability="image" value={imageModelRef} onChange={setImageModelRef} />
@@ -147,7 +147,7 @@ export function CharactersInlinePanel({
                 <div key={char.id} className="flex flex-col items-center gap-1">
                   {/* Thumbnail */}
                 <div
-                  className={`relative h-20 w-20 overflow-hidden rounded-lg border border-[--border-subtle] bg-[--surface] ${getDisplayImage(char) ? "cursor-zoom-in" : ""}`}
+                  className={`relative h-20 w-20 overflow-hidden rounded-lg border border-(--border-subtle) bg-(--surface) ${getDisplayImage(char) ? "cursor-zoom-in" : ""}`}
                   onClick={() => getDisplayImage(char) && setPreviewSrc(uploadUrl(getDisplayImage(char)!))}
                 >
                   {getDisplayImage(char) ? (
@@ -171,7 +171,7 @@ export function CharactersInlinePanel({
                   }`} />
                 </div>
                 {/* Name */}
-                <span className="max-w-[80px] truncate text-[11px] text-[--text-muted]">{char.name}</span>
+                <span className="max-w-[80px] truncate text-[11px] text-(--text-muted)">{char.name}</span>
                 {/* Voice hint badge */}
                 {char.voiceHint ? (
                   <span
@@ -181,7 +181,7 @@ export function CharactersInlinePanel({
                     🎙 {char.voiceHint.split("，")[0]}
                   </span>
                 ) : (
-                  <span className="text-[9px] text-[--text-muted] opacity-50">无音色</span>
+                  <span className="text-[9px] text-(--text-muted) opacity-50">无音色</span>
                 )}
                 {/* Generate button (only when no image) */}
                 {!getDisplayImage(char) && (
@@ -203,7 +203,7 @@ export function CharactersInlinePanel({
           <div className="mt-3 flex justify-end">
             <Link
               href={`/${locale}/project/${projectId}/characters`}
-              className="text-[11px] text-[--text-muted] underline underline-offset-2 hover:text-[--text-secondary] transition-colors"
+              className="text-[11px] text-(--text-muted) underline underline-offset-2 hover:text-(--text-secondary) transition-colors"
             >
               {t("charactersPanelEdit")} →
             </Link>

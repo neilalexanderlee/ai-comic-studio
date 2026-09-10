@@ -200,7 +200,7 @@ export function AdvancedEditor({ scope = "global", projectId }: AdvancedEditorPr
       <textarea
         value={fullTextContent}
         onChange={(e) => setFullTextContent(e.target.value)}
-        className="flex-1 resize-none overflow-y-auto rounded-xl border border-[--border-subtle] bg-white px-3.5 py-3 font-mono text-[11px] leading-relaxed text-[--text-primary] outline-none transition-all duration-200 placeholder:text-[--text-muted] hover:border-[--border-hover] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
+        className="flex-1 resize-none overflow-y-auto rounded-xl border border-(--border-subtle) bg-white px-3.5 py-3 font-mono text-[11px] leading-relaxed text-(--text-primary) outline-none transition-all duration-200 placeholder:text-(--text-muted) hover:border-(--border-hover) focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
         placeholder={t("editor.advancedMode")}
       />
     </div>

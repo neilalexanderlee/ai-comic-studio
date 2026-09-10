@@ -241,14 +241,14 @@ export default function CharactersPage({
       <div className="flex min-h-[400px] items-center justify-center">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          <p className="text-sm text-[--text-muted]">{tc("loading")}</p>
+          <p className="text-sm text-(--text-muted)">{tc("loading")}</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
+    <div className="flex-1 overflow-y-auto bg-(--surface) p-6 pb-24 lg:pb-6">
       {/* Header */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -259,10 +259,10 @@ export default function CharactersPage({
             <ArrowLeft className="h-5 w-5 text-primary" />
           </Link>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {tChar("management")}
             </h2>
-            <p className="text-xs text-[--text-muted]">
+            <p className="text-xs text-(--text-muted)">
               {characters.length} {t("episode.count")}
             </p>
           </div>
@@ -339,7 +339,7 @@ export default function CharactersPage({
         </button>
 
         {guideOpen && (
-          <div className="px-4 pb-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs text-[--text-secondary] leading-relaxed border-t border-blue-100 pt-3">
+          <div className="px-4 pb-4 grid grid-cols-1 gap-3 md:grid-cols-3 text-xs text-(--text-secondary) leading-relaxed border-t border-blue-100 pt-3">
             {/* 定妆图 */}
             <div className="rounded-xl bg-white/80 border border-blue-100 p-3">
               <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold text-blue-700">
@@ -385,8 +385,8 @@ export default function CharactersPage({
       </div>
 
       {characters.length === 0 ? (
-        <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-[--border-subtle] bg-white/50 p-6">
-          <p className="text-sm text-[--text-muted]">{tChar("noMain")}</p>
+        <div className="flex min-h-[200px] items-center justify-center rounded-2xl border border-dashed border-(--border-subtle) bg-white/50 p-6">
+          <p className="text-sm text-(--text-muted)">{tChar("noMain")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-4 xl:grid-cols-4">

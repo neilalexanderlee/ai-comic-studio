@@ -211,7 +211,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                 className={`rounded-lg border px-2.5 py-[7px] text-xs transition-all ${
                   provider.protocol === opt.value
                     ? "border-primary/30 bg-primary/8 text-primary font-medium"
-                    : "border-[--border-subtle] text-[--text-secondary] hover:border-[--border-hover]"
+                    : "border-(--border-subtle) text-(--text-secondary) hover:border-(--border-hover)"
                 }`}
               >
                 {opt.label}
@@ -248,7 +248,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                 <button
                   type="button"
                   onClick={() => setShowKey(!showKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
                 >
                   {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </button>
@@ -267,7 +267,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                 <button
                   type="button"
                   onClick={() => setShowSecretKey(!showSecretKey)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
                 >
                   {showSecretKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                 </button>
@@ -275,7 +275,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
             </div>
           </div>
           {(provider.protocol === "jimeng" || provider.protocol === "jimeng-video") && (
-            <p className="text-[11px] leading-relaxed text-[--text-muted]">
+            <p className="text-[11px] leading-relaxed text-(--text-muted)">
               请填写火山引擎 IAM「访问控制 → 密钥管理」中同一条未禁用的 AK/SK；不是方舟 API Key 或 Bearer Token。
             </p>
           )}
@@ -305,7 +305,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
               <button
                 type="button"
                 onClick={() => setShowKey(!showKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+                className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
               >
                 {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </button>
@@ -315,7 +315,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
       )}
 
       {/* Divider */}
-      <div className="border-t border-[--border-subtle]" />
+      <div className="border-t border-(--border-subtle)" />
 
       {/* Secret actions */}
       <div className="flex items-center justify-end">
@@ -390,25 +390,25 @@ export function ProviderForm({ provider }: ProviderFormProps) {
           const checkedCount = provider.models.filter((m) => m.checked).length;
 
           return (
-            <div className="rounded-xl border border-[--border-subtle] overflow-hidden">
+            <div className="rounded-xl border border-(--border-subtle) overflow-hidden">
               {/* Search bar + stats */}
-              <div className="flex items-center gap-2 border-b border-[--border-subtle] bg-[--surface]/50 px-3 py-2">
-                <Search className="h-3.5 w-3.5 flex-shrink-0 text-[--text-muted]" />
+              <div className="flex items-center gap-2 border-b border-(--border-subtle) bg-(--surface)/50 px-3 py-2">
+                <Search className="h-3.5 w-3.5 flex-shrink-0 text-(--text-muted)" />
                 <input
                   type="text"
                   value={modelSearch}
                   onChange={(e) => setModelSearch(e.target.value)}
                   placeholder={t("searchModels")}
-                  className="flex-1 bg-transparent text-xs text-[--text-primary] outline-none placeholder:text-[--text-muted]"
+                  className="flex-1 bg-transparent text-xs text-(--text-primary) outline-none placeholder:text-(--text-muted)"
                 />
-                <span className="flex-shrink-0 text-[10px] tabular-nums text-[--text-muted]">
+                <span className="flex-shrink-0 text-[10px] tabular-nums text-(--text-muted)">
                   {checkedCount} / {provider.models.length}
                 </span>
               </div>
               {/* Model grid */}
               <div className="max-h-56 overflow-y-auto p-1.5">
                 {filtered.length === 0 ? (
-                  <p className="py-4 text-center text-xs text-[--text-muted]">
+                  <p className="py-4 text-center text-xs text-(--text-muted)">
                     No models found
                   </p>
                 ) : (
@@ -419,20 +419,20 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                         className={`group/item flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 transition-colors ${
                           model.checked
                             ? "bg-primary/5"
-                            : "hover:bg-[--surface]"
+                            : "hover:bg-(--surface)"
                         }`}
                       >
                         <input
                           type="checkbox"
                           checked={model.checked}
                           onChange={() => toggleModel(provider.id, model.id)}
-                          className="h-3.5 w-3.5 flex-shrink-0 rounded border-[--border-subtle] text-primary accent-primary"
+                          className="h-3.5 w-3.5 flex-shrink-0 rounded border-(--border-subtle) text-primary accent-primary"
                         />
                         <span
                           className={`min-w-0 flex-1 truncate text-xs ${
                             model.checked
-                              ? "font-medium text-[--text-primary]"
-                              : "text-[--text-secondary]"
+                              ? "font-medium text-(--text-primary)"
+                              : "text-(--text-secondary)"
                           }`}
                           title={model.id}
                         >
@@ -444,7 +444,7 @@ export function ProviderForm({ provider }: ProviderFormProps) {
                             e.stopPropagation();
                             removeModel(provider.id, model.id);
                           }}
-                          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[--text-muted] opacity-0 transition-all hover:text-destructive group-hover/item:opacity-100"
+                          className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-(--text-muted) opacity-0 transition-all hover:text-destructive group-hover/item:opacity-100"
                         >
                           <Trash2 className="h-2.5 w-2.5" />
                         </button>

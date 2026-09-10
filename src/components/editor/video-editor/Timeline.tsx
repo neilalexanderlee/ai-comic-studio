@@ -295,27 +295,27 @@ function TrackRow({
   }
 
   return (
-    <div className="flex border-b border-[--border-subtle]" style={{ height: TRACK_HEIGHT }}>
+    <div className="flex border-b border-(--border-subtle)" style={{ height: TRACK_HEIGHT }}>
       <div
-        className="flex shrink-0 items-center justify-between bg-[--surface] px-2 border-r border-[--border-subtle]"
+        className="flex shrink-0 items-center justify-between bg-(--surface) px-2 border-r border-(--border-subtle)"
         style={{ width: HEADER_WIDTH }}
       >
         <div className="min-w-0">
-          <p className="truncate text-[11px] font-semibold text-[--text-primary]">{track.name}</p>
-          <p className="text-[9px] text-[--text-muted]">{getTrackLabel(track.type)}</p>
+          <p className="truncate text-[11px] font-semibold text-(--text-primary)">{track.name}</p>
+          <p className="text-[9px] text-(--text-muted)">{getTrackLabel(track.type)}</p>
         </div>
         <div className="flex items-center gap-0.5">
           {(track.type === "audio" || track.type === "bgm") && (
             <button
               onClick={() => updateTrack(track.id, { muted: !track.muted })}
-              className="flex h-5 w-5 items-center justify-center rounded text-[--text-muted] hover:text-primary"
+              className="flex h-5 w-5 items-center justify-center rounded text-(--text-muted) hover:text-primary"
             >
               {track.muted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
             </button>
           )}
           <button
             onClick={() => removeTrack(track.id)}
-            className="flex h-5 w-5 items-center justify-center rounded text-[--text-muted] hover:text-red-500"
+            className="flex h-5 w-5 items-center justify-center rounded text-(--text-muted) hover:text-red-500"
           >
             <Trash2 className="h-3 w-3" />
           </button>
@@ -324,7 +324,7 @@ function TrackRow({
 
       <div
         ref={contentRef}
-        className="relative flex-1 overflow-hidden bg-[--surface]/30"
+        className="relative flex-1 overflow-hidden bg-(--surface)/30"
         style={{ minWidth: totalDuration() * pps + 200 }}
         onDragOver={onDragOverTrack}
         onDragLeave={onDragLeaveTrack}
@@ -369,7 +369,7 @@ function TrackRow({
                 const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
                 setOpenSeam({ idx: i, screenX: rect.left + rect.width / 2, screenY: rect.top });
               }}
-              className="flex h-5 w-5 items-center justify-center rounded-full border border-[--border-subtle] bg-white text-[11px] font-bold text-[--text-muted] shadow hover:border-primary/60 hover:text-primary hover:scale-110 transition-all"
+              className="flex h-5 w-5 items-center justify-center rounded-full border border-(--border-subtle) bg-white text-[11px] font-bold text-(--text-muted) shadow hover:border-primary/60 hover:text-primary hover:scale-110 transition-all"
               title="插入转场"
             >
               +
@@ -383,11 +383,11 @@ function TrackRow({
           if (!seam) return null;
           return (
             <div
-              className="fixed z-[9999] rounded-lg border border-[--border-subtle] bg-white shadow-xl p-2"
+              className="fixed z-[9999] rounded-lg border border-(--border-subtle) bg-white shadow-xl p-2"
               style={{ width: 184, left: openSeam.screenX - 92, top: openSeam.screenY - 8, transform: "translateY(-100%)" }}
               onClick={(e) => e.stopPropagation()}
             >
-              <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-[--text-muted]">选择转场效果</p>
+              <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wide text-(--text-muted)">选择转场效果</p>
               <div className="grid grid-cols-2 gap-1">
                 {TRANSITION_OPTIONS.map((opt) => (
                   <button
@@ -396,7 +396,7 @@ function TrackRow({
                       addTransition(seam.before.id, seam.after.id, opt.type, 1);
                       setOpenSeam(null);
                     }}
-                    className="rounded border border-[--border-subtle] bg-[--surface] px-1.5 py-1 text-[10px] text-[--text-primary] hover:border-primary/40 hover:bg-primary/5 transition-colors"
+                    className="rounded border border-(--border-subtle) bg-(--surface) px-1.5 py-1 text-[10px] text-(--text-primary) hover:border-primary/40 hover:bg-primary/5 transition-colors"
                   >
                     {opt.label}
                   </button>
@@ -501,11 +501,11 @@ function BgmGeneratePanel({
           <Sparkles className="h-3.5 w-3.5 text-purple-500" />
           <span className="text-[11px] font-semibold text-purple-700">生成 BGM</span>
           {musicProvider
-            ? <span className="text-[9px] text-[--text-muted] border border-[--border-subtle] rounded px-1">{musicProvider.name}</span>
+            ? <span className="text-[9px] text-(--text-muted) border border-(--border-subtle) rounded px-1">{musicProvider.name}</span>
             : <span className="text-[9px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-1">需配置音乐模型</span>
           }
         </div>
-        <button onClick={onClose} className="text-[--text-muted] hover:text-[--text-primary]">
+        <button onClick={onClose} className="text-(--text-muted) hover:text-(--text-primary)">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -534,7 +534,7 @@ function BgmGeneratePanel({
       {/* bgmNote chips（来自选中分镜的背景音标注） */}
       {bgmNoteChips.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[9px] text-[--text-muted] font-medium">分镜背景音建议（点击填入）</p>
+          <p className="text-[9px] text-(--text-muted) font-medium">分镜背景音建议（点击填入）</p>
           <div className="flex flex-wrap gap-1">
             {bgmNoteChips.map((note, i) => (
               <button
@@ -561,7 +561,7 @@ function BgmGeneratePanel({
         rows={3}
         placeholder="描述音乐风格…"
         disabled={generating}
-        className="w-full resize-none rounded-lg border border-[--border-subtle] px-2.5 py-1.5 text-[11px] outline-none focus:border-purple-300 disabled:opacity-50"
+        className="w-full resize-none rounded-lg border border-(--border-subtle) px-2.5 py-1.5 text-[11px] outline-none focus:border-purple-300 disabled:opacity-50"
       />
 
       {/* 生成按钮 */}
@@ -645,11 +645,11 @@ export function Timeline() {
   for (let t = 0; t <= total + step; t += step) rulerTicks.push(t);
 
   return (
-    <div className="flex h-full flex-col bg-[--surface] border-t border-[--border-subtle]" onWheel={onWheel}>
+    <div className="flex h-full flex-col bg-(--surface) border-t border-(--border-subtle)" onWheel={onWheel}>
       {/* 工具栏 */}
-      <div className="relative flex items-center gap-2 border-b border-[--border-subtle] px-3 py-1.5">
-        <span className="text-[11px] font-semibold text-[--text-muted]">时间线</span>
-        <div className="flex items-center gap-1 text-[10px] text-[--text-muted]">
+      <div className="relative flex items-center gap-2 border-b border-(--border-subtle) px-3 py-1.5">
+        <span className="text-[11px] font-semibold text-(--text-muted)">时间线</span>
+        <div className="flex items-center gap-1 text-[10px] text-(--text-muted)">
           <span>缩放</span>
           <input
             type="range" min={20} max={300} value={pps}
@@ -661,8 +661,8 @@ export function Timeline() {
 
         {/* 无多选时：操作提示 */}
         {!selectionRange && (
-          <span className="ml-2 text-[10px] text-[--text-muted] select-none">
-            <kbd className="rounded border border-[--border-subtle] bg-[--surface] px-1 py-0.5 font-mono text-[9px]">Shift</kbd>
+          <span className="ml-2 text-[10px] text-(--text-muted) select-none">
+            <kbd className="rounded border border-(--border-subtle) bg-(--surface) px-1 py-0.5 font-mono text-[9px]">Shift</kbd>
             {" + 点击分镜片段可多选，然后生成 BGM"}
           </span>
         )}
@@ -704,7 +704,7 @@ export function Timeline() {
             <button
               key={type}
               onClick={() => { try { addTrack(type); } catch (e: unknown) { alert((e as Error).message); } }}
-              className="flex items-center gap-0.5 rounded border border-[--border-subtle] bg-[--surface] px-1.5 py-0.5 text-[10px] text-[--text-muted] hover:border-primary/40 hover:text-primary"
+              className="flex items-center gap-0.5 rounded border border-(--border-subtle) bg-(--surface) px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:border-primary/40 hover:text-primary"
             >
               <Plus className="h-2.5 w-2.5" />
               {getTrackLabel(type)}轨
@@ -717,18 +717,18 @@ export function Timeline() {
       <div ref={scrollRef} className="flex flex-1 overflow-auto">
         <div style={{ minWidth: HEADER_WIDTH + total * pps + 200 }}>
           {/* 刻度尺 */}
-          <div className="flex border-b border-[--border-subtle]" style={{ height: 24 }}>
-            <div style={{ width: HEADER_WIDTH, minWidth: HEADER_WIDTH }} className="border-r border-[--border-subtle] bg-[--surface]" />
+          <div className="flex border-b border-(--border-subtle)" style={{ height: 24 }}>
+            <div style={{ width: HEADER_WIDTH, minWidth: HEADER_WIDTH }} className="border-r border-(--border-subtle) bg-(--surface)" />
             <div
               ref={rulerRef}
-              className="relative flex-1 cursor-pointer bg-[--surface]/50 select-none"
+              className="relative flex-1 cursor-pointer bg-(--surface)/50 select-none"
               style={{ minWidth: total * pps + 200 }}
               onClick={onRulerClick}
             >
               {rulerTicks.map((t) => (
                 <div key={t} className="absolute top-0 flex flex-col items-center" style={{ left: t * pps }}>
-                  <div className="h-2 w-px bg-[--border-subtle]" />
-                  <span className="text-[8px] text-[--text-muted] leading-none mt-0.5">{formatTime(t)}</span>
+                  <div className="h-2 w-px bg-(--border-subtle)" />
+                  <span className="text-[8px] text-(--text-muted) leading-none mt-0.5">{formatTime(t)}</span>
                 </div>
               ))}
               {/* 播放头 */}
@@ -765,7 +765,7 @@ export function Timeline() {
               />
             ))}
             {tracks.length === 0 && (
-              <div className="flex h-24 items-center justify-center text-[12px] text-[--text-muted]">
+              <div className="flex h-24 items-center justify-center text-[12px] text-(--text-muted)">
                 点击「全部加入」或逐个添加分镜视频
               </div>
             )}
@@ -790,7 +790,7 @@ export function Timeline() {
 
       {/* 提示文字 */}
       {tracks.length > 0 && selectedClipIds.length === 0 && (
-        <div className="border-t border-[--border-subtle] px-3 py-1 text-[9px] text-[--text-muted]">
+        <div className="border-t border-(--border-subtle) px-3 py-1 text-[9px] text-(--text-muted)">
           Shift+点击视频片段可多选 → 为选中范围生成 BGM
         </div>
       )}

@@ -16,12 +16,12 @@ export default function ProjectPromptsPage({
   const t = useTranslations("promptTemplates");
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[--surface] p-6">
+    <div className="flex-1 overflow-y-auto bg-(--surface) p-6">
       {/* Page header */}
       <div className="mb-6 flex items-center gap-4">
         <button
           onClick={() => router.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-white hover:text-[--text-primary]"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-white hover:text-(--text-primary)"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -30,10 +30,10 @@ export default function ProjectPromptsPage({
             <Wand2 className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {t("title")}
             </h2>
-            <p className="text-xs text-[--text-muted]">
+            <p className="text-xs text-(--text-muted)">
               {t("project.useProjectPromptsDesc")}
             </p>
           </div>

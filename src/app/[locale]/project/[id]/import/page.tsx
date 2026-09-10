@@ -361,9 +361,9 @@ export default function ImportPage({
     const base = (() => {
       switch (status) {
         case "running": return "border-primary/30 bg-primary/5 text-primary";
-        case "done": return "border-transparent bg-[--surface] text-[--text-primary]";
+        case "done": return "border-transparent bg-(--surface) text-(--text-primary)";
         case "error": return "border-red-300 bg-red-50 text-red-500";
-        default: return "border-transparent bg-[--surface] text-[--text-muted]";
+        default: return "border-transparent bg-(--surface) text-(--text-muted)";
       }
     })();
     if (selected) return base + " !bg-primary/10 !border-primary/40 !text-primary shadow-sm";
@@ -378,16 +378,16 @@ export default function ImportPage({
   return (
     <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
       {/* Left: Steps sidebar */}
-      <div className="flex w-56 shrink-0 flex-col border-r border-[--border-subtle] bg-white p-4">
+      <div className="flex w-56 shrink-0 flex-col border-r border-(--border-subtle) bg-white p-4">
         <button
           onClick={() => router.push(`/${locale}/project/${projectId}/episodes`)}
-          className="mb-6 flex items-center gap-2 text-sm text-[--text-muted] hover:text-primary transition-colors"
+          className="mb-6 flex items-center gap-2 text-sm text-(--text-muted) hover:text-primary transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           {t("backToEpisodes")}
         </button>
 
-        <h2 className="mb-4 font-display text-lg font-bold text-[--text-primary]">
+        <h2 className="mb-4 font-display text-lg font-bold text-(--text-primary)">
           {t("title")}
         </h2>
 
@@ -423,7 +423,7 @@ export default function ImportPage({
       </div>
 
       {/* Right: Content area */}
-      <div className="flex flex-1 flex-col overflow-y-auto bg-[--surface] p-6">
+      <div className="flex flex-1 flex-col overflow-y-auto bg-(--surface) p-6">
         {/* Upload area (only when no step started) */}
         {currentStep === 0 && !historyMode && (
           <div className="mx-auto w-full max-w-xl space-y-6">
@@ -434,7 +434,7 @@ export default function ImportPage({
                   ? "border-primary bg-primary/5"
                   : file
                     ? "border-emerald-300 bg-emerald-50/50"
-                    : "border-[--border-subtle] bg-white"
+                    : "border-(--border-subtle) bg-white"
               }`}
               onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
               onDragLeave={() => setDragOver(false)}
@@ -452,21 +452,21 @@ export default function ImportPage({
                 <div className="flex items-center gap-3">
                   <FileText className="h-10 w-10 text-emerald-500" />
                   <div>
-                    <p className="text-sm font-medium text-[--text-primary]">{file.name}</p>
-                    <p className="text-xs text-[--text-muted]">{(file.size / 1024).toFixed(1)} KB</p>
+                    <p className="text-sm font-medium text-(--text-primary)">{file.name}</p>
+                    <p className="text-xs text-(--text-muted)">{(file.size / 1024).toFixed(1)} KB</p>
                   </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); setFile(null); }}
                     className="ml-2 flex h-6 w-6 items-center justify-center rounded-full hover:bg-black/5"
                   >
-                    <X className="h-3.5 w-3.5 text-[--text-muted]" />
+                    <X className="h-3.5 w-3.5 text-(--text-muted)" />
                   </button>
                 </div>
               ) : (
                 <>
-                  <Upload className="mb-3 h-10 w-10 text-[--text-muted]" />
-                  <p className="text-sm font-medium text-[--text-primary]">{t("dropHint")}</p>
-                  <p className="mt-1 text-xs text-[--text-muted]">{t("supportedFormats")}</p>
+                  <Upload className="mb-3 h-10 w-10 text-(--text-muted)" />
+                  <p className="text-sm font-medium text-(--text-primary)">{t("dropHint")}</p>
+                  <p className="mt-1 text-xs text-(--text-muted)">{t("supportedFormats")}</p>
                 </>
               )}
             </div>
@@ -488,10 +488,10 @@ export default function ImportPage({
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <h3 className="font-display text-lg font-bold text-[--text-primary]">
+                <h3 className="font-display text-lg font-bold text-(--text-primary)">
                   {t("reviewCharacters")}
                 </h3>
-                <span className="text-sm text-[--text-muted]">
+                <span className="text-sm text-(--text-muted)">
                   已选 {selectedCharIdxs.size} / {characters.length}
                 </span>
               </div>
@@ -504,7 +504,7 @@ export default function ImportPage({
                       setSelectedCharIdxs(new Set(characters.map((_, i) => i)));
                     }
                   }}
-                  className="text-xs text-[--text-muted] hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-[--surface]"
+                  className="text-xs text-(--text-muted) hover:text-primary transition-colors px-2 py-1 rounded-lg hover:bg-(--surface)"
                 >
                   {selectedCharIdxs.size === characters.length ? "取消全选" : "全选"}
                 </button>
@@ -513,7 +513,7 @@ export default function ImportPage({
                 </Button>
               </div>
             </div>
-            <p className="text-sm text-[--text-muted]">点击角色卡可取消选中，取消选中的角色不会被导入</p>
+            <p className="text-sm text-(--text-muted)">点击角色卡可取消选中，取消选中的角色不会被导入</p>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
               {characters.map((char, idx) => {
                 const selected = selectedCharIdxs.has(idx);
@@ -530,7 +530,7 @@ export default function ImportPage({
                     className={`group relative cursor-pointer overflow-hidden rounded-[14px] border transition-all duration-150 select-none
                       ${selected
                         ? "border-primary/30 bg-white hover:border-primary/50 hover:shadow-md hover:shadow-black/5"
-                        : "border-[--border-subtle] bg-[--surface] opacity-45 hover:opacity-60"
+                        : "border-(--border-subtle) bg-(--surface) opacity-45 hover:opacity-60"
                       }`}
                   >
                     {/* Top accent strip */}
@@ -552,13 +552,13 @@ export default function ImportPage({
                           {char.name.charAt(0)}
                         </div>
                         <div className="min-w-0 flex-1 pr-5">
-                          <div className="truncate text-[13px] font-bold text-[--text-primary]">{char.name}</div>
+                          <div className="truncate text-[13px] font-bold text-(--text-primary)">{char.name}</div>
                           {char.aliases && char.aliases.length > 0 && (
-                            <div className="truncate text-[10px] text-[--text-muted]">
+                            <div className="truncate text-[10px] text-(--text-muted)">
                               又称: {char.aliases.join(" / ")}
                             </div>
                           )}
-                          <div className="flex items-center gap-1.5 text-[10px] text-[--text-muted]">
+                          <div className="flex items-center gap-1.5 text-[10px] text-(--text-muted)">
                             <span>{t("frequency")} {char.frequency}</span>
                             {char.visualHint && (
                               <>
@@ -571,12 +571,12 @@ export default function ImportPage({
                       </div>
                       {/* Visual hint tag */}
                       {char.visualHint && (
-                        <div className="mb-2 inline-block rounded-md bg-[--surface] px-2 py-0.5 text-[10px] font-medium text-[--text-muted]">
+                        <div className="mb-2 inline-block rounded-md bg-(--surface) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
                           {char.visualHint}
                         </div>
                       )}
                       {/* Description */}
-                      <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
+                      <p className="line-clamp-2 text-[11px] leading-relaxed text-(--text-muted)">{char.description}</p>
                     </div>
                   </div>
                 );
@@ -589,7 +589,7 @@ export default function ImportPage({
         {showEpReview && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold text-[--text-primary]">
+              <h3 className="font-display text-lg font-bold text-(--text-primary)">
                 {t("reviewEpisodes")} ({episodes.length})
               </h3>
               <Button onClick={runGenerate} className="rounded-xl">
@@ -604,7 +604,7 @@ export default function ImportPage({
                 onChange={(e) => setReplaceEpisodes(e.target.checked)}
                 className="accent-primary h-4 w-4 rounded"
               />
-              <span className="text-sm text-[--text-secondary]">
+              <span className="text-sm text-(--text-secondary)">
                 替换已有集数（保留角色和图片，清除旧分镜）
               </span>
             </label>
@@ -613,12 +613,12 @@ export default function ImportPage({
                 ⚠️ 将删除项目中全部已有集数及其分镜/版本数据，角色档案与图片不受影响。
               </div>
             )}
-            <p className="text-sm text-[--text-muted]">{t("reviewEpisodesHint")}</p>
+            <p className="text-sm text-(--text-muted)">{t("reviewEpisodesHint")}</p>
             <div className="space-y-3">
               {episodes.map((ep, idx) => (
                 <div
                   key={idx}
-                  className="rounded-xl border border-[--border-subtle] bg-white p-4"
+                  className="rounded-xl border border-(--border-subtle) bg-white p-4"
                 >
                   <div className="mb-2 flex items-center gap-3">
                     <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-semibold text-primary">
@@ -631,12 +631,12 @@ export default function ImportPage({
                     />
                     <button
                       onClick={() => removeEpisode(idx)}
-                      className="shrink-0 text-[--text-muted] hover:text-red-500"
+                      className="shrink-0 text-(--text-muted) hover:text-red-500"
                     >
                       <X className="h-4 w-4" />
                     </button>
                   </div>
-                  <p className="text-xs text-[--text-muted]">{ep.description}</p>
+                  <p className="text-xs text-(--text-muted)">{ep.description}</p>
                   {ep.characters && ep.characters.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {ep.characters.map((name) => {
@@ -687,10 +687,10 @@ export default function ImportPage({
           return (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="font-display text-sm font-semibold text-[--text-secondary]">
+                <h3 className="font-display text-sm font-semibold text-(--text-secondary)">
                   {t("processLog")}
                   {selectedStep && (
-                    <span className="ml-2 text-xs font-normal text-[--text-muted]">
+                    <span className="ml-2 text-xs font-normal text-(--text-muted)">
                       — {t(STEPS[selectedStep - 1].label)}
                     </span>
                   )}
@@ -705,7 +705,7 @@ export default function ImportPage({
                 )}
               </div>
 
-              <div className="rounded-xl border border-[--border-subtle] bg-white p-4">
+              <div className="rounded-xl border border-(--border-subtle) bg-white p-4">
                 <div className="max-h-[30vh] space-y-1.5 overflow-y-auto font-mono text-xs">
                   {filteredLogs.map((log) => (
                     <div key={log.id} className="flex items-start gap-2">
@@ -719,9 +719,9 @@ export default function ImportPage({
                         }`}
                       />
                       {!selectedStep && (
-                        <span className="shrink-0 text-[--text-muted]">[Step {log.step}]</span>
+                        <span className="shrink-0 text-(--text-muted)">[Step {log.step}]</span>
                       )}
-                      <span className={log.status === "error" ? "text-red-500" : "text-[--text-primary]"}>
+                      <span className={log.status === "error" ? "text-red-500" : "text-(--text-primary)"}>
                         {log.message}
                       </span>
                     </div>
@@ -746,14 +746,14 @@ export default function ImportPage({
               {/* Step 2 metadata: characters */}
               {selectedStep === 2 && metaCharacters && metaCharacters.length > 0 && (
                 <div>
-                  <h4 className="mb-2 text-sm font-medium text-[--text-secondary]">
+                  <h4 className="mb-2 text-sm font-medium text-(--text-secondary)">
                     {t("reviewCharacters")} ({metaCharacters.length})
                   </h4>
                   <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3">
                     {metaCharacters.map((char, idx) => (
                       <div
                         key={idx}
-                        className="group relative overflow-hidden rounded-[14px] border border-[--border-subtle] bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-[--border-hover]"
+                        className="group relative overflow-hidden rounded-[14px] border border-(--border-subtle) bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/5 hover:border-(--border-hover)"
                       >
                         <div className="h-1 w-full bg-gradient-to-r from-primary/60 to-primary/40" />
                         <div className="p-3.5">
@@ -765,8 +765,8 @@ export default function ImportPage({
                               {char.name.charAt(0)}
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-[13px] font-bold text-[--text-primary]">{char.name}</div>
-                              <div className="flex items-center gap-1.5 text-[10px] text-[--text-muted]">
+                              <div className="truncate text-[13px] font-bold text-(--text-primary)">{char.name}</div>
+                              <div className="flex items-center gap-1.5 text-[10px] text-(--text-muted)">
                                 <span>{t("frequency")} {char.frequency}</span>
                                 {char.visualHint && (
                                   <>
@@ -778,11 +778,11 @@ export default function ImportPage({
                             </div>
                           </div>
                           {char.visualHint && (
-                            <div className="mb-2 inline-block rounded-md bg-[--surface] px-2 py-0.5 text-[10px] font-medium text-[--text-muted]">
+                            <div className="mb-2 inline-block rounded-md bg-(--surface) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
                               {char.visualHint}
                             </div>
                           )}
-                          <p className="line-clamp-2 text-[11px] leading-relaxed text-[--text-muted]">{char.description}</p>
+                          <p className="line-clamp-2 text-[11px] leading-relaxed text-(--text-muted)">{char.description}</p>
                         </div>
                       </div>
                     ))}
@@ -793,19 +793,19 @@ export default function ImportPage({
               {/* Step 3 metadata: episodes */}
               {selectedStep === 3 && metaEpisodes && metaEpisodes.length > 0 && (
                 <div>
-                  <h4 className="mb-2 text-sm font-medium text-[--text-secondary]">
+                  <h4 className="mb-2 text-sm font-medium text-(--text-secondary)">
                     {t("reviewEpisodes")} ({metaEpisodes.length})
                   </h4>
                   <div className="space-y-2">
                     {metaEpisodes.map((ep, idx) => (
-                      <div key={idx} className="rounded-xl border border-[--border-subtle] bg-white p-3">
+                      <div key={idx} className="rounded-xl border border-(--border-subtle) bg-white p-3">
                         <div className="mb-1 flex items-center gap-2">
                           <span className="rounded-md bg-primary/10 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
                             EP.{String(idx + 1).padStart(2, "0")}
                           </span>
-                          <span className="text-sm font-semibold text-[--text-primary]">{ep.title}</span>
+                          <span className="text-sm font-semibold text-(--text-primary)">{ep.title}</span>
                         </div>
-                        <p className="text-xs text-[--text-muted]">{ep.description}</p>
+                        <p className="text-xs text-(--text-muted)">{ep.description}</p>
                         {ep.characters && ep.characters.length > 0 && (
                           <div className="mt-2 flex flex-wrap gap-1">
                             {ep.characters.map((name) => {

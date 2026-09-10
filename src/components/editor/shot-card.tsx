@@ -120,7 +120,7 @@ function StepIndicator({ state }: { state: StepState }) {
   if (state === "done") return <CheckCircle2 className="h-4 w-4 text-emerald-500 flex-shrink-0" />;
   if (state === "generating") return <Loader2 className="h-4 w-4 text-primary animate-spin flex-shrink-0" />;
   if (state === "error") return <XCircle className="h-4 w-4 text-destructive flex-shrink-0" />;
-  return <Circle className="h-4 w-4 text-[--text-muted] flex-shrink-0" />;
+  return <Circle className="h-4 w-4 text-(--text-muted) flex-shrink-0" />;
 }
 
 function StepRow({
@@ -146,7 +146,7 @@ function StepRow({
           ? "border-emerald-100 bg-emerald-50/40"
           : state === "error"
             ? "border-destructive/20 bg-destructive/3"
-            : "border-[--border-subtle] bg-[--surface]/50"
+            : "border-(--border-subtle) bg-(--surface)/50"
     }`}>
       <button
         className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left"
@@ -154,18 +154,18 @@ function StepRow({
       >
         <StepIndicator state={state} />
         <span className={`flex-1 text-[13px] font-medium ${
-          isNext ? "text-primary" : state === "done" ? "text-emerald-700" : "text-[--text-secondary]"
+          isNext ? "text-primary" : state === "done" ? "text-emerald-700" : "text-(--text-secondary)"
         }`}>
           {label}
         </span>
         {open ? (
-          <ChevronUp className="h-3.5 w-3.5 text-[--text-muted]" />
+          <ChevronUp className="h-3.5 w-3.5 text-(--text-muted)" />
         ) : (
-          <ChevronDown className="h-3.5 w-3.5 text-[--text-muted]" />
+          <ChevronDown className="h-3.5 w-3.5 text-(--text-muted)" />
         )}
       </button>
       {open && (
-        <div className="border-t border-[--border-subtle] px-3 pb-3 pt-2.5">
+        <div className="border-t border-(--border-subtle) px-3 pb-3 pt-2.5">
           {children}
         </div>
       )}
@@ -421,7 +421,7 @@ export function ShotCard({
   if (isCompact) {
     return (
       <div
-        className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-white px-3 py-2 cursor-pointer hover:border-primary/30 hover:bg-primary/2 transition-colors"
+        className="flex items-center gap-3 rounded-xl border border-(--border-subtle) bg-white px-3 py-2 cursor-pointer hover:border-primary/30 hover:bg-primary/2 transition-colors"
         onClick={() => onOpenDrawer?.(id)}
       >
         {/* Sequence */}
@@ -433,7 +433,7 @@ export function ShotCard({
           {[anchorFirst, anchorLastAi, cutPoint, videoUrl].map((src, i) => {
             const isVid = i === 3;
             return (
-              <div key={i} className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-[--border-subtle] bg-[--surface]">
+              <div key={i} className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-(--border-subtle) bg-(--surface)">
                 {src ? (
                   isVid
                     ? <video className="h-full w-full object-cover" src={uploadUrl(src)} />
@@ -441,8 +441,8 @@ export function ShotCard({
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
                     {isVid
-                      ? <VideoIcon className="h-3 w-3 text-[--text-muted]" />
-                      : <ImageIcon className="h-3 w-3 text-[--text-muted]" />
+                      ? <VideoIcon className="h-3 w-3 text-(--text-muted)" />
+                      : <ImageIcon className="h-3 w-3 text-(--text-muted)" />
                     }
                   </div>
                 )}
@@ -451,11 +451,11 @@ export function ShotCard({
           })}
         </div>
         {/* Scene text */}
-        <p className="flex-1 truncate text-xs text-[--text-secondary]">{prompt}</p>
+        <p className="flex-1 truncate text-xs text-(--text-secondary)">{prompt}</p>
         {/* Progress dots */}
         <div className="flex items-center gap-1">
           {[hasText, hasFrame, hasVideoPrompt, hasVideo].map((done, i) => (
-            <div key={i} className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-400" : "bg-[--border-subtle]"}`} />
+            <div key={i} className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-400" : "bg-(--border-subtle)"}`} />
           ))}
         </div>
       </div>
@@ -463,7 +463,7 @@ export function ShotCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-colors hover:border-[--border-hover]">
+    <div className="overflow-hidden rounded-2xl border border-(--border-subtle) bg-white transition-colors hover:border-(--border-hover)">
       {/* ── Header ── */}
       <div className="flex items-center gap-3 px-4 py-3">
         {/* Sequence + Track badge */}
@@ -489,7 +489,7 @@ export function ShotCard({
             return (
               <div
                 key={i}
-                className={`h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-[--border-subtle] ${src ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
+                className={`h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg border border-(--border-subtle) ${src ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
                 onClick={() => src && setPreviewSrc(uploadUrl(src))}
               >
                 {src ? (
@@ -499,10 +499,10 @@ export function ShotCard({
                     <img src={uploadUrl(src, { w: 160 })} className="h-full w-full object-cover" />
                   )
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[--surface]">
+                  <div className="flex h-full w-full items-center justify-center bg-(--surface)">
                     {isVideo
-                      ? <VideoIcon className="h-3.5 w-3.5 text-[--text-muted]" />
-                      : <ImageIcon className="h-3.5 w-3.5 text-[--text-muted]" />
+                      ? <VideoIcon className="h-3.5 w-3.5 text-(--text-muted)" />
+                      : <ImageIcon className="h-3.5 w-3.5 text-(--text-muted)" />
                     }
                   </div>
                 )}
@@ -513,10 +513,10 @@ export function ShotCard({
 
         {/* Scene summary + meta */}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm text-[--text-primary]">{prompt}</p>
+          <p className="truncate text-sm text-(--text-primary)">{prompt}</p>
           <div className="mt-1 flex items-center gap-2">
             {/* Duration */}
-            <span className={`flex items-center gap-1 text-xs rounded px-1 -mx-1 ${durationOverLimit ? "text-orange-600" : "text-[--text-muted]"}`}>
+            <span className={`flex items-center gap-1 text-xs rounded px-1 -mx-1 ${durationOverLimit ? "text-orange-600" : "text-(--text-muted)"}`}>
               <Clock className="h-3 w-3" />
               <input
                 type="number"
@@ -532,7 +532,7 @@ export function ShotCard({
                 className={`w-9 rounded border px-1 py-0.5 text-center text-[11px] font-medium outline-none ${
                   durationOverLimit
                     ? "border-orange-400 bg-orange-50 text-orange-700 focus:border-orange-500"
-                    : "border-[--border-subtle] bg-white text-[--text-primary] focus:border-primary/50"
+                    : "border-(--border-subtle) bg-white text-(--text-primary) focus:border-primary/50"
                 }`}
               />
               <span className="text-[11px]">s</span>
@@ -551,7 +551,7 @@ export function ShotCard({
               )}
             </span>
             {dialogues.length > 0 && (
-              <span className="flex items-center gap-1 text-xs text-[--text-muted]">
+              <span className="flex items-center gap-1 text-xs text-(--text-muted)">
                 <MessageCircle className="h-3 w-3" />
                 {dialogues.length}
               </span>
@@ -559,7 +559,7 @@ export function ShotCard({
             {/* Pipeline progress dots */}
             <div className="flex items-center gap-1 ml-1">
               {[hasText, hasFrame, hasVideoPrompt, hasVideo].map((done, i) => (
-                <div key={i} className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-400" : "bg-[--border-subtle]"}`} />
+                <div key={i} className={`h-1.5 w-1.5 rounded-full ${done ? "bg-emerald-400" : "bg-(--border-subtle)"}`} />
               ))}
             </div>
           </div>
@@ -570,7 +570,7 @@ export function ShotCard({
           <button
             onClick={handleCopyPrompt}
             title={t("shot.copyPrompt")}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary]"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary)"
           >
             {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
           </button>
@@ -589,7 +589,7 @@ export function ShotCard({
       )}
 
       {/* ── Pipeline Steps ── */}
-      <div className="space-y-2 border-t border-[--border-subtle] px-4 pb-3 pt-3">
+      <div className="space-y-2 border-t border-(--border-subtle) px-4 pb-3 pt-3">
 
         {/* Step 1: 分镜描述 */}
         <StepRow
@@ -599,7 +599,7 @@ export function ShotCard({
         >
           <div className="space-y-2.5">
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.sceneDescription")}</p>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.sceneDescription")}</p>
               <Textarea
                 value={editPrompt}
                 onChange={(e) => setEditPrompt(e.target.value)}
@@ -644,19 +644,19 @@ export function ShotCard({
               />
             </div>
             <div>
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.cameraDirection")}</p>
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.cameraDirection")}</p>
               <input
                 value={editCameraDirection}
                 onChange={(e) => setEditCameraDirection(e.target.value)}
                 onBlur={async () => { await patchShot({ cameraDirection: editCameraDirection }); onUpdate(); }}
-                className="w-full rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
+                className="w-full rounded-xl border border-(--border-subtle) bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
                 placeholder="static / pan-left / zoom-in ..."
               />
             </div>
             {/* 台词：只读展示，由剧本解析写入，不支持手动编辑 */}
             {dialogues.length > 0 && (
-              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 space-y-1.5">
-                <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+              <div className="rounded-xl border border-(--border-subtle) bg-(--surface) p-3 space-y-1.5">
+                <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">
                   <MessageCircle className="h-3 w-3" />
                   台词
                 </p>
@@ -669,8 +669,8 @@ export function ShotCard({
                       {dtype !== "dialogue" && (
                         <span className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">{typeLabel[dtype]}</span>
                       )}
-                      <span className="mx-1.5 text-[--text-muted]">—</span>
-                      <span className="text-[--text-secondary]">{d.text}</span>
+                      <span className="mx-1.5 text-(--text-muted)">—</span>
+                      <span className="text-(--text-secondary)">{d.text}</span>
                     </p>
                   );
                 })}
@@ -690,7 +690,7 @@ export function ShotCard({
                   {splitingContent ? <Loader2 className="h-3 w-3 animate-spin" /> : <Scissors className="h-3 w-3" />}
                   {splitingContent ? "拆分中…" : "AI 拆分分镜"}
                 </Button>
-                <p className="text-[9px] text-[--text-muted] leading-tight px-0.5">
+                <p className="text-[9px] text-(--text-muted) leading-tight px-0.5">
                   适用：角色中途入镜、首帧无法锚定主体
                 </p>
               </div>
@@ -768,7 +768,7 @@ export function ShotCard({
             {/* 道具参考图（分镜级手动绑定，有 prop 资产时显示） */}
             {availablePropAssets.length > 0 && (
               <div className="mt-2">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">道具参考图</p>
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">道具参考图</p>
                 <div className="flex flex-wrap gap-1.5">
                   {availablePropAssets.map((prop) => {
                     const isSelected = localPropRefs.includes(prop.id);
@@ -789,14 +789,14 @@ export function ShotCard({
                         className={`relative h-10 w-10 overflow-hidden rounded-lg border-2 transition-all ${
                           isSelected
                             ? "border-amber-400 ring-1 ring-amber-300"
-                            : "border-[--border-subtle] opacity-50 hover:opacity-100"
+                            : "border-(--border-subtle) opacity-50 hover:opacity-100"
                         }`}
                       >
                         {prop.imagePath ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={uploadUrl(prop.imagePath, { w: 160 })} alt={prop.tag} className="h-full w-full object-cover" />
                         ) : (
-                          <div className="flex h-full items-center justify-center bg-[--surface-alt] text-[7px] text-[--text-muted]">无图</div>
+                          <div className="flex h-full items-center justify-center bg-(--surface) text-[7px] text-(--text-muted)">无图</div>
                         )}
                         {isSelected && (
                           <div className="absolute inset-x-0 bottom-0 bg-amber-400/80 text-center text-[7px] font-bold text-white leading-tight">✓</div>
@@ -846,7 +846,7 @@ export function ShotCard({
         >
           {hasVideo && (
             <div
-              className="group relative mb-2.5 w-full overflow-hidden rounded-xl border border-[--border-subtle] bg-black cursor-pointer"
+              className="group relative mb-2.5 w-full overflow-hidden rounded-xl border border-(--border-subtle) bg-black cursor-pointer"
               style={{ aspectRatio: "16/9" }}
               onClick={() => setPreviewSrc(uploadUrl(videoUrl!))}
               onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY }); }}
@@ -854,7 +854,7 @@ export function ShotCard({
               <video className="h-full w-full object-contain" src={uploadUrl(videoUrl!)} />
               <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow-lg">
-                  <VideoIcon className="h-4 w-4 text-[--text-primary] translate-x-0.5" />
+                  <VideoIcon className="h-4 w-4 text-(--text-primary) translate-x-0.5" />
                 </div>
               </div>
               {/* Resolution badge */}
@@ -938,18 +938,18 @@ export function ShotCard({
       {/* 右键菜单 */}
       {ctxMenu && (
         <div
-          className="fixed z-[100] min-w-[140px] rounded-lg border border-[--border-subtle] bg-white py-1 shadow-xl"
+          className="fixed z-[100] min-w-[140px] rounded-lg border border-(--border-subtle) bg-white py-1 shadow-xl"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onClick={(e) => e.stopPropagation()}
         >
           <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-[--text-primary] hover:bg-[--surface] transition-colors"
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-(--text-primary) hover:bg-(--surface) transition-colors"
             onClick={() => {
               setCtxMenu(null);
               setVideoHistoryOpen(true);
             }}
           >
-            <History className="h-3.5 w-3.5 text-[--text-muted]" />
+            <History className="h-3.5 w-3.5 text-(--text-muted)" />
             版本历史
           </button>
         </div>

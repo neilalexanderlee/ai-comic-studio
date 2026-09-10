@@ -36,11 +36,11 @@ export default async function DashboardPage() {
             <Clapperboard className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {t("title")}
             </h2>
             {allProjects.length > 0 && (
-              <p className="text-xs text-[--text-muted]">
+              <p className="text-xs text-(--text-muted)">
                 {allProjects.length}{" "}
                 {allProjects.length === 1 ? "project" : "projects"}
               </p>
@@ -51,14 +51,14 @@ export default async function DashboardPage() {
       </div>
 
       {allProjects.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-24">
+        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-(--border-subtle) bg-(--surface)/50 py-24">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-accent/10">
             <Clapperboard className="h-7 w-7 text-primary" />
           </div>
-          <h3 className="font-display text-lg font-semibold text-[--text-primary]">
+          <h3 className="font-display text-lg font-semibold text-(--text-primary)">
             {t("title")}
           </h3>
-          <p className="mt-2 max-w-sm text-center text-sm text-[--text-secondary]">
+          <p className="mt-2 max-w-sm text-center text-sm text-(--text-secondary)">
             {t("noProjects")}
           </p>
           <div className="mt-6">

@@ -72,7 +72,7 @@ export function EpisodeDialog({
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[--text-primary]">
+            <label className="mb-1.5 block text-sm font-medium text-(--text-primary)">
               {t("title")} *
             </label>
             <Input
@@ -83,7 +83,7 @@ export function EpisodeDialog({
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[--text-primary]">
+            <label className="mb-1.5 block text-sm font-medium text-(--text-primary)">
               {t("description")}
             </label>
             <textarea
@@ -91,11 +91,11 @@ export function EpisodeDialog({
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("descriptionPlaceholder")}
               rows={3}
-              className="w-full rounded-xl border border-[--border-subtle] bg-[--surface] px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-[--text-muted] focus:border-primary focus:ring-1 focus:ring-primary/20 resize-none"
+              className="w-full rounded-xl border border-(--border-subtle) bg-(--surface) px-3.5 py-2.5 text-sm outline-none transition-colors placeholder:text-(--text-muted) focus:border-primary focus:ring-1 focus:ring-primary/20 resize-none"
             />
           </div>
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-[--text-primary]">
+            <label className="mb-1.5 block text-sm font-medium text-(--text-primary)">
               {t("keywords")}
             </label>
             <Input

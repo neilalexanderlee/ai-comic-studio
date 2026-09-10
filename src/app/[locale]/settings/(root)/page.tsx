@@ -22,11 +22,11 @@ export default function SettingsPage() {
   return (
     <div className="flex min-h-screen flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-[--border-subtle] bg-white/80 backdrop-blur-xl px-4 lg:px-6">
+      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-(--border-subtle) bg-white/80 backdrop-blur-xl px-4 lg:px-6">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary]"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary)"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -34,14 +34,14 @@ export default function SettingsPage() {
             <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary">
               <Settings className="h-3.5 w-3.5" />
             </div>
-            <span className="font-display text-sm font-semibold text-[--text-primary]">
+            <span className="font-display text-sm font-semibold text-(--text-primary)">
               {t("title")}
             </span>
           </div>
         </div>
       </header>
 
-      <main className="flex-1 bg-[--surface] p-4 lg:p-6">
+      <main className="flex-1 bg-(--surface) p-4 lg:p-6">
         <div className="mx-auto max-w-4xl animate-page-in space-y-5">
           {/* 账户与套餐 —— 未启用计费时组件自己返回 null，整块不渲染 */}
           <BillingSection />
@@ -49,21 +49,21 @@ export default function SettingsPage() {
           {isStaff && (
             <Link
               href="/admin"
-              className="flex items-center gap-3 rounded-2xl border border-[--border-subtle] bg-white p-5 transition-all duration-200 hover:border-[--border-hover] hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+              className="flex items-center gap-3 rounded-2xl border border-(--border-subtle) bg-white p-5 transition-all duration-200 hover:border-(--border-hover) hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
             >
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-600">
                 <ShieldUser className="h-4 w-4" />
               </div>
               <div>
                 <div className="font-display text-sm font-semibold">管理后台</div>
-                <div className="text-xs text-[--text-muted]">邀请码、用户与用量看板</div>
+                <div className="text-xs text-(--text-muted)">邀请码、用户与用量看板</div>
               </div>
             </Link>
           )}
 
           {/* Default model selection */}
-          <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
-            <h3 className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+          <div className="rounded-2xl border border-(--border-subtle) bg-white p-5">
+            <h3 className="mb-4 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
               <Zap className="h-3.5 w-3.5" />
               {t("defaultModels")}
             </h3>
@@ -73,24 +73,24 @@ export default function SettingsPage() {
           {/* Prompt Templates link */}
           <Link
             href="/settings/prompts"
-            className="flex items-center gap-3 rounded-2xl border border-[--border-subtle] bg-white p-5 transition-all duration-200 hover:border-[--border-hover] hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+            className="flex items-center gap-3 rounded-2xl border border-(--border-subtle) bg-white p-5 transition-all duration-200 hover:border-(--border-hover) hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
           >
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Wand2 className="h-4 w-4" />
             </div>
             <div>
               <div className="font-display text-sm font-semibold">{t("promptTemplates")}</div>
-              <div className="text-xs text-[--text-muted]">{t("promptTemplatesDesc")}</div>
+              <div className="text-xs text-(--text-muted)">{t("promptTemplatesDesc")}</div>
             </div>
           </Link>
 
           {ready && managed ? (
-            <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
-              <h3 className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+            <div className="rounded-2xl border border-(--border-subtle) bg-white p-5">
+              <h3 className="mb-2 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
                 <ShieldCheck className="h-3.5 w-3.5" />
                 模型配置
               </h3>
-              <p className="text-sm text-[--text-muted]">
+              <p className="text-sm text-(--text-muted)">
                 本站的生成模型由平台统一配置，你不需要填写任何 API Key ——
                 在上方「默认模型」里选择要用哪一个即可。
               </p>
@@ -142,10 +142,10 @@ export default function SettingsPage() {
             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-violet-100 text-violet-600">
               <Layers className="h-3 w-3" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
               AI 多媒体套件
             </span>
-            <div className="flex-1 border-t border-[--border-subtle]" />
+            <div className="flex-1 border-t border-(--border-subtle)" />
           </div>
 
           {/* AI MediaKit 画质增强 */}
@@ -156,10 +156,10 @@ export default function SettingsPage() {
             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-emerald-100 text-emerald-600">
               <ShieldCheck className="h-3 w-3" />
             </div>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
               真人形象视频（Seedance 2.0 人脸拦截解锁）
             </span>
-            <div className="flex-1 border-t border-[--border-subtle]" />
+            <div className="flex-1 border-t border-(--border-subtle)" />
           </div>
 
           {/* 私域虚拟人像素材资产库 */}

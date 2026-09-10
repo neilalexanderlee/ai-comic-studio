@@ -27,7 +27,7 @@ export default function EpisodeLayout({
     return (
       <div className="flex min-h-[60vh] items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <p className="ml-2 text-sm text-[--text-muted]">{t("loading")}</p>
+        <p className="ml-2 text-sm text-(--text-muted)">{t("loading")}</p>
       </div>
     );
   }
@@ -35,7 +35,7 @@ export default function EpisodeLayout({
   return (
     <div className="flex flex-1 overflow-hidden">
       <ProjectNav projectId={id} episodeId={episodeId} />
-      <main className="flex-1 overflow-y-auto bg-[--surface] p-6 pb-24 lg:pb-6">
+      <main className="flex-1 overflow-y-auto bg-(--surface) p-6 pb-24 lg:pb-6">
         {children}
       </main>
     </div>

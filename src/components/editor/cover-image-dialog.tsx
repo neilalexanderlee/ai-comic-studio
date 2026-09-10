@@ -206,33 +206,33 @@ export function CoverImageDialog({ open, onOpenChange, projectId }: CoverImageDi
 
           {/* 参考图多选下拉 */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-[--text-secondary]">
+            <label className="mb-1.5 block text-xs font-medium text-(--text-secondary)">
               角色定妆图参考（已选 {selected.size} / 14）
             </label>
             <div className="relative" ref={dropRef}>
               <button
                 type="button"
                 onClick={() => setDropOpen((v) => !v)}
-                className="flex w-full items-center justify-between rounded-lg border border-[--border-subtle] bg-white px-3 py-2 text-left text-xs shadow-sm transition hover:border-primary/30"
+                className="flex w-full items-center justify-between rounded-lg border border-(--border-subtle) bg-white px-3 py-2 text-left text-xs shadow-sm transition hover:border-primary/30"
               >
-                <span className="truncate text-[--text-secondary]">
+                <span className="truncate text-(--text-secondary)">
                   {loadingChars ? "加载中..." : summaryText}
                 </span>
-                <ChevronDown className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-[--text-muted] transition-transform ${dropOpen ? "rotate-180" : ""}`} />
+                <ChevronDown className={`ml-2 h-3.5 w-3.5 flex-shrink-0 text-(--text-muted) transition-transform ${dropOpen ? "rotate-180" : ""}`} />
               </button>
               {dropOpen && !loadingChars && (
-                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-[--border-subtle] bg-white shadow-lg">
+                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-y-auto rounded-lg border border-(--border-subtle) bg-white shadow-lg">
                   {options.length === 0 ? (
-                    <p className="px-3 py-3 text-center text-xs text-[--text-muted]">暂无定妆图</p>
+                    <p className="px-3 py-3 text-center text-xs text-(--text-muted)">暂无定妆图</p>
                   ) : options.map((opt) => {
                     const checked = selected.has(opt.key);
                     return (
                       <button key={opt.key} type="button" onClick={() => toggleOption(opt.key)}
-                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-[--surface]">
-                        <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-white" : "border-[--border-subtle]"}`}>
+                        className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition hover:bg-(--surface)">
+                        <span className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border ${checked ? "border-primary bg-primary text-white" : "border-(--border-subtle)"}`}>
                           {checked && <Check className="h-2.5 w-2.5" />}
                         </span>
-                        <span className={checked ? "text-[--text-primary]" : "text-[--text-secondary]"}>{opt.label}</span>
+                        <span className={checked ? "text-(--text-primary)" : "text-(--text-secondary)"}>{opt.label}</span>
                       </button>
                     );
                   })}
@@ -243,22 +243,22 @@ export function CoverImageDialog({ open, onOpenChange, projectId }: CoverImageDi
 
           {/* 提示词 */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-[--text-secondary]">封面描述（可编辑）</label>
+            <label className="mb-1.5 block text-xs font-medium text-(--text-secondary)">封面描述（可编辑）</label>
             <textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={5}
-              className="w-full rounded-lg border border-[--border-subtle] bg-[--surface] px-3 py-2 text-xs text-[--text-primary] focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
+              className="w-full rounded-lg border border-(--border-subtle) bg-(--surface) px-3 py-2 text-xs text-(--text-primary) focus:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary/20 resize-y"
             />
           </div>
 
           {/* 模型 */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-[--text-secondary]">图片模型</label>
+            <label className="mb-1.5 block text-xs font-medium text-(--text-secondary)">图片模型</label>
             <InlineModelPicker capability="image" value={imageModelRef} onChange={setImageModelRef} />
           </div>
 
-          <p className="text-[11px] text-[--text-muted]">
+          <p className="text-[11px] text-(--text-muted)">
             比例：2:3 竖版（1664×2496px 2K，符合红果封面 ≥350×500px 要求）
           </p>
 
@@ -270,13 +270,13 @@ export function CoverImageDialog({ open, onOpenChange, projectId }: CoverImageDi
           {/* 生成结果预览 */}
           {(generating || resultPath) && (
             <div className="flex flex-col items-center gap-2 pt-1">
-              <div className="relative mx-auto overflow-hidden rounded-xl border border-[--border-subtle] bg-[--surface]" style={{ width: 140, height: 210 }}>
+              <div className="relative mx-auto overflow-hidden rounded-xl border border-(--border-subtle) bg-(--surface)" style={{ width: 140, height: 210 }}>
                 {resultPath ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={uploadUrl(resultPath, { w: 320 })} alt="封面预览" className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-[--text-muted]" />
+                    <Loader2 className="h-6 w-6 animate-spin text-(--text-muted)" />
                   </div>
                 )}
               </div>
@@ -292,7 +292,7 @@ export function CoverImageDialog({ open, onOpenChange, projectId }: CoverImageDi
                     <Download className="mr-1.5 h-3.5 w-3.5" />
                     导出平台格式（1334×2000 ≤2MB）
                   </Button>
-                  <p className="text-center text-[10px] text-[--text-muted]">平台要求高度 ≤2000px，比例 2:3</p>
+                  <p className="text-center text-[10px] text-(--text-muted)">平台要求高度 ≤2000px，比例 2:3</p>
                 </div>
               )}
             </div>

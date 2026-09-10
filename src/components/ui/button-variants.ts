@@ -20,11 +20,11 @@ const buttonVariants = cva(
         default:
           "bg-primary text-white rounded-xl shadow-lg shadow-primary/20 hover:bg-[#E8573A] hover:shadow-xl hover:shadow-primary/30 active:scale-[0.97]",
         outline:
-          "rounded-xl border border-border bg-transparent text-[--text-secondary] hover:bg-[--surface-hover] hover:text-[--text-primary] hover:border-[--border-hover]",
+          "rounded-xl border border-border bg-transparent text-(--text-secondary) hover:bg-(--surface-hover) hover:text-(--text-primary) hover:border-(--border-hover)",
         secondary:
-          "rounded-xl bg-secondary text-secondary-foreground hover:bg-[--surface-hover]",
+          "rounded-xl bg-secondary text-secondary-foreground hover:bg-(--surface-hover)",
         ghost:
-          "rounded-xl text-[--text-secondary] hover:bg-[--surface-hover] hover:text-[--text-primary]",
+          "rounded-xl text-(--text-secondary) hover:bg-(--surface-hover) hover:text-(--text-primary)",
         destructive:
           "rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20",
         link: "text-primary underline-offset-4 hover:underline",

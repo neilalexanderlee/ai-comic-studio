@@ -261,14 +261,14 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
         </DialogTitle>
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-[--border-subtle] px-5 py-3">
+        <div className="flex items-center justify-between border-b border-(--border-subtle) px-5 py-3">
           <div className="flex items-center gap-2.5">
             <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10">
               <Wand2 className="h-3.5 w-3.5 text-primary" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-[--text-primary]">{headerTitle}</div>
-              <div className="text-[10px] font-mono text-[--text-muted]">{headerSubtitle}</div>
+              <div className="text-sm font-semibold text-(--text-primary)">{headerTitle}</div>
+              <div className="text-[10px] font-mono text-(--text-muted)">{headerSubtitle}</div>
             </div>
             {isProject && (
               <Badge variant="default" className="text-[10px]">
@@ -300,18 +300,18 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
         </div>
 
         {loading ? (
-          <div className="flex flex-1 items-center justify-center text-[--text-muted] text-sm">
+          <div className="flex flex-1 items-center justify-center text-(--text-muted) text-sm">
             Loading...
           </div>
         ) : (
           <div className="flex flex-1 overflow-hidden">
             {/* Slot list (left) */}
-            <div className="w-[170px] shrink-0 overflow-y-auto border-r border-[--border-subtle] p-2">
+            <div className="w-[170px] shrink-0 overflow-y-auto border-r border-(--border-subtle) p-2">
               {prompts.map((prompt, pi) => (
                 <div key={prompt.key}>
                   {/* Show prompt group header when multiple prompts */}
                   {prompts.length > 1 && (
-                    <div className={`px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted] ${pi > 0 ? "pt-3 mt-1 border-t border-[--border-subtle]" : "pt-1"}`}>
+                    <div className={`px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted) ${pi > 0 ? "pt-3 mt-1 border-t border-(--border-subtle)" : "pt-1"}`}>
                       {t(tKey(prompt.nameKey) as Parameters<typeof t>[0])}
                     </div>
                   )}
@@ -324,8 +324,8 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
                         onClick={() => setSelectedSlot({ promptKey: prompt.key, slotKey: slot.key })}
                         className={`flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-xs transition-all ${
                           isSelected
-                            ? "border border-primary/15 bg-primary/5 text-[--text-primary] font-medium"
-                            : "border border-transparent hover:bg-[--surface] text-[--text-secondary]"
+                            ? "border border-primary/15 bg-primary/5 text-(--text-primary) font-medium"
+                            : "border border-transparent hover:bg-(--surface) text-(--text-secondary)"
                         }`}
                       >
                         <span className="flex-1 truncate">
@@ -343,7 +343,7 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
               ))}
               {allLockedSlots.length > 0 && (
                 <>
-                  <div className="my-1.5 border-t border-[--border-subtle]" />
+                  <div className="my-1.5 border-t border-(--border-subtle)" />
                   {allLockedSlots.map((slot) => {
                     const isSelected = selectedSlot?.promptKey === slot.promptKey && selectedSlot?.slotKey === slot.key;
                     return (
@@ -352,8 +352,8 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
                         onClick={() => setSelectedSlot({ promptKey: slot.promptKey, slotKey: slot.key })}
                         className={`flex w-full items-center gap-1.5 rounded-lg px-2.5 py-2 text-left text-xs transition-all ${
                           isSelected
-                            ? "border border-[--border-subtle] bg-[--surface] text-[--text-secondary]"
-                            : "border border-transparent text-[--text-muted] hover:bg-[--surface] opacity-60 hover:opacity-80"
+                            ? "border border-(--border-subtle) bg-(--surface) text-(--text-secondary)"
+                            : "border border-transparent text-(--text-muted) hover:bg-(--surface) opacity-60 hover:opacity-80"
                         }`}
                       >
                         <Lock className="h-2.5 w-2.5 shrink-0" />
@@ -372,11 +372,11 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
               {selectedSlot && currentSlotMeta ? (
                 <div className="flex flex-1 flex-col p-3 overflow-hidden">
                   <div className="mb-2 flex items-center gap-2">
-                    <span className="text-xs font-medium text-[--text-primary]">
+                    <span className="text-xs font-medium text-(--text-primary)">
                       {t(tKey(currentSlotMeta.nameKey) as Parameters<typeof t>[0])}
                     </span>
                     {!currentSlotMeta.editable && (
-                      <Badge className="shrink-0 text-[9px] px-1.5 py-0 bg-[--surface] text-[--text-muted]">
+                      <Badge className="shrink-0 text-[9px] px-1.5 py-0 bg-(--surface) text-(--text-muted)">
                         {t("editor.locked")}
                       </Badge>
                     )}
@@ -399,16 +399,16 @@ export function PromptDrawer({ open, onOpenChange, promptKeys: rawKeys, projectI
                         },
                       }));
                     }}
-                    className={`flex-1 resize-none rounded-xl border border-[--border-subtle] px-3 py-2.5 font-mono text-[11px] leading-relaxed text-[--text-primary] outline-none transition-all ${
+                    className={`flex-1 resize-none rounded-xl border border-(--border-subtle) px-3 py-2.5 font-mono text-[11px] leading-relaxed text-(--text-primary) outline-none transition-all ${
                       currentSlotMeta.editable
-                        ? "bg-white hover:border-[--border-hover] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
-                        : "bg-[--surface] cursor-default"
+                        ? "bg-white hover:border-(--border-hover) focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
+                        : "bg-(--surface) cursor-default"
                     }`}
                     placeholder={t("editor.edit")}
                   />
                 </div>
               ) : (
-                <div className="flex flex-1 items-center justify-center text-xs text-[--text-muted]">
+                <div className="flex flex-1 items-center justify-center text-xs text-(--text-muted)">
                   {t("editor.slotMode")}
                 </div>
               )}

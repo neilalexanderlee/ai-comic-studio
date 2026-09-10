@@ -90,7 +90,7 @@ export function ShotExternalFrameHelper({
             </div>
           ) : data ? (
             <div className="space-y-4">
-              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 text-xs text-[--text-secondary]">
+              <div className="rounded-xl border border-(--border-subtle) bg-(--surface) p-3 text-xs text-(--text-secondary)">
                 <div>{t("shot.externalFrameHelperHint")}</div>
                 {data.reusePreviousLastFrame && (
                   <div className="mt-1 text-amber-700">{t("shot.reusePreviousLastFrame")}</div>
@@ -105,7 +105,7 @@ export function ShotExternalFrameHelper({
                       {copied === "first" ? t("common.copied") : t("shot.copyPrompt")}
                     </Button>
                   </div>
-                  <div className="mb-2 text-[11px] text-[--text-muted]">{data.startFrameDesc}</div>
+                  <div className="mb-2 text-[11px] text-(--text-muted)">{data.startFrameDesc}</div>
                   <Textarea value={data.firstPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
                 </div>
                 <div className="rounded-xl border border-amber-200 bg-amber-50/30 p-3">
@@ -116,7 +116,7 @@ export function ShotExternalFrameHelper({
                       {copied === "last" ? t("common.copied") : t("shot.copyPrompt")}
                     </Button>
                   </div>
-                  <div className="mb-2 text-[11px] text-[--text-muted]">{data.endFrameDesc}</div>
+                  <div className="mb-2 text-[11px] text-(--text-muted)">{data.endFrameDesc}</div>
                   <Textarea value={data.lastPrompt} readOnly rows={14} className="font-mono text-xs leading-relaxed" />
                 </div>
               </div>

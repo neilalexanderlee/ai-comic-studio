@@ -100,7 +100,7 @@ export function ShotKanban({
   return (
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {columns.map((col) => (
-        <div key={col.key} className="flex flex-col rounded-2xl border border-[--border-subtle] bg-white overflow-hidden">
+        <div key={col.key} className="flex flex-col rounded-2xl border border-(--border-subtle) bg-white overflow-hidden">
           <div className={`flex items-center gap-2 border-b px-3 py-2 ${col.headerBg}`}>
             <span className={col.color}>{col.icon}</span>
             <span className={`flex-1 text-[12px] font-semibold ${col.color}`}>
@@ -112,7 +112,7 @@ export function ShotKanban({
           </div>
 
           {col.batchAction && col.shots.length > 0 && (
-            <div className="border-b border-[--border-subtle] px-2 py-2">
+            <div className="border-b border-(--border-subtle) px-2 py-2">
               <Button
                 size="xs"
                 variant="outline"
@@ -134,7 +134,7 @@ export function ShotKanban({
 
           <div className="flex-1 space-y-1.5 overflow-y-auto p-2">
             {col.shots.length === 0 ? (
-              <div className="flex items-center justify-center py-6 text-[11px] text-[--text-muted]">
+              <div className="flex items-center justify-center py-6 text-[11px] text-(--text-muted)">
                 —
               </div>
             ) : (
@@ -143,24 +143,24 @@ export function ShotKanban({
                 return (
                   <div
                     key={shot.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-[--border-subtle] bg-white px-2 py-1.5 transition-colors hover:border-primary/30 hover:bg-primary/2"
+                    className="flex cursor-pointer items-center gap-2 rounded-lg border border-(--border-subtle) bg-white px-2 py-1.5 transition-colors hover:border-primary/30 hover:bg-primary/2"
                     onClick={() => onOpenDrawer(shot.id)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenDrawer(shot.id); } }}
                   >
-                    <div className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-[--border-subtle] bg-[--surface]">
+                    <div className="h-8 w-11 flex-shrink-0 overflow-hidden rounded-md border border-(--border-subtle) bg-(--surface)">
                       {thumb ? (
                         <img src={uploadUrl(thumb, { w: 160 })} alt={`Shot ${shot.sequence}`} className="h-full w-full object-cover" />
                       ) : (
                         <div className="flex h-full w-full items-center justify-center">
-                          <ImageIcon className="h-3 w-3 text-[--text-muted]" />
+                          <ImageIcon className="h-3 w-3 text-(--text-muted)" />
                         </div>
                       )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-[10px] font-mono font-bold text-primary">#{shot.sequence}</div>
-                      <div className="truncate text-[11px] text-[--text-secondary]">{shot.prompt}</div>
+                      <div className="truncate text-[11px] text-(--text-secondary)">{shot.prompt}</div>
                     </div>
                   </div>
                 );

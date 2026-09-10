@@ -120,7 +120,7 @@ export function NewVersionDialog({
           <div className="space-y-1.5">
             <Label>基于</Label>
             <div className="flex flex-col gap-1.5">
-              <label className="flex items-center gap-2.5 cursor-pointer rounded-lg border border-[--border-subtle] px-3 py-2.5 transition-colors hover:bg-[--surface]">
+              <label className="flex items-center gap-2.5 cursor-pointer rounded-lg border border-(--border-subtle) px-3 py-2.5 transition-colors hover:bg-(--surface)">
                 <input
                   type="radio"
                   name="source"
@@ -129,12 +129,12 @@ export function NewVersionDialog({
                   onChange={() => setSourceId("none")}
                   className="accent-primary"
                 />
-                <span className="text-sm font-medium text-[--text-primary]">从头开始（空版本）</span>
+                <span className="text-sm font-medium text-(--text-primary)">从头开始（空版本）</span>
               </label>
               {versions.map((v) => (
                 <label
                   key={v.id}
-                  className="flex items-center gap-2.5 cursor-pointer rounded-lg border border-[--border-subtle] px-3 py-2.5 transition-colors hover:bg-[--surface]"
+                  className="flex items-center gap-2.5 cursor-pointer rounded-lg border border-(--border-subtle) px-3 py-2.5 transition-colors hover:bg-(--surface)"
                 >
                   <input
                     type="radio"
@@ -144,7 +144,7 @@ export function NewVersionDialog({
                     onChange={() => setSourceId(v.id)}
                     className="accent-primary"
                   />
-                  <span className="text-sm font-medium text-[--text-primary]">{v.label}</span>
+                  <span className="text-sm font-medium text-(--text-primary)">{v.label}</span>
                   {v.id === currentVersionId && (
                     <span className="ml-auto text-[10px] font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5">
                       当前
@@ -159,11 +159,11 @@ export function NewVersionDialog({
           {hasSource && (
             <div className="space-y-1.5">
               <Label>复制内容</Label>
-              <div className="rounded-xl border border-[--border-subtle] divide-y divide-[--border-subtle]">
+              <div className="rounded-xl border border-(--border-subtle) divide-y divide-(--border-subtle)">
                 {COPY_OPTIONS.map(({ key, label: optLabel, desc }) => (
                   <label
                     key={key}
-                    className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-[--surface] transition-colors first:rounded-t-xl last:rounded-b-xl"
+                    className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-(--surface) transition-colors first:rounded-t-xl last:rounded-b-xl"
                   >
                     <input
                       type="checkbox"
@@ -172,8 +172,8 @@ export function NewVersionDialog({
                       className="accent-primary mt-0.5 h-3.5 w-3.5 flex-shrink-0"
                     />
                     <div>
-                      <div className="text-sm font-medium text-[--text-primary]">{optLabel}</div>
-                      <div className="text-[11px] text-[--text-muted] mt-0.5">{desc}</div>
+                      <div className="text-sm font-medium text-(--text-primary)">{optLabel}</div>
+                      <div className="text-[11px] text-(--text-muted) mt-0.5">{desc}</div>
                     </div>
                   </label>
                 ))}

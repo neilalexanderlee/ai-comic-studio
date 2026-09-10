@@ -41,7 +41,7 @@ function NumInput({
       onChange={(e) => setLocal(e.target.value)}
       onBlur={(e) => commit(e.target.value)}
       onKeyDown={(e) => { if (e.key === "Enter") commit((e.target as HTMLInputElement).value); }}
-      className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
+      className="w-full rounded border border-(--border-subtle) px-2 py-1 text-[11px] outline-none focus:border-primary/50"
     />
   );
 }
@@ -102,15 +102,15 @@ export function PropertyPanel() {
   }
 
   return (
-    <div className="flex h-full flex-col border-l border-[--border-subtle] bg-white overflow-hidden">
+    <div className="flex h-full flex-col border-l border-(--border-subtle) bg-white overflow-hidden">
       {/* Tab 切换 */}
-      <div className="flex shrink-0 border-b border-[--border-subtle]">
+      <div className="flex shrink-0 border-b border-(--border-subtle)">
         <button
           onClick={() => setTab("clip")}
           className={`flex-1 py-2 text-[11px] font-medium transition-colors ${
             tab === "clip"
               ? "border-b-2 border-primary text-primary"
-              : "text-[--text-muted] hover:text-[--text-primary]"
+              : "text-(--text-muted) hover:text-(--text-primary)"
           }`}
         >
           片段属性
@@ -120,7 +120,7 @@ export function PropertyPanel() {
           className={`flex-1 py-2 text-[11px] font-medium transition-colors ${
             tab === "subtitle"
               ? "border-b-2 border-primary text-primary"
-              : "text-[--text-muted] hover:text-[--text-primary]"
+              : "text-(--text-muted) hover:text-(--text-primary)"
           }`}
         >
           全局字幕
@@ -131,7 +131,7 @@ export function PropertyPanel() {
       {tab === "subtitle" && (
         <div className="flex-1 overflow-y-auto">
           <div className="space-y-3 p-3">
-            <p className="text-[10px] text-[--text-muted] leading-relaxed">
+            <p className="text-[10px] text-(--text-muted) leading-relaxed">
               设置导出时所有字幕的默认样式。点击「应用到全部」批量更新时间线上的字幕片段。
             </p>
             <div className="space-y-2">
@@ -149,16 +149,16 @@ export function PropertyPanel() {
                     type="color"
                     value={globalSubtitleStyle.color ?? "#ffffff"}
                     onChange={(e) => setGlobalSubtitleStyle({ color: e.target.value })}
-                    className="h-7 w-10 rounded border border-[--border-subtle] cursor-pointer"
+                    className="h-7 w-10 rounded border border-(--border-subtle) cursor-pointer"
                   />
-                  <span className="text-[10px] text-[--text-muted]">{globalSubtitleStyle.color ?? "#ffffff"}</span>
+                  <span className="text-[10px] text-(--text-muted)">{globalSubtitleStyle.color ?? "#ffffff"}</span>
                 </div>
               </Row>
               <Row label="对齐">
                 <select
                   value={globalSubtitleStyle.textAlign ?? "center"}
                   onChange={(e) => setGlobalSubtitleStyle({ textAlign: e.target.value as "left" | "center" | "right" })}
-                  className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
+                  className="w-full rounded border border-(--border-subtle) px-2 py-1 text-[11px] outline-none focus:border-primary/50"
                 >
                   <option value="left">左对齐</option>
                   <option value="center">居中</option>
@@ -167,8 +167,8 @@ export function PropertyPanel() {
               </Row>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-[--text-muted]">垂直位置</span>
-                  <span className="text-[10px] text-[--text-muted]">{Math.round((globalSubtitleStyle.y ?? 0.82) * 100)}%</span>
+                  <span className="text-[10px] text-(--text-muted)">垂直位置</span>
+                  <span className="text-[10px] text-(--text-muted)">{Math.round((globalSubtitleStyle.y ?? 0.82) * 100)}%</span>
                 </div>
                 <input
                   type="range" min={0} max={1} step={0.01}
@@ -191,17 +191,17 @@ export function PropertyPanel() {
       {/* 片段属性 tab */}
       {tab === "clip" && !selectedClip && (
         <div className="flex flex-1 items-center justify-center">
-          <p className="text-[11px] text-[--text-muted]">点击时间线上的片段</p>
+          <p className="text-[11px] text-(--text-muted)">点击时间线上的片段</p>
         </div>
       )}
 
       {tab === "clip" && selectedClip && (
       <>
       {/* 标题 */}
-      <div className="flex shrink-0 items-center justify-between border-b border-[--border-subtle] px-3 py-2">
+      <div className="flex shrink-0 items-center justify-between border-b border-(--border-subtle) px-3 py-2">
         <div>
-          <p className="text-[12px] font-semibold text-[--text-primary] truncate max-w-[90px]">{selectedClip.name}</p>
-          <p className="text-[10px] text-[--text-muted]">{selectedClip.type}</p>
+          <p className="text-[12px] font-semibold text-(--text-primary) truncate max-w-[90px]">{selectedClip.name}</p>
+          <p className="text-[10px] text-(--text-muted)">{selectedClip.type}</p>
         </div>
         <button
           onClick={() => { removeClip(selectedClip.id); selectClip(null); }}
@@ -215,7 +215,7 @@ export function PropertyPanel() {
       <div className="space-y-4 p-3">
         {/* 基础：时间 */}
         <section>
-          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">时间</p>
+          <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">时间</p>
           <div className="space-y-1.5">
             <Row label="开始">
               <NumInput
@@ -237,8 +237,8 @@ export function PropertyPanel() {
         {/* 视频属性 */}
         {selectedClip.type === "video" && (
           <section>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">视频</p>
-            <p className="text-[10px] text-[--text-muted] truncate mb-2">{selectedClip.url?.split("/").pop()}</p>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">视频</p>
+            <p className="text-[10px] text-(--text-muted) truncate mb-2">{selectedClip.url?.split("/").pop()}</p>
             <ProbeButton
               url={selectedClip.url}
               onProbed={(actual) => resetDurationWithRipple(selectedClip.id, actual)}
@@ -249,7 +249,7 @@ export function PropertyPanel() {
         {/* 视频裁剪 */}
         {selectedClip.type === "video" && (
           <section>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">裁剪</p>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">裁剪</p>
             <div className="space-y-1.5">
               <Row label="起点">
                 <NumInput
@@ -267,7 +267,7 @@ export function PropertyPanel() {
                   onChange={(v) => updateClip(selectedClip.id, { trimEnd: v })}
                 />
               </Row>
-              <p className="text-[9px] text-[--text-muted]">
+              <p className="text-[9px] text-(--text-muted)">
                 起点/终点为素材内偏移秒数，留空 = 使用全段
               </p>
             </div>
@@ -278,7 +278,7 @@ export function PropertyPanel() {
         {selectedClip.type === "video" && selectedClip.effectType && (
           <section>
             <div className="flex items-center justify-between mb-1.5">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">特效</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">特效</p>
               <button
                 onClick={() => updateClip(selectedClip.id, { effectType: undefined })}
                 className="text-[9px] text-red-400 hover:text-red-600 transition-colors"
@@ -295,7 +295,7 @@ export function PropertyPanel() {
         {/* 音频属性 */}
         {(selectedClip.type === "audio" || selectedClip.type === "bgm") && (
           <section>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">音频</p>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">音频</p>
             <Row label="音量">
               <div className="flex items-center gap-2">
                 <input
@@ -304,7 +304,7 @@ export function PropertyPanel() {
                   onChange={(e) => updateClip(selectedClip.id, { volume: parseFloat(e.target.value) })}
                   className="flex-1"
                 />
-                <span className="w-8 text-right text-[10px] text-[--text-muted]">
+                <span className="w-8 text-right text-[10px] text-(--text-muted)">
                   {Math.round((selectedClip.volume ?? 1) * 100)}%
                 </span>
               </div>
@@ -325,13 +325,13 @@ export function PropertyPanel() {
         {/* 字幕属性 */}
         {selectedClip.type === "subtitle" && (
           <section>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">字幕</p>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">字幕</p>
             <div className="space-y-2">
               <textarea
                 value={selectedClip.text ?? ""}
                 onChange={(e) => updateClip(selectedClip.id, { name: e.target.value.slice(0, 20), text: e.target.value })}
                 rows={3}
-                className="w-full rounded border border-[--border-subtle] px-2 py-1.5 text-[11px] outline-none focus:border-primary/50 resize-none"
+                className="w-full rounded border border-(--border-subtle) px-2 py-1.5 text-[11px] outline-none focus:border-primary/50 resize-none"
                 placeholder="字幕内容"
               />
               <Row label="字号">
@@ -339,7 +339,7 @@ export function PropertyPanel() {
                   type="number" min={12} max={96} step={2}
                   value={subtitleStyle.fontSize ?? 32}
                   onChange={(e) => updateStyle("fontSize", parseInt(e.target.value))}
-                  className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
+                  className="w-full rounded border border-(--border-subtle) px-2 py-1 text-[11px] outline-none focus:border-primary/50"
                 />
               </Row>
               <Row label="颜色">
@@ -348,16 +348,16 @@ export function PropertyPanel() {
                     type="color"
                     value={subtitleStyle.color ?? "#ffffff"}
                     onChange={(e) => updateStyle("color", e.target.value)}
-                    className="h-7 w-10 rounded border border-[--border-subtle] cursor-pointer"
+                    className="h-7 w-10 rounded border border-(--border-subtle) cursor-pointer"
                   />
-                  <span className="text-[10px] text-[--text-muted]">{subtitleStyle.color ?? "#ffffff"}</span>
+                  <span className="text-[10px] text-(--text-muted)">{subtitleStyle.color ?? "#ffffff"}</span>
                 </div>
               </Row>
               <Row label="对齐">
                 <select
                   value={subtitleStyle.textAlign ?? "center"}
                   onChange={(e) => updateStyle("textAlign", e.target.value)}
-                  className="w-full rounded border border-[--border-subtle] px-2 py-1 text-[11px] outline-none focus:border-primary/50"
+                  className="w-full rounded border border-(--border-subtle) px-2 py-1 text-[11px] outline-none focus:border-primary/50"
                 >
                   <option value="left">左对齐</option>
                   <option value="center">居中</option>
@@ -379,8 +379,8 @@ export function PropertyPanel() {
         {/* 转场属性 */}
         {selectedClip.type === "transition" && (
           <section>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-[--text-muted]">转场</p>
-            <p className="text-[12px] text-[--text-primary]">{selectedClip.transitionType}</p>
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">转场</p>
+            <p className="text-[12px] text-(--text-primary)">{selectedClip.transitionType}</p>
           </section>
         )}
       </div>
@@ -424,7 +424,7 @@ function ProbeButton({ url, onProbed }: { url?: string | null; onProbed: (durati
       <button
         onClick={probe}
         disabled={probing || !url}
-        className="flex w-full items-center justify-center gap-1.5 rounded border border-[--border-subtle] bg-[--surface] py-1 text-[10px] text-[--text-muted] hover:border-primary/40 hover:text-primary disabled:opacity-50 transition-colors"
+        className="flex w-full items-center justify-center gap-1.5 rounded border border-(--border-subtle) bg-(--surface) py-1 text-[10px] text-(--text-muted) hover:border-primary/40 hover:text-primary disabled:opacity-50 transition-colors"
       >
         <RefreshCw className={`h-2.5 w-2.5 ${probing ? "animate-spin" : ""}`} />
         从文件重置时长
@@ -437,7 +437,7 @@ function ProbeButton({ url, onProbed }: { url?: string | null; onProbed: (durati
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-10 shrink-0 text-[10px] text-[--text-muted]">{label}</span>
+      <span className="w-10 shrink-0 text-[10px] text-(--text-muted)">{label}</span>
       <div className="flex-1">{children}</div>
     </div>
   );
@@ -449,8 +449,8 @@ function FadeRow({ label, value, onChange }: { label: string; value: number; onC
   return (
     <div className="space-y-1 mt-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-[--text-muted]">{label}</span>
-        <span className="text-[10px] font-medium text-[--text-primary]">
+        <span className="text-[10px] text-(--text-muted)">{label}</span>
+        <span className="text-[10px] font-medium text-(--text-primary)">
           {value === 0 ? "无" : `${value}s`}
         </span>
       </div>
@@ -463,7 +463,7 @@ function FadeRow({ label, value, onChange }: { label: string; value: number; onC
             className={`flex-1 rounded py-0.5 text-[10px] transition-colors border ${
               value === p
                 ? "bg-primary text-white border-primary"
-                : "bg-[--surface] text-[--text-muted] border-[--border-subtle] hover:border-primary/40 hover:text-primary"
+                : "bg-(--surface) text-(--text-muted) border-(--border-subtle) hover:border-primary/40 hover:text-primary"
             }`}
           >
             {p === 0 ? "无" : `${p}s`}

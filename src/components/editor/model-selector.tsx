@@ -151,24 +151,24 @@ export function InlineModelPicker({ capability, value: controlledValue, onChange
           }
           setOpen(!open);
         }}
-        className="flex items-center gap-1.5 rounded-lg border border-[--border-subtle] bg-white px-2 py-1 transition-colors hover:border-[--border-hover]"
+        className="flex items-center gap-1.5 rounded-lg border border-(--border-subtle) bg-white px-2 py-1 transition-colors hover:border-(--border-hover)"
       >
         <div
           className={`flex h-5 w-5 items-center justify-center rounded ${COLORS[capability]}`}
         >
           {ICONS[capability]}
         </div>
-        <span className="max-w-[140px] truncate text-[11px] font-medium text-[--text-primary]">
+        <span className="max-w-[140px] truncate text-[11px] font-medium text-(--text-primary)">
           {currentOption ? getLabel(currentOption) : "—"}
         </span>
         <ChevronDown
-          className={`h-3 w-3 text-[--text-muted] transition-transform ${open ? "rotate-180" : ""}`}
+          className={`h-3 w-3 text-(--text-muted) transition-transform ${open ? "rotate-180" : ""}`}
         />
       </button>
 
       {/* Dropdown */}
       {open && (
-        <div className={`absolute left-0 z-50 min-w-[200px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white py-1 shadow-lg ${dropUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
+        <div className={`absolute left-0 z-50 min-w-[200px] overflow-hidden rounded-xl border border-(--border-subtle) bg-white py-1 shadow-lg ${dropUp ? "bottom-full mb-1" : "top-full mt-1"}`}>
           {options.map((opt) => {
             const key = `${opt.providerId}:${opt.modelId}`;
             const selected = key === currentKey;
@@ -180,14 +180,14 @@ export function InlineModelPicker({ capability, value: controlledValue, onChange
                 className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors ${
                   selected
                     ? "bg-primary/5 text-primary"
-                    : "text-[--text-primary] hover:bg-[--surface]"
+                    : "text-(--text-primary) hover:bg-(--surface)"
                 }`}
               >
                 <span
                   className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full ${
                     selected
                       ? "bg-primary text-white"
-                      : "border border-[--border-subtle]"
+                      : "border border-(--border-subtle)"
                   }`}
                 >
                   {selected && <Check className="h-2.5 w-2.5" />}

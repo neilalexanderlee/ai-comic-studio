@@ -16,23 +16,23 @@ export function AuthShell({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[--surface] p-6">
+    <div className="flex min-h-screen items-center justify-center bg-(--surface) p-6">
       <div className="w-full max-w-sm space-y-5">
         <div className="flex flex-col items-center gap-2">
           <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
             <LogoIcon size={22} />
           </div>
-          <h1 className="font-display text-lg font-bold tracking-tight text-[--text-primary]">
+          <h1 className="font-display text-lg font-bold tracking-tight text-(--text-primary)">
             AI 漫剧工坊
           </h1>
-          <p className="text-xs text-[--text-muted]">{subtitle}</p>
+          <p className="text-xs text-(--text-muted)">{subtitle}</p>
         </div>
 
-        <div className="rounded-2xl border border-[--border-subtle] bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-(--border-subtle) bg-white p-6 shadow-sm">
           {children}
         </div>
 
-        {footer && <div className="space-y-2 text-center text-[11px] text-[--text-muted]">{footer}</div>}
+        {footer && <div className="space-y-2 text-center text-[11px] text-(--text-muted)">{footer}</div>}
       </div>
     </div>
   );

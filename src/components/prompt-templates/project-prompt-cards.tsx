@@ -66,7 +66,7 @@ function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
         aria-checked={checked}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus-visible:outline-none ${
-          checked ? "bg-primary" : "bg-[--border-subtle]"
+          checked ? "bg-primary" : "bg-(--border-subtle)"
         }`}
       >
         <span
@@ -75,7 +75,7 @@ function ToggleSwitch({ checked, onChange, label }: ToggleSwitchProps) {
           }`}
         />
       </div>
-      <span className="text-sm font-medium text-[--text-primary]">{label}</span>
+      <span className="text-sm font-medium text-(--text-primary)">{label}</span>
     </label>
   );
 }
@@ -189,7 +189,7 @@ export function ProjectPromptCards({ projectId }: ProjectPromptCardsProps) {
 
   if (loading) {
     return (
-      <div className="flex h-40 items-center justify-center text-[--text-muted]">
+      <div className="flex h-40 items-center justify-center text-(--text-muted)">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
       </div>
     );
@@ -198,14 +198,14 @@ export function ProjectPromptCards({ projectId }: ProjectPromptCardsProps) {
   return (
     <div className="flex flex-col gap-5">
       {/* Toggle header */}
-      <div className="flex items-center justify-between rounded-2xl border border-[--border-subtle] bg-white p-4">
+      <div className="flex items-center justify-between rounded-2xl border border-(--border-subtle) bg-white p-4">
         <div className="flex flex-col gap-0.5">
           <ToggleSwitch
             checked={enabled}
             onChange={handleToggle}
             label={t("project.useProjectPrompts")}
           />
-          <p className="ml-12 text-xs text-[--text-muted]">
+          <p className="ml-12 text-xs text-(--text-muted)">
             {t("project.useProjectPromptsDesc")}
           </p>
         </div>
@@ -229,19 +229,19 @@ export function ProjectPromptCards({ projectId }: ProjectPromptCardsProps) {
             return (
               <div
                 key={entry.key}
-                className="flex flex-col gap-3 rounded-2xl border border-[--border-subtle] bg-white p-4 transition-shadow hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
+                className="flex flex-col gap-3 rounded-2xl border border-(--border-subtle) bg-white p-4 transition-shadow hover:shadow-[0_2px_12px_rgba(0,0,0,0.06)]"
               >
                 <div className="flex items-start gap-3">
                   <div
                     className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-base ${
-                      hasOverride ? "bg-primary/10" : "bg-[--surface]"
+                      hasOverride ? "bg-primary/10" : "bg-(--surface)"
                     }`}
                   >
                     {emoji}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-sm font-semibold text-[--text-primary]">
+                      <span className="truncate text-sm font-semibold text-(--text-primary)">
                         {t(tKey(entry.nameKey) as Parameters<typeof t>[0])}
                       </span>
                       {hasOverride ? (
@@ -249,18 +249,18 @@ export function ProjectPromptCards({ projectId }: ProjectPromptCardsProps) {
                           {t("editor.overridden")}
                         </Badge>
                       ) : (
-                        <Badge className="shrink-0 text-[10px] px-1.5 py-0 bg-[--surface] text-[--text-muted]">
+                        <Badge className="shrink-0 text-[10px] px-1.5 py-0 bg-(--surface) text-(--text-muted)">
                           {t("editor.usingGlobal")}
                         </Badge>
                       )}
                     </div>
-                    <span className="truncate font-mono text-[10px] text-[--text-muted]">
+                    <span className="truncate font-mono text-[10px] text-(--text-muted)">
                       {entry.key}
                     </span>
                   </div>
                 </div>
 
-                <p className="text-xs text-[--text-secondary]">
+                <p className="text-xs text-(--text-secondary)">
                   {t("editor.slotsCount", { count: totalSlots })}
                   {hasOverride && modifiedCount > 0
                     ? `, ${t("project.modifiedCount", { count: modifiedCount })}`
@@ -281,7 +281,7 @@ export function ProjectPromptCards({ projectId }: ProjectPromptCardsProps) {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="flex-1 text-[--text-muted] hover:text-destructive"
+                      className="flex-1 text-(--text-muted) hover:text-destructive"
                       disabled={isDeleting}
                       onClick={() => handleUseGlobal(entry.key)}
                     >

@@ -240,7 +240,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
 
   if (loading) {
     return (
-      <div className="flex h-96 items-center justify-center text-[--text-muted]">
+      <div className="flex h-96 items-center justify-center text-(--text-muted)">
         Loading...
       </div>
     );
@@ -265,7 +265,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                 });
               }}
               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ${
-                projectPromptsEnabled ? "bg-primary" : "bg-[--border-subtle]"
+                projectPromptsEnabled ? "bg-primary" : "bg-(--border-subtle)"
               }`}
             >
               <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
@@ -274,12 +274,12 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
             </div>
             <span className="text-xs font-medium text-primary">{t("project.useProjectPrompts")}</span>
           </label>
-          <span className="text-xs text-[--text-secondary]">{t("project.useProjectPromptsDesc")}</span>
+          <span className="text-xs text-(--text-secondary)">{t("project.useProjectPromptsDesc")}</span>
         </div>
       )}
 
       {/* Category filter pills */}
-      <div className="flex flex-wrap gap-1.5 rounded-2xl border border-[--border-subtle] bg-white p-2">
+      <div className="flex flex-wrap gap-1.5 rounded-2xl border border-(--border-subtle) bg-white p-2">
         {CATEGORIES.map((cat) => (
           <button
             key={cat}
@@ -287,7 +287,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all duration-200 ${
               categoryFilter === cat
                 ? "bg-primary text-white shadow-sm"
-                : "text-[--text-secondary] hover:bg-[--surface] hover:text-[--text-primary]"
+                : "text-(--text-secondary) hover:bg-(--surface) hover:text-(--text-primary)"
             }`}
           >
             {t(`categories.${cat}`)}
@@ -305,13 +305,13 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
       )}
 
       {/* Three-column editor — fill remaining viewport height */}
-      <div className="flex flex-1 overflow-hidden rounded-2xl border border-[--border-subtle] bg-white">
+      <div className="flex flex-1 overflow-hidden rounded-2xl border border-(--border-subtle) bg-white">
         {/* Left column: Prompt list */}
-        <div className="w-[200px] shrink-0 overflow-y-auto border-r border-[--border-subtle]">
+        <div className="w-[200px] shrink-0 overflow-y-auto border-r border-(--border-subtle)">
           <div className="flex flex-col gap-0.5 p-2">
             {Object.entries(grouped).map(([category, prompts]) => (
               <div key={category}>
-                <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                <div className="px-2 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
                   {t(`categories.${category}` as Parameters<typeof t>[0])}
                 </div>
                 {prompts.map((prompt) => {
@@ -324,15 +324,15 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                       className={`flex w-full flex-col gap-0.5 rounded-xl px-2.5 py-2 text-left transition-all duration-200 ${
                         isSelected
                           ? "border border-primary/15 bg-primary/5"
-                          : "border border-transparent hover:bg-[--surface]"
+                          : "border border-transparent hover:bg-(--surface)"
                       }`}
                     >
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`text-sm ${
                             isSelected
-                              ? "text-[--text-primary] font-medium"
-                              : "text-[--text-secondary]"
+                              ? "text-(--text-primary) font-medium"
+                              : "text-(--text-secondary)"
                           }`}
                         >
                           {t(tKey(prompt.nameKey) as Parameters<typeof t>[0])}
@@ -346,7 +346,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                           </Badge>
                         )}
                       </div>
-                      <span className="font-mono text-[10px] text-[--text-muted]">
+                      <span className="font-mono text-[10px] text-(--text-muted)">
                         {prompt.key}
                       </span>
                     </button>
@@ -358,7 +358,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
         </div>
 
         {/* Middle column: Slot list */}
-        <div className="w-[170px] shrink-0 overflow-y-auto border-r border-[--border-subtle]">
+        <div className="w-[170px] shrink-0 overflow-y-auto border-r border-(--border-subtle)">
           <SlotList />
         </div>
 
@@ -380,7 +380,7 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                   const descKey = tKey(selectedPrompt.descriptionKey);
                   const desc = t(descKey as Parameters<typeof t>[0]);
                   return desc && desc !== descKey ? (
-                    <div className="border-b border-[--border-subtle] bg-[--surface] px-4 py-2 text-[11px] text-[--text-muted]">
+                    <div className="border-b border-(--border-subtle) bg-(--surface) px-4 py-2 text-[11px] text-(--text-muted)">
                       {desc}
                     </div>
                   ) : null;
@@ -389,15 +389,15 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                 }
               })()}
               {/* Editor header — always visible */}
-              <div className="flex items-center justify-between border-b border-[--border-subtle] px-4 py-2.5">
+              <div className="flex items-center justify-between border-b border-(--border-subtle) px-4 py-2.5">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[--text-primary]">
+                  <span className="text-sm font-medium text-(--text-primary)">
                     {mode === "slots" && selectedSlot
                       ? (t(tKey(selectedSlot.nameKey) as Parameters<typeof t>[0]) || selectedSlot.key)
                       : t("editor.advancedMode")}
                   </span>
                   {mode === "slots" && selectedSlot && !selectedSlot.editable && (
-                    <Badge className="text-[10px] px-1.5 py-0 bg-[--surface] text-[--text-muted]">
+                    <Badge className="text-[10px] px-1.5 py-0 bg-(--surface) text-(--text-muted)">
                       {t("editor.locked")}
                     </Badge>
                   )}
@@ -410,13 +410,13 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
 
                 <div className="flex items-center gap-2">
                   {/* Mode toggle */}
-                  <div className="flex rounded-lg bg-[--surface] p-0.5">
+                  <div className="flex rounded-lg bg-(--surface) p-0.5">
                     <button
                       onClick={() => setMode("slots")}
                       className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
                         mode === "slots"
-                          ? "bg-white text-[--text-primary] shadow-sm"
-                          : "text-[--text-muted]"
+                          ? "bg-white text-(--text-primary) shadow-sm"
+                          : "text-(--text-muted)"
                       }`}
                     >
                       {t("editor.slotMode")}
@@ -425,8 +425,8 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                       onClick={() => setMode("advanced")}
                       className={`rounded-md px-2.5 py-1 text-xs font-medium transition-all ${
                         mode === "advanced"
-                          ? "bg-white text-[--text-primary] shadow-sm"
-                          : "text-[--text-muted]"
+                          ? "bg-white text-(--text-primary) shadow-sm"
+                          : "text-(--text-muted)"
                       }`}
                     >
                       {t("editor.advancedMode")}
@@ -501,26 +501,26 @@ export function PromptEditor({ scope = "global", projectId, initialPromptKey }: 
                           );
                         }
                       }}
-                      className={`h-full w-full resize-none rounded-xl border border-[--border-subtle] px-3.5 py-3 font-mono text-[12px] leading-relaxed text-[--text-primary] outline-none transition-all duration-200 placeholder:text-[--text-muted] ${
+                      className={`h-full w-full resize-none rounded-xl border border-(--border-subtle) px-3.5 py-3 font-mono text-[12px] leading-relaxed text-(--text-primary) outline-none transition-all duration-200 placeholder:text-(--text-muted) ${
                         selectedSlot.editable
-                          ? "bg-white hover:border-[--border-hover] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
-                          : "bg-[--surface] cursor-default"
+                          ? "bg-white hover:border-(--border-hover) focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/15"
+                          : "bg-(--surface) cursor-default"
                       }`}
                       placeholder={t("editor.edit")}
                     />
                   </div>
-                  <div className="flex-1 overflow-y-auto border-t border-[--border-subtle]">
+                  <div className="flex-1 overflow-y-auto border-t border-(--border-subtle)">
                     <PromptPreview />
                   </div>
                 </div>
               ) : (
-                <div className="flex flex-1 items-center justify-center text-sm text-[--text-muted]">
+                <div className="flex flex-1 items-center justify-center text-sm text-(--text-muted)">
                   {t("editor.slotMode")}
                 </div>
               )}
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-sm text-[--text-muted]">
+            <div className="flex flex-1 items-center justify-center text-sm text-(--text-muted)">
               {t("editor.edit")}
             </div>
           )}

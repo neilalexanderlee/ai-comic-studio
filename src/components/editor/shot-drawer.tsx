@@ -322,31 +322,31 @@ export function ShotDrawer({
       />
 
       {/* Drawer */}
-      <div className="fixed right-0 top-0 z-50 flex h-full w-[560px] max-w-[90vw] flex-col border-l border-[--border-subtle] bg-white shadow-2xl">
+      <div className="fixed right-0 top-0 z-50 flex h-full w-[560px] max-w-[90vw] flex-col border-l border-(--border-subtle) bg-white shadow-2xl">
         {/* Header */}
-        <div className="flex flex-shrink-0 items-center gap-2 border-b border-[--border-subtle] px-4 py-3">
+        <div className="flex flex-shrink-0 items-center gap-2 border-b border-(--border-subtle) px-4 py-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/8 font-mono text-sm font-bold text-primary">
             {shot.sequence}
           </div>
-          <p className="flex-1 truncate text-sm font-medium text-[--text-primary]">{shot.prompt}</p>
+          <p className="flex-1 truncate text-sm font-medium text-(--text-primary)">{shot.prompt}</p>
           <div className="flex items-center gap-1">
             <button
               onClick={() => hasPrev && onShotChange(shots[currentIndex - 1].id)}
               disabled={!hasPrev || localGenerating}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary] disabled:opacity-30"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary) disabled:opacity-30"
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
             <button
               onClick={() => hasNext && onShotChange(shots[currentIndex + 1].id)}
               disabled={!hasNext || localGenerating}
-              className="flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary] disabled:opacity-30"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary) disabled:opacity-30"
             >
               <ChevronRight className="h-4 w-4" />
             </button>
             <button
               onClick={onClose}
-              className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary]"
+              className="ml-1 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary)"
             >
               <X className="h-4 w-4" />
             </button>
@@ -358,7 +358,7 @@ export function ShotDrawer({
 
           {/* Step 1: Text */}
           <section>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.stepText")}</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.stepText")}</p>
             <div className="space-y-2">
               <Textarea
                 value={editPrompt}
@@ -395,11 +395,11 @@ export function ShotDrawer({
                 value={editCameraDirection}
                 onChange={(e) => setEditCameraDirection(e.target.value)}
                 onBlur={async () => { await patchShot({ cameraDirection: editCameraDirection }); onUpdate(); }}
-                className="w-full rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
+                className="w-full rounded-xl border border-(--border-subtle) bg-white px-3 py-2 text-sm outline-none focus:border-primary/50"
                 placeholder="static / pan-left / zoom-in ..."
               />
               <div className="flex items-center gap-2">
-                <span className={`flex items-center gap-1 text-xs ${editDuration > videoModelMax ? "text-orange-600" : "text-[--text-muted]"}`}>
+                <span className={`flex items-center gap-1 text-xs ${editDuration > videoModelMax ? "text-orange-600" : "text-(--text-muted)"}`}>
                   <Clock className="h-3 w-3" />
                   <input
                     type="number"
@@ -414,7 +414,7 @@ export function ShotDrawer({
                     className={`w-9 rounded border px-1 py-0.5 text-center text-[11px] font-medium outline-none ${
                       editDuration > videoModelMax
                         ? "border-orange-400 bg-orange-50 text-orange-700"
-                        : "border-[--border-subtle] bg-white focus:border-primary/50"
+                        : "border-(--border-subtle) bg-white focus:border-primary/50"
                     }`}
                   />
                   <span className="text-[11px]">s</span>
@@ -437,8 +437,8 @@ export function ShotDrawer({
               </div>
               {/* 台词：只读展示，由剧本解析写入，不支持手动编辑 */}
               {shot.dialogues.length > 0 && (
-                <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 space-y-1.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.dialogue")}</p>
+                <div className="rounded-xl border border-(--border-subtle) bg-(--surface) p-3 space-y-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.dialogue")}</p>
                   {shot.dialogues.map((d) => {
                     const dtype = (d as { type?: string }).type ?? "dialogue";
                     const typeLabel: Record<string, string> = { dialogue: "对白", os: "OS", vo: "VO" };
@@ -448,8 +448,8 @@ export function ShotDrawer({
                         {dtype !== "dialogue" && (
                           <span className="mx-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold text-amber-700">{typeLabel[dtype]}</span>
                         )}
-                        <span className="mx-1.5 text-[--text-muted]">&mdash;</span>
-                        <span className="text-[--text-secondary]">{d.text}</span>
+                        <span className="mx-1.5 text-(--text-muted)">&mdash;</span>
+                        <span className="text-(--text-secondary)">{d.text}</span>
                       </p>
                     );
                   })}
@@ -469,7 +469,7 @@ export function ShotDrawer({
 
           {/* Step 2: Frames */}
           <section>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">
               {t("shot.stepFrames")}
             </p>
             {chainSourceHint && (
@@ -531,7 +531,7 @@ export function ShotDrawer({
             {/* 道具参考图勾选（分镜级手动绑定） */}
             {shot.availablePropAssets && shot.availablePropAssets.length > 0 && (
               <div className="mt-3">
-                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">
                   道具参考图
                 </p>
                 <div className="flex flex-wrap gap-2">
@@ -554,7 +554,7 @@ export function ShotDrawer({
                         className={`relative h-14 w-14 overflow-hidden rounded-lg border-2 transition-all ${
                           isSelected
                             ? "border-amber-400 ring-1 ring-amber-300"
-                            : "border-[--border-subtle] opacity-60 hover:opacity-100"
+                            : "border-(--border-subtle) opacity-60 hover:opacity-100"
                         }`}
                       >
                         {prop.imagePath ? (
@@ -565,7 +565,7 @@ export function ShotDrawer({
                             className="h-full w-full object-cover"
                           />
                         ) : (
-                          <div className="flex h-full items-center justify-center bg-[--surface-alt] text-[8px] text-[--text-muted]">
+                          <div className="flex h-full items-center justify-center bg-(--surface) text-[8px] text-(--text-muted)">
                             无图
                           </div>
                         )}
@@ -584,7 +584,7 @@ export function ShotDrawer({
 
           {/* Step 3: Video Prompt */}
           <section>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.stepVideoPrompt")}</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.stepVideoPrompt")}</p>
             {hasVideoPrompt && (
               <Textarea
                 value={editVideoPrompt}
@@ -630,17 +630,17 @@ export function ShotDrawer({
 
           {/* Step 4: Video */}
           <section>
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-[--text-muted]">{t("shot.stepVideo")}</p>
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-(--text-muted)">{t("shot.stepVideo")}</p>
             {hasVideo && (
               <div
-                className="group relative mb-2 overflow-hidden rounded-xl border border-[--border-subtle] bg-black cursor-pointer"
+                className="group relative mb-2 overflow-hidden rounded-xl border border-(--border-subtle) bg-black cursor-pointer"
                 style={{ aspectRatio: "16/9" }}
                 onClick={() => setPreviewSrc(uploadUrl(shot.videoUrl!))}
               >
                 <video className="h-full w-full object-contain" src={uploadUrl(shot.videoUrl!)} />
                 <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/30">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/90 shadow-lg">
-                    <VideoIcon className="h-4 w-4 text-[--text-primary] translate-x-0.5" />
+                    <VideoIcon className="h-4 w-4 text-(--text-primary) translate-x-0.5" />
                   </div>
                 </div>
                 {shot.videoResolution && (

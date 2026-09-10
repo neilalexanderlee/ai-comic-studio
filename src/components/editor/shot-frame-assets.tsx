@@ -54,8 +54,8 @@ function FrameCell({
   return (
     <div className="flex flex-1 min-w-0 flex-col gap-1">
       <div
-        className={`overflow-hidden rounded-lg border bg-[--surface] ${
-          pathMissing ? "border-red-500 ring-1 ring-red-500/40" : "border-[--border-subtle]"
+        className={`overflow-hidden rounded-lg border bg-(--surface) ${
+          pathMissing ? "border-red-500 ring-1 ring-red-500/40" : "border-(--border-subtle)"
         } ${src && !pathMissing && !isUploading ? "cursor-pointer hover:opacity-80 transition-opacity" : ""}`}
         onClick={() => src && !pathMissing && !isUploading && onPreview()}
       >
@@ -72,13 +72,13 @@ function FrameCell({
           </div>
         ) : (
           <div className="flex h-16 items-center justify-center">
-            <ImageIcon className="h-4 w-4 text-[--text-muted]" />
+            <ImageIcon className="h-4 w-4 text-(--text-muted)" />
           </div>
         )}
       </div>
       <p
         className={`text-[10px] text-center truncate ${
-          pathMissing ? "text-red-600 font-medium" : "text-[--text-muted]"
+          pathMissing ? "text-red-600 font-medium" : "text-(--text-muted)"
         }`}
       >
         {label}
@@ -90,7 +90,7 @@ function FrameCell({
             type="button"
             onClick={onUpload}
             disabled={isUploading || disabled}
-            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-[--border-subtle] bg-white py-0.5 text-[10px] text-[--text-muted] hover:border-primary/40 hover:text-primary disabled:opacity-40"
+            className="flex flex-1 items-center justify-center gap-1 rounded-md border border-(--border-subtle) bg-white py-0.5 text-[10px] text-(--text-muted) hover:border-primary/40 hover:text-primary disabled:opacity-40"
           >
             <Upload className="h-2.5 w-2.5" />
             上传
@@ -100,7 +100,7 @@ function FrameCell({
               type="button"
               onClick={onClear}
               disabled={disabled}
-              className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[10px] text-[--text-muted] hover:border-red-300 hover:text-red-500 disabled:opacity-40"
+              className="flex items-center justify-center rounded-md border border-(--border-subtle) bg-white px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:border-red-300 hover:text-red-500 disabled:opacity-40"
             >
               <Trash2 className="h-2.5 w-2.5" />
             </button>
@@ -111,7 +111,7 @@ function FrameCell({
               onClick={onRegen}
               disabled={disabled || isUploading}
               title="单独重新生成"
-              className="flex items-center justify-center rounded-md border border-[--border-subtle] bg-white px-1.5 py-0.5 text-[--text-muted] hover:border-primary/40 hover:text-primary disabled:opacity-40"
+              className="flex items-center justify-center rounded-md border border-(--border-subtle) bg-white px-1.5 py-0.5 text-(--text-muted) hover:border-primary/40 hover:text-primary disabled:opacity-40"
             >
               {regenSpinning ? (
                 <Loader2 className="h-2.5 w-2.5 animate-spin" />
@@ -123,7 +123,7 @@ function FrameCell({
         </div>
       )}
       {readOnly && !src && (
-        <p className="text-[9px] text-center text-[--text-muted]">生成视频后出现</p>
+        <p className="text-[9px] text-center text-(--text-muted)">生成视频后出现</p>
       )}
     </div>
   );

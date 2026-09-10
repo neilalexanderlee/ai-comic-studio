@@ -46,10 +46,10 @@ export default async function RegisterPage({
     return (
       <AuthShell subtitle="注册已关闭">
         <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-[--surface] text-[--text-muted]">
+          <div className="mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-(--surface) text-(--text-muted)">
             <Shield className="h-5 w-5" />
           </div>
-          <p className="text-sm leading-relaxed text-[--text-secondary]">
+          <p className="text-sm leading-relaxed text-(--text-secondary)">
             本站已关闭自助注册。
             <br />
             需要账号请联系管理员开通。

@@ -176,9 +176,9 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
   }
 
   return (
-    <div className="flex h-full flex-col border-r border-[--border-subtle] bg-white">
+    <div className="flex h-full flex-col border-r border-(--border-subtle) bg-white">
       {/* 标签栏 */}
-      <div className="flex border-b border-[--border-subtle] overflow-x-auto">
+      <div className="flex border-b border-(--border-subtle) overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -186,7 +186,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
             className={`flex shrink-0 items-center gap-1 px-3 py-2 text-[11px] font-medium transition-colors ${
               tab === t.id
                 ? "border-b-2 border-primary text-primary"
-                : "text-[--text-muted] hover:text-[--text-primary]"
+                : "text-(--text-muted) hover:text-(--text-primary)"
             }`}
           >
             {t.icon}
@@ -202,7 +202,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
         {tab === "video" && (
           <>
             <div className="flex items-center justify-between px-1">
-              <p className="text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">分镜视频</p>
+              <p className="text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">分镜视频</p>
               {shots.filter((s) => s.videoUrl).length > 0 && (
                 <button
                   onClick={addAllVideoClips}
@@ -215,14 +215,14 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
               )}
             </div>
             {shots.filter((s) => s.videoUrl).length === 0 && (
-              <p className="py-4 text-center text-[11px] text-[--text-muted]">暂无已生成的分镜视频</p>
+              <p className="py-4 text-center text-[11px] text-(--text-muted)">暂无已生成的分镜视频</p>
             )}
             {shots
               .filter((s) => s.videoUrl)
               .map((shot) => (
                 <div
                   key={shot.id}
-                  className="flex items-center gap-2 rounded-lg border border-[--border-subtle] bg-[--surface] p-1.5 cursor-pointer hover:border-primary/40 hover:bg-primary/3 transition-colors"
+                  className="flex items-center gap-2 rounded-lg border border-(--border-subtle) bg-(--surface) p-1.5 cursor-pointer hover:border-primary/40 hover:bg-primary/3 transition-colors"
                   onClick={() => addVideoClip(shot)}
                   title="点击添加到时间线"
                 >
@@ -233,18 +233,18 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                       alt=""
                     />
                   ) : (
-                    <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-[--border-subtle]">
-                      <Film className="h-4 w-4 text-[--text-muted]" />
+                    <div className="flex h-10 w-16 shrink-0 items-center justify-center rounded bg-(--border-subtle)">
+                      <Film className="h-4 w-4 text-(--text-muted)" />
                     </div>
                   )}
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-[11px] font-medium text-[--text-primary]">
+                    <p className="truncate text-[11px] font-medium text-(--text-primary)">
                       分镜 {shot.sequence}
                     </p>
-                    <p className="truncate text-[10px] text-[--text-muted]">{shot.prompt?.slice(0, 30)}</p>
-                    <p className="text-[9px] text-[--text-muted]">{shot.duration}s</p>
+                    <p className="truncate text-[10px] text-(--text-muted)">{shot.prompt?.slice(0, 30)}</p>
+                    <p className="text-[9px] text-(--text-muted)">{shot.duration}s</p>
                   </div>
-                  <ChevronRight className="h-3 w-3 text-[--text-muted] shrink-0" />
+                  <ChevronRight className="h-3 w-3 text-(--text-muted) shrink-0" />
                 </div>
               ))}
           </>
@@ -253,19 +253,19 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
         {/* 音频素材 */}
         {tab === "audio" && (
           <>
-            <p className="px-1 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">音效轨道</p>
+            <p className="px-1 text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">音效轨道</p>
             {audioItems.length === 0 && (
-              <p className="py-4 text-center text-[11px] text-[--text-muted]">暂无音频素材</p>
+              <p className="py-4 text-center text-[11px] text-(--text-muted)">暂无音频素材</p>
             )}
             {audioItems.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center gap-2 rounded-lg border border-[--border-subtle] bg-[--surface] p-2 cursor-pointer hover:border-primary/40 transition-colors"
+                className="flex items-center gap-2 rounded-lg border border-(--border-subtle) bg-(--surface) p-2 cursor-pointer hover:border-primary/40 transition-colors"
               >
                 <Music className="h-4 w-4 text-emerald-500 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="truncate text-[11px] font-medium">{item.name}</p>
-                  {item.duration && <p className="text-[9px] text-[--text-muted]">{formatTime(item.duration)}</p>}
+                  {item.duration && <p className="text-[9px] text-(--text-muted)">{formatTime(item.duration)}</p>}
                 </div>
                 <div className="flex gap-1">
                   <button
@@ -283,11 +283,11 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                 </div>
               </div>
             ))}
-            <p className="mt-3 px-1 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">背景音乐</p>
-            <p className="px-1 text-[10px] text-[--text-muted]">在时间线多选分镜片段，即可在顶部工具栏生成并放置 BGM。</p>
+            <p className="mt-3 px-1 text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">背景音乐</p>
+            <p className="px-1 text-[10px] text-(--text-muted)">在时间线多选分镜片段，即可在顶部工具栏生成并放置 BGM。</p>
 
             <div
-              className={`flex items-center gap-2 rounded-lg border border-dashed border-[--border-subtle] bg-[--surface]/50 p-2 transition-colors ${bgmUploading ? "opacity-60 cursor-wait" : "cursor-pointer hover:border-purple-300"}`}
+              className={`flex items-center gap-2 rounded-lg border border-dashed border-(--border-subtle) bg-(--surface)/50 p-2 transition-colors ${bgmUploading ? "opacity-60 cursor-wait" : "cursor-pointer hover:border-purple-300"}`}
               onClick={async () => {
                 if (bgmUploading) return;
                 const input = document.createElement("input");
@@ -328,7 +328,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                 ? <Loader2 className="h-4 w-4 text-purple-400 shrink-0 animate-spin" />
                 : <Music className="h-4 w-4 text-purple-400 shrink-0" />
               }
-              <p className="text-[11px] text-[--text-muted]">
+              <p className="text-[11px] text-(--text-muted)">
                 {bgmUploading ? "上传中…" : "上传本地 BGM 文件"}
               </p>
             </div>
@@ -338,15 +338,15 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
         {/* 字幕 */}
         {tab === "subtitle" && (
           <>
-            <p className="px-1 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">添加字幕</p>
+            <p className="px-1 text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">添加字幕</p>
             <button
               onClick={addSubtitleClip}
-              className="w-full flex items-center gap-2 rounded-lg border border-[--border-subtle] bg-[--surface] p-2 hover:border-primary/40 hover:bg-primary/3 transition-colors text-left"
+              className="w-full flex items-center gap-2 rounded-lg border border-(--border-subtle) bg-(--surface) p-2 hover:border-primary/40 hover:bg-primary/3 transition-colors text-left"
             >
               <Type className="h-4 w-4 text-amber-500" />
               <div>
-                <p className="text-[11px] font-medium text-[--text-primary]">添加字幕块</p>
-                <p className="text-[10px] text-[--text-muted]">点击后在时间线末尾追加 3s 字幕</p>
+                <p className="text-[11px] font-medium text-(--text-primary)">添加字幕块</p>
+                <p className="text-[10px] text-(--text-muted)">点击后在时间线末尾追加 3s 字幕</p>
               </div>
             </button>
           </>
@@ -358,8 +358,8 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
           const isVideoSelected = selectedClip?.type === "video";
           return (
             <>
-              <p className="px-1 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">转场效果</p>
-              <p className="px-1 text-[10px] text-[--text-muted]">
+              <p className="px-1 text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">转场效果</p>
+              <p className="px-1 text-[10px] text-(--text-muted)">
                 {isVideoSelected
                   ? `拖拽到时间线，或点击插入到「${selectedClip.name}」相邻处`
                   : "拖拽到时间线片段接缝处；或先选中片段再点击"}
@@ -375,7 +375,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                       e.dataTransfer.effectAllowed = "copy";
                     }}
                     onClick={() => applyTransition(opt.type)}
-                    className="rounded-lg border border-[--border-subtle] bg-[--surface] px-2 py-2 text-[11px] font-medium text-[--text-primary] hover:border-primary/40 hover:bg-primary/3 transition-colors cursor-grab active:cursor-grabbing select-none text-center"
+                    className="rounded-lg border border-(--border-subtle) bg-(--surface) px-2 py-2 text-[11px] font-medium text-(--text-primary) hover:border-primary/40 hover:bg-primary/3 transition-colors cursor-grab active:cursor-grabbing select-none text-center"
                   >
                     {opt.label}
                   </div>
@@ -391,8 +391,8 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
           const isVideoSelected = selectedClip?.type === "video";
           return (
             <>
-              <p className="px-1 text-[10px] font-semibold text-[--text-muted] uppercase tracking-wide">画面特效</p>
-              <p className="px-1 text-[10px] text-[--text-muted] pb-1">
+              <p className="px-1 text-[10px] font-semibold text-(--text-muted) uppercase tracking-wide">画面特效</p>
+              <p className="px-1 text-[10px] text-(--text-muted) pb-1">
                 {isVideoSelected
                   ? `拖拽到片段，或点击应用到「${selectedClip.name}」`
                   : "拖拽到时间线的视频片段上；或先选中片段再点击"}
@@ -418,7 +418,7 @@ export function MediaLibrary({ shots, audioItems = [] }: MediaLibraryProps) {
                       className={`rounded-lg border px-2 py-2 text-[11px] font-medium transition-colors cursor-grab active:cursor-grabbing select-none text-center ${
                         isActive
                           ? "border-primary bg-primary/10 text-primary"
-                          : "border-[--border-subtle] bg-[--surface] text-[--text-primary] hover:border-primary/40 hover:bg-primary/3"
+                          : "border-(--border-subtle) bg-(--surface) text-(--text-primary) hover:border-primary/40 hover:bg-primary/3"
                       }`}
                     >
                       {opt.label}

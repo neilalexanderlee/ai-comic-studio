@@ -139,19 +139,19 @@ export function AdminConsole() {
   const canManageRoles = myRole === "owner";
 
   function statusOf(c: InviteCode): { text: string; tone: string } {
-    if (c.revokedAt) return { text: "已作废", tone: "text-[--text-muted] line-through" };
+    if (c.revokedAt) return { text: "已作废", tone: "text-(--text-muted) line-through" };
     if (c.expiresAt && new Date(c.expiresAt).getTime() <= Date.now())
-      return { text: "已过期", tone: "text-[--text-muted]" };
-    if (c.usedCount >= c.maxUses) return { text: "已用完", tone: "text-[--text-muted]" };
+      return { text: "已过期", tone: "text-(--text-muted)" };
+    if (c.usedCount >= c.maxUses) return { text: "已用完", tone: "text-(--text-muted)" };
     return { text: `可用 ${c.maxUses - c.usedCount}/${c.maxUses}`, tone: "text-emerald-600" };
   }
 
   return (
     <div className="flex min-h-screen flex-col">
-      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center gap-3 border-b border-[--border-subtle] bg-white/80 px-4 backdrop-blur-xl lg:px-6">
+      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center gap-3 border-b border-(--border-subtle) bg-white/80 px-4 backdrop-blur-xl lg:px-6">
         <button
           onClick={() => router.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary]"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary)"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -163,10 +163,10 @@ export function AdminConsole() {
         </div>
       </header>
 
-      <main className="flex-1 bg-[--surface] p-4 lg:p-6">
+      <main className="flex-1 bg-(--surface) p-4 lg:p-6">
         <div className="mx-auto max-w-4xl animate-page-in space-y-5">
           {loading ? (
-            <div className="flex items-center justify-center py-20 text-[--text-muted]">
+            <div className="flex items-center justify-center py-20 text-(--text-muted)">
               <Loader2 className="h-5 w-5 animate-spin" />
             </div>
           ) : (
@@ -180,13 +180,13 @@ export function AdminConsole() {
               )}
 
               {/* 邀请码 */}
-              <div className="space-y-4 rounded-2xl border border-[--border-subtle] bg-white p-5">
+              <div className="space-y-4 rounded-2xl border border-(--border-subtle) bg-white p-5">
                 <div className="flex items-center justify-between">
-                  <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+                  <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
                     <Ticket className="h-3.5 w-3.5" />
                     邀请码
                   </h3>
-                  <span className="text-xs text-[--text-muted]">
+                  <span className="text-xs text-(--text-muted)">
                     当前注册模式：<span className="font-mono">{mode}</span>
                   </span>
                 </div>
@@ -226,9 +226,9 @@ export function AdminConsole() {
                 </div>
 
                 {codes.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-[--text-muted]">还没有邀请码</p>
+                  <p className="py-6 text-center text-sm text-(--text-muted)">还没有邀请码</p>
                 ) : (
-                  <div className="divide-y divide-[--border-subtle]">
+                  <div className="divide-y divide-(--border-subtle)">
                     {codes.map((c) => {
                       const st = statusOf(c);
                       return (
@@ -239,12 +239,12 @@ export function AdminConsole() {
                               void navigator.clipboard.writeText(c.code);
                               toast.success("已复制");
                             }}
-                            className="text-[--text-muted] hover:text-[--text-primary]"
+                            className="text-(--text-muted) hover:text-(--text-primary)"
                             aria-label="复制邀请码"
                           >
                             <Copy className="h-3.5 w-3.5" />
                           </button>
-                          <span className="text-xs text-[--text-muted]">{c.note ?? "—"}</span>
+                          <span className="text-xs text-(--text-muted)">{c.note ?? "—"}</span>
                           <span className={`ml-auto text-xs ${st.tone}`}>{st.text}</span>
                           {!c.revokedAt && (
                             <Button size="sm" variant="outline" onClick={() => handleRevoke(c.id)}>
@@ -259,19 +259,19 @@ export function AdminConsole() {
               </div>
 
               {/* 用户 */}
-              <div className="space-y-3 rounded-2xl border border-[--border-subtle] bg-white p-5">
-                <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+              <div className="space-y-3 rounded-2xl border border-(--border-subtle) bg-white p-5">
+                <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
                   <Users className="h-3.5 w-3.5" />
                   用户
                 </h3>
-                <div className="divide-y divide-[--border-subtle]">
+                <div className="divide-y divide-(--border-subtle)">
                   {users.map((u) => {
                     const isOwner = u.id === ownerId;
                     const isSelf = u.id === meId;
                     const disabled = u.status === "disabled";
                     return (
                       <div key={u.id} className="flex flex-wrap items-center gap-2 py-2.5">
-                        <span className={`text-sm ${disabled ? "text-[--text-muted] line-through" : ""}`}>
+                        <span className={`text-sm ${disabled ? "text-(--text-muted) line-through" : ""}`}>
                           {u.username}
                         </span>
                         {u.role === "owner" && (
@@ -324,7 +324,7 @@ export function AdminConsole() {
                     );
                   })}
                 </div>
-                <p className="text-[11px] text-[--text-muted]">
+                <p className="text-[11px] text-(--text-muted)">
                   停用会同时让该账号已签发的登录态失效，最长 30 秒后全站生效 ——
                   凭据泄露时这就是切断它继续消耗平台 Key 的开关。
                 </p>

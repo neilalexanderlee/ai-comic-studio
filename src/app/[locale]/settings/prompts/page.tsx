@@ -19,11 +19,11 @@ export default function PromptSettingsPage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Header */}
-      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-[--border-subtle] bg-white/80 backdrop-blur-xl px-4 lg:px-6">
+      <header className="sticky top-0 z-30 flex h-14 flex-shrink-0 items-center justify-between border-b border-(--border-subtle) bg-white/80 backdrop-blur-xl px-4 lg:px-6">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.back()}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-primary]"
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-primary)"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -32,7 +32,7 @@ export default function PromptSettingsPage() {
               <Wand2 className="h-3.5 w-3.5" />
             </div>
             <div className="flex items-center gap-2">
-              <span className="font-display text-sm font-semibold text-[--text-primary]">
+              <span className="font-display text-sm font-semibold text-(--text-primary)">
                 {t("title")}
               </span>
               {isProject ? (
@@ -40,7 +40,7 @@ export default function PromptSettingsPage() {
                   {t("project.useProjectPrompts")}
                 </Badge>
               ) : (
-                <span className="text-xs text-[--text-muted]">
+                <span className="text-xs text-(--text-muted)">
                   {t("subtitle")}
                 </span>
               )}
@@ -49,7 +49,7 @@ export default function PromptSettingsPage() {
         </div>
       </header>
 
-      <main className="flex flex-1 flex-col overflow-hidden bg-[--surface] p-4 lg:p-6">
+      <main className="flex flex-1 flex-col overflow-hidden bg-(--surface) p-4 lg:p-6">
         <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col overflow-hidden animate-page-in">
           <PromptEditor
             scope={scope}

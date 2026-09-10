@@ -91,24 +91,24 @@ export function ShotVideoHistoryDialog({
         <div className="mt-2 space-y-2">
           {historyLoading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-[--text-muted]" />
+              <Loader2 className="h-5 w-5 animate-spin text-(--text-muted)" />
             </div>
           ) : historyList.length === 0 ? (
-            <p className="py-6 text-center text-sm text-[--text-muted]">暂无历史版本</p>
+            <p className="py-6 text-center text-sm text-(--text-muted)">暂无历史版本</p>
           ) : (
             historyList.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center gap-3 rounded-lg border border-[--border-subtle] p-2.5"
+                className="flex items-center gap-3 rounded-lg border border-(--border-subtle) p-2.5"
               >
                 <div className="h-14 w-24 flex-shrink-0 overflow-hidden rounded-md bg-black">
                   <video src={uploadUrl(entry.videoUrl)} className="h-full w-full object-contain" muted />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-medium text-[--text-primary]">
+                  <p className="truncate text-xs font-medium text-(--text-primary)">
                     {entry.label ?? "视频"}
                   </p>
-                  <p className="mt-0.5 text-[10px] text-[--text-muted]">
+                  <p className="mt-0.5 text-[10px] text-(--text-muted)">
                     {new Date(entry.createdAt).toLocaleString("zh-CN", {
                       month: "numeric",
                       day: "numeric",
@@ -145,7 +145,7 @@ export function ShotVideoHistoryDialog({
               </div>
             ))
           )}
-          <p className="pt-1 text-center text-[10px] text-[--text-muted]">
+          <p className="pt-1 text-center text-[10px] text-(--text-muted)">
             最多保留 5 个历史版本，超出时自动清理最旧的
           </p>
         </div>

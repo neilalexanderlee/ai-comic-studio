@@ -488,7 +488,7 @@ export function CharacterCard({
     return (
       <div key={asset.id} className="relative flex-shrink-0 w-[140px] snap-center group/slot flex flex-col gap-1">
         <input 
-          className="text-[11px] font-semibold text-center text-[--text-secondary] bg-white/50 rounded-full py-0.5 border border-[--border-subtle] focus:bg-white outline-none transition-colors"
+          className="text-[11px] font-semibold text-center text-(--text-secondary) bg-white/50 rounded-full py-0.5 border border-(--border-subtle) focus:bg-white outline-none transition-colors"
           title={t("character.morphTagInputTitle")}
           value={assetTagDrafts[asset.id] ?? asset.tag}
           onChange={(e) =>
@@ -519,7 +519,7 @@ export function CharacterCard({
             }
           }}
         />
-        <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-[--surface] border border-[--border-subtle] transition-shadow hover:shadow-md">
+        <div className="relative aspect-[3/4] rounded-xl overflow-hidden bg-(--surface) border border-(--border-subtle) transition-shadow hover:shadow-md">
           {asset.imagePath ? (
             <img 
               src={uploadUrl(asset.imagePath, { w: 640 })} 
@@ -587,7 +587,7 @@ export function CharacterCard({
           <label className={`absolute inset-0 flex flex-col items-center justify-center transition-all duration-200 cursor-pointer ${
             asset.imagePath
               ? 'bg-black/40 text-white opacity-0 group-hover/slot:opacity-100'
-              : 'bg-transparent text-[--text-muted] opacity-0 group-hover/slot:opacity-100 group-hover/slot:bg-black/5 hover:!text-[--text-primary]'
+              : 'bg-transparent text-(--text-muted) opacity-0 group-hover/slot:opacity-100 group-hover/slot:bg-black/5 hover:!text-(--text-primary)'
           }`}>
             <Upload className="h-5 w-5 mb-1" />
             <span className="text-[10px] font-medium">{t("character.uploadImage")}</span>
@@ -694,9 +694,9 @@ export function CharacterCard({
   }
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-[--border-subtle] bg-white transition-all duration-300 hover:border-[--border-hover] hover:shadow-lg hover:shadow-black/5 flex flex-col">
+    <div className="group overflow-hidden rounded-2xl border border-(--border-subtle) bg-white transition-all duration-300 hover:border-(--border-hover) hover:shadow-lg hover:shadow-black/5 flex flex-col">
       {/* Images Area */}
-      <div className="relative bg-gradient-to-b from-[--surface] to-white/50 pt-4 pb-2 border-b border-[--border-subtle]">
+      <div className="relative bg-gradient-to-b from-(--surface) to-white/50 pt-4 pb-2 border-b border-(--border-subtle)">
         {onDelete && (
           <button
             onClick={onDelete}
@@ -717,9 +717,9 @@ export function CharacterCard({
             <button
               onClick={() => handleAddAsset("morph")}
               title={t("character.addMorphTooltip")}
-              className="w-[140px] aspect-[3/4] rounded-xl border-2 border-dashed border-[--border-subtle] flex flex-col items-center justify-center gap-2 text-[--text-muted] hover:text-primary hover:border-primary transition-all group/add"
+              className="w-[140px] aspect-[3/4] rounded-xl border-2 border-dashed border-(--border-subtle) flex flex-col items-center justify-center gap-2 text-(--text-muted) hover:text-primary hover:border-primary transition-all group/add"
             >
-              <div className="w-10 h-10 rounded-full bg-[--surface] flex items-center justify-center group-hover/add:bg-primary/10 transition-colors">
+              <div className="w-10 h-10 rounded-full bg-(--surface) flex items-center justify-center group-hover/add:bg-primary/10 transition-colors">
                 <Upload className="h-5 w-5" />
               </div>
               <span className="text-xs font-medium">添加形态</span>
@@ -766,28 +766,28 @@ export function CharacterCard({
                 添加集数
               </button>
               {showEpPicker && unlinkedEpisodes.length > 0 && (
-                <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-44 overflow-y-auto rounded-xl border border-[--border-subtle] bg-white shadow-lg">
+                <div className="absolute left-0 top-full z-50 mt-1 max-h-48 w-44 overflow-y-auto rounded-xl border border-(--border-subtle) bg-white shadow-lg">
                   {unlinkedEpisodes.map((ep) => (
                     <button
                       key={ep.id}
                       onClick={() => addEpisode(ep.id)}
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50 transition-colors"
                     >
-                      <span className="shrink-0 font-medium text-[--text-muted]">
+                      <span className="shrink-0 font-medium text-(--text-muted)">
                         EP.{String(ep.sequence).padStart(2, "0")}
                       </span>
-                      <span className="truncate text-[--text-secondary]">{ep.title}</span>
+                      <span className="truncate text-(--text-secondary)">{ep.title}</span>
                     </button>
                   ))}
                 </div>
               )}
               {showEpPicker && unlinkedEpisodes.length === 0 && (
-                <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-[--border-subtle] bg-white px-3 py-2 text-xs text-[--text-muted] shadow-lg">
+                <div className="absolute left-0 top-full z-50 mt-1 w-36 rounded-xl border border-(--border-subtle) bg-white px-3 py-2 text-xs text-(--text-muted) shadow-lg">
                   已关联所有集数
                 </div>
               )}
             </div>
-            {savingEpisodes && <Loader2 className="h-3 w-3 animate-spin text-[--text-muted]" />}
+            {savingEpisodes && <Loader2 className="h-3 w-3 animate-spin text-(--text-muted)" />}
           </div>
         </div>
       )}
@@ -820,10 +820,10 @@ export function CharacterCard({
       </div>
 
       {/* 音色设置区域（参考 Toonflow 音频资产设计） */}
-      <div className="border-t border-[--border-subtle] px-4 py-3 space-y-3">
+      <div className="border-t border-(--border-subtle) px-4 py-3 space-y-3">
         {/* 区域标题 + 当前使用优先级 */}
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-[--text-secondary]">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-(--text-secondary)">
             <Mic className="h-3.5 w-3.5" />
             音色设置
           </div>
@@ -840,7 +840,7 @@ export function CharacterCard({
 
         {/* 文字音色描述（9维度） */}
         <div className="space-y-1.5">
-          <label className="text-[10px] text-[--text-muted] font-medium">
+          <label className="text-[10px] text-(--text-muted) font-medium">
             文字音色描述
             <span className="ml-1 font-normal opacity-60">（有值时优先于音频克隆）</span>
           </label>
@@ -865,7 +865,7 @@ export function CharacterCard({
                   className={`rounded-full border px-2 py-0.5 text-[10px] font-medium transition-colors ${
                     isSelected
                       ? "border-blue-400 bg-blue-100 text-blue-700"
-                      : "border-[--border-subtle] bg-white text-[--text-secondary] hover:border-blue-300 hover:text-blue-600"
+                      : "border-(--border-subtle) bg-white text-(--text-secondary) hover:border-blue-300 hover:text-blue-600"
                   }`}
                   title={preset.text}
                 >
@@ -885,12 +885,12 @@ export function CharacterCard({
 
         {/* 参考音频上传（音色克隆） */}
         <div className="space-y-1">
-          <label className="text-[10px] text-[--text-muted] font-medium">
+          <label className="text-[10px] text-(--text-muted) font-medium">
             参考音频
             <span className="ml-1 font-normal opacity-60">（MP3 / WAV / M4A，用于 Seedance 音色克隆）</span>
           </label>
           {uploadingAudio ? (
-            <div className="flex items-center justify-center gap-2 rounded-lg border border-[--border-subtle] bg-[--surface] py-2 text-xs text-[--text-muted]">
+            <div className="flex items-center justify-center gap-2 rounded-lg border border-(--border-subtle) bg-(--surface) py-2 text-xs text-(--text-muted)">
               <Loader2 className="h-3 w-3 animate-spin" />
               上传中…
             </div>
@@ -901,7 +901,7 @@ export function CharacterCard({
                 <span className="truncate">音色参考已设置</span>
               </div>
               <label
-                className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-[--border-subtle] bg-white px-2 text-xs text-[--text-muted] hover:border-primary/40 hover:text-primary transition-colors"
+                className="flex h-8 cursor-pointer items-center gap-1 rounded-lg border border-(--border-subtle) bg-white px-2 text-xs text-(--text-muted) hover:border-primary/40 hover:text-primary transition-colors"
                 title="替换音频参考"
               >
                 <Upload className="h-3 w-3" />
@@ -927,7 +927,7 @@ export function CharacterCard({
             </div>
           ) : (
             <label
-              className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[--border-subtle] bg-[--surface] py-2.5 text-xs text-[--text-muted] transition-colors hover:border-primary/40 hover:text-primary"
+              className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-(--border-subtle) bg-(--surface) py-2.5 text-xs text-(--text-muted) transition-colors hover:border-primary/40 hover:text-primary"
               title="上传音频参考（MP3/WAV/M4A），用于 Seedance 音色克隆"
             >
               <Mic className="h-3.5 w-3.5" />
@@ -1009,7 +1009,7 @@ export function CharacterCard({
                   {gachaPaths.map((path, idx) => (
                     <div 
                       key={idx} 
-                      className="group relative aspect-[3/4] rounded-xl overflow-hidden border border-[--border-subtle] cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
+                      className="group relative aspect-[3/4] rounded-xl overflow-hidden border border-(--border-subtle) cursor-pointer hover:border-primary/50 hover:shadow-md transition-all"
                       onClick={() => saveGachaImage(path)}
                     >
                       <img src={uploadUrl(path, { w: 640 })} alt="Generated" className="w-full h-full object-cover" />

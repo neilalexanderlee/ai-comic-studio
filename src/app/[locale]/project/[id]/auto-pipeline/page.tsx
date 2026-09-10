@@ -475,12 +475,12 @@ export default function AutoPipelinePage({
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-[--surface]">
+    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-(--surface)">
       {/* Left sidebar */}
-      <div className="flex w-64 shrink-0 flex-col border-r border-[--border-subtle] bg-white p-5">
+      <div className="flex w-64 shrink-0 flex-col border-r border-(--border-subtle) bg-white p-5">
         <button
           onClick={() => router.push(`/${locale}/project/${projectId}/episodes`)}
-          className="mb-6 flex items-center gap-2 text-sm text-[--text-muted] hover:text-primary transition-colors"
+          className="mb-6 flex items-center gap-2 text-sm text-(--text-muted) hover:text-primary transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
           返回剧集列表
@@ -489,12 +489,12 @@ export default function AutoPipelinePage({
         <div className="mb-5">
           <div className="flex items-center gap-2 mb-1">
             <Wand2 className="h-4 w-4 text-primary" />
-            <h2 className="font-display text-base font-bold text-[--text-primary]">
+            <h2 className="font-display text-base font-bold text-(--text-primary)">
               整剧模式
             </h2>
           </div>
           {projectTitle && (
-            <p className="text-xs text-[--text-muted] truncate">{projectTitle}</p>
+            <p className="text-xs text-(--text-muted) truncate">{projectTitle}</p>
           )}
         </div>
 
@@ -514,7 +514,7 @@ export default function AutoPipelinePage({
                     ? "border-transparent bg-emerald-50"
                     : status === "error"
                     ? "border-red-200 bg-red-50"
-                    : "border-transparent bg-[--surface]"
+                    : "border-transparent bg-(--surface)"
                 }`}
               >
                 {/* Animated left bar when running */}
@@ -530,7 +530,7 @@ export default function AutoPipelinePage({
                       ? "bg-primary/15 text-primary"
                       : status === "error"
                       ? "bg-red-100 text-red-500"
-                      : "bg-white text-[--text-muted]"
+                      : "bg-white text-(--text-muted)"
                   }`}
                 >
                   {status === "running" ? (
@@ -553,12 +553,12 @@ export default function AutoPipelinePage({
                         ? "text-primary"
                         : status === "error"
                         ? "text-red-600"
-                        : "text-[--text-muted]"
+                        : "text-(--text-muted)"
                     }`}
                   >
                     {label}
                   </div>
-                  <div className="text-[10px] text-[--text-muted] truncate">{desc}</div>
+                  <div className="text-[10px] text-(--text-muted) truncate">{desc}</div>
                 </div>
               </div>
             );
@@ -567,27 +567,27 @@ export default function AutoPipelinePage({
 
         {/* Stats when running / done */}
         {started && (
-          <div className="mt-auto pt-4 space-y-1.5 border-t border-[--border-subtle]">
+          <div className="mt-auto pt-4 space-y-1.5 border-t border-(--border-subtle)">
             {streamedChars > 0 && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[--text-muted]">已生成</span>
-                <span className="font-mono font-medium text-[--text-primary]">
+                <span className="text-(--text-muted)">已生成</span>
+                <span className="font-mono font-medium text-(--text-primary)">
                   {streamedChars.toLocaleString()} 字
                 </span>
               </div>
             )}
             {steps[2].status === "done" && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[--text-muted]">角色数</span>
-                <span className="font-mono font-medium text-[--text-primary]">
+                <span className="text-(--text-muted)">角色数</span>
+                <span className="font-mono font-medium text-(--text-primary)">
                   {characters.current.length}
                 </span>
               </div>
             )}
             {steps[3].status === "done" && (
               <div className="flex items-center justify-between text-xs">
-                <span className="text-[--text-muted]">剧集数</span>
-                <span className="font-mono font-medium text-[--text-primary]">
+                <span className="text-(--text-muted)">剧集数</span>
+                <span className="font-mono font-medium text-(--text-primary)">
                   {episodes.current.length}
                 </span>
               </div>
@@ -607,50 +607,50 @@ export default function AutoPipelinePage({
                 <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5">
                   <Wand2 className="h-7 w-7 text-primary" />
                 </div>
-                <h1 className="font-display text-2xl font-bold text-[--text-primary]">
+                <h1 className="font-display text-2xl font-bold text-(--text-primary)">
                   整剧模式 · 一键规划
                 </h1>
-                <p className="mt-1.5 text-sm text-[--text-muted]">
+                <p className="mt-1.5 text-sm text-(--text-muted)">
                   {pipelineSummary}
                 </p>
               </div>
 
               {/* Outline preview */}
-              <div className="rounded-2xl border border-[--border-subtle] bg-white p-5">
+              <div className="rounded-2xl border border-(--border-subtle) bg-white p-5">
                 <div className="mb-3 flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-[--text-muted]" />
-                  <span className="text-sm font-medium text-[--text-secondary]">
+                  <FileText className="h-4 w-4 text-(--text-muted)" />
+                  <span className="text-sm font-medium text-(--text-secondary)">
                     {sourceLabel}
                   </span>
-                  <span className="ml-auto text-xs text-[--text-muted]">
+                  <span className="ml-auto text-xs text-(--text-muted)">
                     {outline.length} 字
                   </span>
                 </div>
                 {!projectLoaded ? (
-                  <div className="flex items-center gap-2 text-sm text-[--text-muted]">
+                  <div className="flex items-center gap-2 text-sm text-(--text-muted)">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     加载中...
                   </div>
                 ) : outline ? (
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-[--text-primary] line-clamp-8">
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-(--text-primary) line-clamp-8">
                     {outline}
                   </p>
                 ) : (
-                  <p className="text-sm text-[--text-muted] italic">
+                  <p className="text-sm text-(--text-muted) italic">
                     未找到{sourceLabel}。请返回项目首页重新创建，并补充输入内容。
                   </p>
                 )}
               </div>
 
               {/* Pipeline preview */}
-              <div className="flex items-center justify-center gap-2 text-xs text-[--text-muted]">
+              <div className="flex items-center justify-center gap-2 text-xs text-(--text-muted)">
                 {stepMeta.map(({ num, label }, i) => (
                   <div key={num} className="flex items-center gap-2">
                     <span className="rounded-full bg-primary/10 px-2 py-0.5 text-primary font-medium">
                       {label}
                     </span>
                     {i < stepMeta.length - 1 && (
-                      <ChevronRight className="h-3.5 w-3.5 text-[--text-muted]" />
+                      <ChevronRight className="h-3.5 w-3.5 text-(--text-muted)" />
                     )}
                   </div>
                 ))}
@@ -707,7 +707,7 @@ export default function AutoPipelinePage({
                     : "准备中..."}
                 </div>
                 {currentStep && !allDone && !hasError && (
-                  <div className="text-xs text-[--text-muted]">
+                  <div className="text-xs text-(--text-muted)">
                     {steps[currentStep].message}
                   </div>
                 )}
@@ -727,9 +727,9 @@ export default function AutoPipelinePage({
 
             {/* Live script streaming (step 1) */}
             {steps[1].status === "running" && (
-              <div className="rounded-xl border border-[--border-subtle] bg-white flex-1 overflow-hidden flex flex-col min-h-0">
-                <div className="flex items-center justify-between px-4 py-2.5 border-b border-[--border-subtle] shrink-0">
-                  <div className="flex items-center gap-2 text-sm font-medium text-[--text-secondary]">
+              <div className="rounded-xl border border-(--border-subtle) bg-white flex-1 overflow-hidden flex flex-col min-h-0">
+                <div className="flex items-center justify-between px-4 py-2.5 border-b border-(--border-subtle) shrink-0">
+                  <div className="flex items-center gap-2 text-sm font-medium text-(--text-secondary)">
                     <Wand2 className="h-4 w-4 text-primary" />
                     实时生成预览
                   </div>
@@ -737,9 +737,9 @@ export default function AutoPipelinePage({
                     {streamedChars.toLocaleString()} 字
                   </span>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed text-[--text-secondary] whitespace-pre-wrap">
+                <div className="flex-1 overflow-y-auto p-4 font-mono text-xs leading-relaxed text-(--text-secondary) whitespace-pre-wrap">
                   {/* We don't store the streaming text in state for perf — just show char count */}
-                  <div className="flex items-center gap-2 text-[--text-muted]">
+                  <div className="flex items-center gap-2 text-(--text-muted)">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     正在生成剧本内容...（{streamedChars.toLocaleString()} 字已生成）
                   </div>
@@ -749,17 +749,17 @@ export default function AutoPipelinePage({
 
             {/* Log panel */}
             {(steps[1].status !== "running" || logs.length > 0) && (
-              <div className="rounded-xl border border-[--border-subtle] bg-white overflow-hidden flex flex-col min-h-0 flex-1">
-                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[--border-subtle] shrink-0">
-                  <FileText className="h-3.5 w-3.5 text-[--text-muted]" />
-                  <span className="text-sm font-medium text-[--text-secondary]">执行日志</span>
+              <div className="rounded-xl border border-(--border-subtle) bg-white overflow-hidden flex flex-col min-h-0 flex-1">
+                <div className="flex items-center gap-2 px-4 py-2.5 border-b border-(--border-subtle) shrink-0">
+                  <FileText className="h-3.5 w-3.5 text-(--text-muted)" />
+                  <span className="text-sm font-medium text-(--text-secondary)">执行日志</span>
                 </div>
                 <div className="flex-1 overflow-y-auto p-4 max-h-[50vh]">
                   <div className="space-y-1.5 font-mono text-xs">
                     {logs.map((log, i) => (
                       <div key={i} className="flex items-start gap-2">
                         <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
-                        <span className="text-[--text-primary]">{log}</span>
+                        <span className="text-(--text-primary)">{log}</span>
                       </div>
                     ))}
 
@@ -776,7 +776,7 @@ export default function AutoPipelinePage({
                             />
                             <span
                               className={
-                                status === "error" ? "text-red-500" : "text-[--text-primary]"
+                                status === "error" ? "text-red-500" : "text-(--text-primary)"
                               }
                             >
                               [Step {num}] {message}
@@ -795,7 +795,7 @@ export default function AutoPipelinePage({
             {/* Character preview after step 2 */}
             {steps[2].status === "done" && characters.current.length > 0 && (
               <div className="shrink-0">
-                <div className="mb-2 text-xs font-medium text-[--text-secondary]">
+                <div className="mb-2 text-xs font-medium text-(--text-secondary)">
                   已提取角色（{characters.current.length}）
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -808,7 +808,7 @@ export default function AutoPipelinePage({
                     </span>
                   ))}
                   {characters.current.length > 20 && (
-                    <span className="rounded-full px-2.5 py-0.5 text-[10px] text-[--text-muted]">
+                    <span className="rounded-full px-2.5 py-0.5 text-[10px] text-(--text-muted)">
                       +{characters.current.length - 20} 更多
                     </span>
                   )}

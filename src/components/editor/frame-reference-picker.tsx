@@ -145,7 +145,7 @@ export function FrameReferencePicker({
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle>{resolvedTitle}</DialogTitle>
-          <p className="text-sm text-[--text-secondary]">
+          <p className="text-sm text-(--text-secondary)">
             {frameTarget === "last"
               ? `勾选一张或多张参考图（最多 ${maxSelectable} 张，角色定妆图自动注入不占此数）发给 AI 生成尾帧，第一张优先用于镜间衔接。`
               : `勾选一张或多张参考图（最多 ${maxSelectable} 张，角色定妆图自动注入不占此数）发给 AI 生成首帧，第一张优先用于镜间衔接。`}
@@ -160,11 +160,11 @@ export function FrameReferencePicker({
             className={`w-full rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
               isNoneMode
                 ? "border-primary bg-primary/5 text-primary"
-                : "border-[--border-subtle] hover:border-primary/30"
+                : "border-(--border-subtle) hover:border-primary/30"
             }`}
           >
             <span className="font-medium">独立生成（不参考其他分镜）</span>
-            <p className="mt-1 text-xs text-[--text-muted]">
+            <p className="mt-1 text-xs text-(--text-muted)">
               {frameTarget === "last"
                 ? "仅使用本镜描述与角色定妆图生成尾帧，不读取其他分镜画面。"
                 : "仅使用本镜描述与角色定妆图生成首帧，不读取其他分镜画面。"}
@@ -172,7 +172,7 @@ export function FrameReferencePicker({
           </button>
 
           {options.length === 0 ? (
-            <p className="text-sm text-[--text-muted] py-4 text-center">
+            <p className="text-sm text-(--text-muted) py-4 text-center">
               当前版本中没有其他分镜的可选参考图
             </p>
           ) : (
@@ -207,11 +207,11 @@ export function FrameReferencePicker({
                         isChecked
                           ? "border-primary ring-2 ring-primary/30"
                           : isDisabled
-                            ? "border-[--border-subtle] opacity-40 cursor-not-allowed"
-                            : "border-[--border-subtle] hover:border-primary/30"
+                            ? "border-(--border-subtle) opacity-40 cursor-not-allowed"
+                            : "border-(--border-subtle) hover:border-primary/30"
                       }`}
                     >
-                      <div className="aspect-video bg-[--surface] relative">
+                      <div className="aspect-video bg-(--surface) relative">
                         <img
                           src={uploadUrl(opt.src, { w: 640 })}
                           alt={opt.label}
@@ -232,7 +232,7 @@ export function FrameReferencePicker({
                           </div>
                         )}
                       </div>
-                      <p className="px-2 py-1.5 text-[11px] text-[--text-secondary] truncate">
+                      <p className="px-2 py-1.5 text-[11px] text-(--text-secondary) truncate">
                         {opt.label}
                       </p>
                     </button>
@@ -263,8 +263,8 @@ export function FrameReferencePicker({
 export function FrameRefThumb({ src, className }: { src?: string | null; className?: string }) {
   if (!src) {
     return (
-      <div className={`flex items-center justify-center bg-[--surface] ${className ?? ""}`}>
-        <ImageIcon className="h-3.5 w-3.5 text-[--text-muted]" />
+      <div className={`flex items-center justify-center bg-(--surface) ${className ?? ""}`}>
+        <ImageIcon className="h-3.5 w-3.5 text-(--text-muted)" />
       </div>
     );
   }

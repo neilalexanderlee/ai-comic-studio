@@ -83,15 +83,15 @@ export function AiMediaKitSection() {
   }
 
   return (
-    <div className="rounded-2xl border border-[--border-subtle] bg-white p-5 space-y-4">
+    <div className="rounded-2xl border border-(--border-subtle) bg-white p-5 space-y-4">
       {/* Section header */}
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+          <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
             <Sparkles className="h-3.5 w-3.5" />
             AI MediaKit · 画质增强
           </h3>
-          <p className="mt-1 text-xs text-[--text-muted] max-w-md">
+          <p className="mt-1 text-xs text-(--text-muted) max-w-md">
             火山引擎智能处理套件，用于将 AI 生成视频超分至 1080p。
             独立于即梦/Seedance，需单独申请 MediaKit API Key。
           </p>
@@ -100,7 +100,7 @@ export function AiMediaKitSection() {
           href="https://console.volcengine.com/imp/ai-mediakit/tools"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-[--border-subtle] px-2.5 py-1.5 text-xs text-[--text-secondary] transition-colors hover:border-primary hover:text-primary"
+          className="flex-shrink-0 flex items-center gap-1 rounded-lg border border-(--border-subtle) px-2.5 py-1.5 text-xs text-(--text-secondary) transition-colors hover:border-primary hover:text-primary"
         >
           <ExternalLink className="h-3 w-3" />
           控制台
@@ -131,23 +131,23 @@ export function AiMediaKitSection() {
           <button
             type="button"
             onClick={() => setShowKey(!showKey)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-[--text-muted] hover:text-[--text-primary]"
+            className="absolute right-2 top-1/2 -translate-y-1/2 flex h-7 w-7 items-center justify-center rounded-lg text-(--text-muted) hover:text-(--text-primary)"
           >
             {showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
         </div>
-        <p className="text-[11px] text-[--text-muted]">
+        <p className="text-[11px] text-(--text-muted)">
           在 AI MediaKit 控制台 → API Key 管理页面创建并复制。
           该 Key 仅用于画质增强服务，与其他提供商 Key 互相独立。
         </p>
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-between border-t border-[--border-subtle] pt-3">
+      <div className="flex items-center justify-between border-t border-(--border-subtle) pt-3">
         <button
           onClick={handleDelete}
           disabled={loading || !hasKey}
-          className="text-xs text-[--text-muted] transition-colors hover:text-destructive disabled:opacity-40"
+          className="text-xs text-(--text-muted) transition-colors hover:text-destructive disabled:opacity-40"
         >
           清除 Key
         </button>

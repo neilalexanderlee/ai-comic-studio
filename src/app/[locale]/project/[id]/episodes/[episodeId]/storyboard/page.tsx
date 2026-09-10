@@ -596,10 +596,10 @@ export default function EpisodeStoryboardPage() {
             <Film className="h-4 w-4 text-primary" />
           </div>
           <div>
-            <h2 className="font-display text-xl font-bold tracking-tight text-[--text-primary]">
+            <h2 className="font-display text-xl font-bold tracking-tight text-(--text-primary)">
               {t("project.storyboard")}
             </h2>
-            <p className="text-xs text-[--text-muted]">
+            <p className="text-xs text-(--text-muted)">
               {totalShots} shots
             </p>
           </div>
@@ -668,13 +668,13 @@ export default function EpisodeStoryboardPage() {
           )}
           <PromptEditButton promptKeys="shot_split" projectId={project.id} />
           {totalShots > 0 && (
-            <div className="inline-flex gap-1 rounded-xl border border-[--border-subtle] bg-[--surface] p-1">
+            <div className="inline-flex gap-1 rounded-xl border border-(--border-subtle) bg-(--surface) p-1">
               <button
                 onClick={() => switchView("list")}
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all duration-150 ${
                   viewMode === "list"
                     ? "bg-white text-primary shadow ring-1 ring-primary/20"
-                    : "text-[--text-muted] hover:bg-white/60 hover:text-[--text-secondary]"
+                    : "text-(--text-muted) hover:bg-white/60 hover:text-(--text-secondary)"
                 }`}
               >
                 <List className={`h-3.5 w-3.5 ${viewMode === "list" ? "text-primary" : ""}`} />
@@ -685,7 +685,7 @@ export default function EpisodeStoryboardPage() {
                 className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all duration-150 ${
                   viewMode === "kanban"
                     ? "bg-white text-primary shadow ring-1 ring-primary/20"
-                    : "text-[--text-muted] hover:bg-white/60 hover:text-[--text-secondary]"
+                    : "text-(--text-muted) hover:bg-white/60 hover:text-(--text-secondary)"
                 }`}
               >
                 <LayoutGrid className={`h-3.5 w-3.5 ${viewMode === "kanban" ? "text-primary" : ""}`} />
@@ -722,7 +722,7 @@ export default function EpisodeStoryboardPage() {
       </div>
 
       {/* ── Control Panel ── */}
-      <div className="rounded-2xl border border-[--border-subtle] bg-white p-4 space-y-3">
+      <div className="rounded-2xl border border-(--border-subtle) bg-white p-4 space-y-3">
         {/* Generation mode + version tabs row */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           {/* Version tabs */}
@@ -738,7 +738,7 @@ export default function EpisodeStoryboardPage() {
                   className={`rounded-lg pl-3 pr-6 py-1.5 text-[13px] font-medium transition-colors ${
                     selectedVersionId === v.id
                       ? "bg-primary/10 text-primary"
-                      : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
+                      : "text-(--text-muted) hover:bg-(--surface) hover:text-(--text-secondary)"
                   }`}
                 >
                   {v.label}
@@ -746,7 +746,7 @@ export default function EpisodeStoryboardPage() {
                 {versions.length > 1 && (
                   <button
                     onClick={(e) => { e.stopPropagation(); setDeleteVersionId(v.id); }}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-[--text-muted] hover:bg-red-100 hover:text-red-500 transition-colors"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-(--text-muted) hover:bg-red-100 hover:text-red-500 transition-colors"
                     title={`删除版本 ${v.label}`}
                   >
                     <X className="h-3 w-3" />
@@ -762,7 +762,7 @@ export default function EpisodeStoryboardPage() {
                   className={`flex items-center gap-0.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-colors ${
                     versions.slice(2).some((v) => v.id === selectedVersionId)
                       ? "bg-primary/10 text-primary"
-                      : "text-[--text-muted] hover:bg-[--surface] hover:text-[--text-secondary]"
+                      : "text-(--text-muted) hover:bg-(--surface) hover:text-(--text-secondary)"
                   }`}
                 >
                   {versions.slice(2).some((v) => v.id === selectedVersionId)
@@ -772,7 +772,7 @@ export default function EpisodeStoryboardPage() {
                 </button>
                 {versionDropdownOpen && (
                   <div
-                    className="absolute right-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-[--border-subtle] bg-white shadow-lg"
+                    className="absolute right-0 top-full z-20 mt-1 min-w-[160px] overflow-hidden rounded-xl border border-(--border-subtle) bg-white shadow-lg"
                     onMouseLeave={() => setVersionDropdownOpen(false)}
                   >
                     {versions.slice(2).map((v) => (
@@ -783,15 +783,15 @@ export default function EpisodeStoryboardPage() {
                             fetchProject(project!.id, undefined, v.id);
                             setVersionDropdownOpen(false);
                           }}
-                          className={`w-full pl-3 pr-8 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[--surface] ${
-                            selectedVersionId === v.id ? "text-primary" : "text-[--text-secondary]"
+                          className={`w-full pl-3 pr-8 py-2 text-left text-[13px] font-medium transition-colors hover:bg-(--surface) ${
+                            selectedVersionId === v.id ? "text-primary" : "text-(--text-secondary)"
                           }`}
                         >
                           {v.label}
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); setDeleteVersionId(v.id); setVersionDropdownOpen(false); }}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-[--text-muted] hover:bg-red-100 hover:text-red-500 transition-colors"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 hidden group-hover:flex h-4 w-4 items-center justify-center rounded text-(--text-muted) hover:bg-red-100 hover:text-red-500 transition-colors"
                           title={`删除版本 ${v.label}`}
                         >
                           <X className="h-3 w-3" />
@@ -805,7 +805,7 @@ export default function EpisodeStoryboardPage() {
             {/* + 新建版本 */}
             <button
               onClick={() => setNewVersionDialogOpen(true)}
-              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary]"
+              className="flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[13px] font-medium text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-secondary)"
               title="新建版本"
             >
               <Plus className="h-3.5 w-3.5" />
@@ -816,7 +816,7 @@ export default function EpisodeStoryboardPage() {
                 <button
                   onClick={handleGenerateShots}
                   disabled={anyGenerating}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-[--text-muted] transition-colors hover:bg-[--surface] hover:text-[--text-secondary] disabled:opacity-40"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-(--text-muted) transition-colors hover:bg-(--surface) hover:text-(--text-secondary) disabled:opacity-40"
                   title={t("project.generateShots")}
                 >
                   <Sparkles className="h-3.5 w-3.5" />
@@ -888,12 +888,12 @@ export default function EpisodeStoryboardPage() {
 
         {/* Batch operations */}
         {viewMode === "list" && (
-        <div className="space-y-2 sticky top-[56px] z-20 bg-[--bg] pb-1 pt-0.5">
+        <div className="space-y-2 sticky top-[56px] z-20 bg-(--background) pb-1 pt-0.5">
 
           {/* Global generation settings strip */}
-          <div className="flex items-center gap-3 rounded-xl border border-[--border-subtle] bg-[--surface]/60 px-3 py-2 flex-wrap">
-            <span className="text-[11px] font-semibold text-[--text-muted] uppercase tracking-wide shrink-0">生成设置</span>
-            <div className="h-3.5 w-px bg-[--border-subtle] shrink-0" />
+          <div className="flex items-center gap-3 rounded-xl border border-(--border-subtle) bg-(--surface)/60 px-3 py-2 flex-wrap">
+            <span className="text-[11px] font-semibold text-(--text-muted) uppercase tracking-wide shrink-0">生成设置</span>
+            <div className="h-3.5 w-px bg-(--border-subtle) shrink-0" />
             <InlineModelPicker capability="text" />
             <InlineModelPicker capability="image" />
             <InlineModelPicker capability="video" />
@@ -902,7 +902,7 @@ export default function EpisodeStoryboardPage() {
               onChange={handleVideoRatioChange}
               allowedRatios={videoCapability.ratios}
             />
-            <div className="flex items-center rounded-lg border border-[--border-subtle] bg-white overflow-hidden text-xs">
+            <div className="flex items-center rounded-lg border border-(--border-subtle) bg-white overflow-hidden text-xs">
               {videoCapability.resolutions.map((res) => (
                 <button
                   key={res}
@@ -911,7 +911,7 @@ export default function EpisodeStoryboardPage() {
                   className={`px-2.5 py-1.5 font-medium transition-colors ${
                     videoGenerationResolution === res
                       ? "bg-primary text-white"
-                      : "text-[--text-secondary] hover:bg-[--surface]"
+                      : "text-(--text-secondary) hover:bg-(--surface)"
                   }`}
                 >
                   {res}
@@ -922,7 +922,7 @@ export default function EpisodeStoryboardPage() {
 
           {/* Row 1: Generate text / shots */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">1</span>
+            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-(--surface) text-[10px] font-bold text-(--text-muted)">1</span>
             <Button
               onClick={handleGenerateShots}
               disabled={anyGenerating}
@@ -949,7 +949,7 @@ export default function EpisodeStoryboardPage() {
 
           {/* Row 2: Video prompts */}
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-[--surface] text-[10px] font-bold text-[--text-muted]">2</span>
+            <span className="w-4 h-4 flex-shrink-0 flex items-center justify-center rounded-full bg-(--surface) text-[10px] font-bold text-(--text-muted)">2</span>
             <Button
               onClick={handleBatchGenerateVideoPrompts}
               disabled={anyGenerating || totalShots === 0}
@@ -985,14 +985,14 @@ export default function EpisodeStoryboardPage() {
 
       {/* Shot cards */}
       {totalShots === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-24">
+        <div className="flex flex-col items-center justify-center rounded-3xl border border-dashed border-(--border-subtle) bg-(--surface)/50 py-24">
           <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-primary/15 to-accent/10">
             <Film className="h-7 w-7 text-primary" />
           </div>
-          <h3 className="font-display text-lg font-semibold text-[--text-primary]">
+          <h3 className="font-display text-lg font-semibold text-(--text-primary)">
             {t("project.storyboard")}
           </h3>
-          <p className="mt-2 max-w-sm text-center text-sm text-[--text-secondary]">
+          <p className="mt-2 max-w-sm text-center text-sm text-(--text-secondary)">
             {t("shot.noShots")}
           </p>
         </div>
@@ -1048,7 +1048,7 @@ export default function EpisodeStoryboardPage() {
                       合并视频 {trackVideoInfo.totalDuration}s · {trackVideoInfo.shotCount}镜
                     </button>
                   ) : (
-                    <span className="text-[10px] text-[--text-muted]">（未生成合并视频）</span>
+                    <span className="text-[10px] text-(--text-muted)">（未生成合并视频）</span>
                   )}
                   <div className="flex-1 h-px bg-violet-100" />
                 </div>
@@ -1212,8 +1212,8 @@ export default function EpisodeStoryboardPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-1">
-            <p className="text-sm text-[--text-secondary]">
-              确认删除版本 <span className="font-semibold text-[--text-primary]">
+            <p className="text-sm text-(--text-secondary)">
+              确认删除版本 <span className="font-semibold text-(--text-primary)">
                 {versions.find((v) => v.id === deleteVersionId)?.label}
               </span>？
             </p>
@@ -1250,10 +1250,10 @@ export default function EpisodeStoryboardPage() {
             </div>
           ) : extractPreview ? (
             <div className="space-y-4">
-              <div className="rounded-xl border border-[--border-subtle] bg-[--surface] p-3 text-sm text-[--text-secondary]">
+              <div className="rounded-xl border border-(--border-subtle) bg-(--surface) p-3 text-sm text-(--text-secondary)">
                 <div>{t("project.previewExtractSummary", { count: extractPreview.shotCount, score: extractPreview.score } as never)}</div>
                 {extractPreview.reasons.length > 0 && (
-                  <div className="mt-1 text-xs text-[--text-muted]">{extractPreview.reasons.join(" · ")}</div>
+                  <div className="mt-1 text-xs text-(--text-muted)">{extractPreview.reasons.join(" · ")}</div>
                 )}
                 {extractPreview.warnings.length > 0 && (
                   <div className="mt-2 text-xs text-amber-700">{extractPreview.warnings.join(" | ")}</div>
@@ -1262,16 +1262,16 @@ export default function EpisodeStoryboardPage() {
 
               <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
                 {extractPreview.shots.map((shot) => (
-                  <div key={shot.sequence} className="rounded-xl border border-[--border-subtle] bg-white p-3">
+                  <div key={shot.sequence} className="rounded-xl border border-(--border-subtle) bg-white p-3">
                     <div className="flex items-center justify-between gap-3">
-                      <div className="font-medium text-[--text-primary]">
+                      <div className="font-medium text-(--text-primary)">
                         #{shot.sequence} {shot.sceneTitle || t("project.previewUntitled")}
                       </div>
-                      <div className="text-xs text-[--text-muted]">
+                      <div className="text-xs text-(--text-muted)">
                         {shot.duration ? `${shot.duration}s` : t("project.previewNoDuration")} · {shot.dialogueCount} dialogue
                       </div>
                     </div>
-                    <div className="mt-2 text-xs text-[--text-secondary] line-clamp-3">{shot.prompt}</div>
+                    <div className="mt-2 text-xs text-(--text-secondary) line-clamp-3">{shot.prompt}</div>
                     <div className="mt-3 flex flex-wrap gap-2 text-[10px]">
                       <span className={`rounded-full px-2 py-1 ${shot.completeness.hasPrompt ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasPrompt ? t("project.previewFieldReady", { field: "prompt" } as never) : t("project.previewFieldMissing", { field: "prompt" } as never)}</span>
                       <span className={`rounded-full px-2 py-1 ${shot.completeness.hasStartFrame ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasStartFrame ? t("project.previewFieldReady", { field: "start" } as never) : t("project.previewFieldMissing", { field: "start" } as never)}</span>
@@ -1280,10 +1280,10 @@ export default function EpisodeStoryboardPage() {
                       <span className={`rounded-full px-2 py-1 ${shot.completeness.hasCameraDirection ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{shot.completeness.hasCameraDirection ? t("project.previewFieldReady", { field: "camera" } as never) : t("project.previewFieldMissing", { field: "camera" } as never)}</span>
                     </div>
                     {shot.dialogues.length > 0 && (
-                      <div className="mt-3 rounded-lg bg-[--surface] p-2 text-[11px] text-[--text-secondary]">
+                      <div className="mt-3 rounded-lg bg-(--surface) p-2 text-[11px] text-(--text-secondary)">
                         {shot.dialogues.slice(0, 2).map((dialogue) => (
                           <div key={`${shot.sequence}-${dialogue.sequence}`}>
-                            <span className="font-medium text-[--text-primary]">{dialogue.character}:</span> {dialogue.text}
+                            <span className="font-medium text-(--text-primary)">{dialogue.character}:</span> {dialogue.text}
                           </div>
                         ))}
                       </div>

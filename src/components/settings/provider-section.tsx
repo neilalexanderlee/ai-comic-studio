@@ -56,10 +56,10 @@ export function ProviderSection({
   }
 
   return (
-    <div className="rounded-2xl border border-[--border-subtle] bg-white p-5 space-y-4">
+    <div className="rounded-2xl border border-(--border-subtle) bg-white p-5 space-y-4">
       {/* Section header */}
       <div className="flex items-center justify-between">
-        <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
+        <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-(--text-muted)">
           {icon}
           {label}
         </h3>
@@ -70,9 +70,9 @@ export function ProviderSection({
       </div>
 
       {sectionProviders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-10">
-          <div className="h-6 w-6 text-[--text-muted]">{icon}</div>
-          <p className="mt-2 text-sm text-[--text-muted]">{t("noProviders")}</p>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-(--border-subtle) bg-(--surface)/50 py-10">
+          <div className="h-6 w-6 text-(--text-muted)">{icon}</div>
+          <p className="mt-2 text-sm text-(--text-muted)">{t("noProviders")}</p>
           <Button size="sm" className="mt-3" onClick={handleAdd}>
             <Plus className="h-3.5 w-3.5" />
             {t("addProvider")}
@@ -97,8 +97,8 @@ export function ProviderSection({
           {selectedProvider ? (
             <ProviderForm key={selectedProvider.id} provider={selectedProvider} />
           ) : (
-            <div className="flex items-center justify-center rounded-xl border border-dashed border-[--border-subtle] bg-[--surface]/50 py-8">
-              <p className="text-sm text-[--text-muted]">{t("selectProvider")}</p>
+            <div className="flex items-center justify-center rounded-xl border border-dashed border-(--border-subtle) bg-(--surface)/50 py-8">
+              <p className="text-sm text-(--text-muted)">{t("selectProvider")}</p>
             </div>
           )}
         </>
