@@ -470,6 +470,13 @@
       "when": 1779000042000,
       "tag": "0066_render_preview_dedup",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1779000043000,
+      "tag": "0067_prune_orphan_migration_rows",
+      "breakpoints": true
     }
   ]
 }
