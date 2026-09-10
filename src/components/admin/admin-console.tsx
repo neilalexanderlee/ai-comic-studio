@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { UsagePanel } from "./usage-panel";
+import { roleBadge } from "./role-badge";
 import type { UsageSummary, UsageWindow } from "./usage-panel";
 import { ArrowLeft, Copy, Loader2, Plus, ShieldUser, Ticket, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -274,21 +275,14 @@ export function AdminConsole() {
                         <span className={`text-sm ${disabled ? "text-(--text-muted) line-through" : ""}`}>
                           {u.username}
                         </span>
-                        {u.role === "owner" && (
-                          <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">
-                            owner · 可配置模型密钥
-                          </span>
-                        )}
-                        {u.role === "admin" && (
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
-                            运营管理员
-                          </span>
-                        )}
-                        {isOwner && (
-                          <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                            平台 Key
-                          </span>
-                        )}
+                        {(() => {
+                          const badge = roleBadge(u.role, isOwner);
+                          return badge ? (
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] ${badge.className}`}>
+                              {badge.text}
+                            </span>
+                          ) : null;
+                        })()}
                         {disabled && (
                           <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">
                             已停用

@@ -30,14 +30,25 @@ export async function GET(request: Request) {
   return NextResponse.json({
     users: rows,
     /**
-     * 平台 Key 挂在谁名下 —— **只回给 owner**。
+     * 平台 Key 当前解析到哪个账号 —— **所有管理端角色都返回**。
      *
-     * 它的用途是提醒 owner「别停用这个账号」（停了全站生成当场失效）。
-     * 而运营 admin 本来就停不了 owner，拿到这条信息没有任何用途，
-     * 却精确指出了「上游密钥在哪个账号手里」—— 对一个被明确排除在密钥之外的角色，
-     * 这是没必要的暴露：它把最高价值的目标直接标了出来。
+     * 这里原先只回给 owner，理由是「不要向运营 admin 指出上游密钥在谁手里」。
+     * 那条理由站不住：同一份响应里每个用户的 `role` 都在，而界面上 owner 的徽章
+     * 原文就写着「可配置模型密钥」—— 想藏的那件事，旁边一行就说清楚了。
+     * 就算把徽章也去掉，还有三条路照样能认出 owner：PATCH 到 owner 会回
+     * 「只有 owner 可以操作 owner 账号」（逐个 id 试即可定位）、用量面板里
+     * 唯一缺席的那个账号就是他（owner 的生成记为 keySource=user，不入表）、
+     * 以及邀请码的 `created_by`。
+     *
+     * 更根本的是：**知道 owner 是谁并不能拿到 Key**。拦着的是 `isKeyOwner()`、
+     * 密钥与端点的同源不变量、以及 owner 账号自身的认证 —— 没有一层依赖
+     * 「admin 不知道 owner 是谁」。留着那个特例只是一层看起来在防、实际不防的保护，
+     * 比不防更糟：它会让人以为这里有边界。
+     *
+     * 它真正的用途是回答「Key 配在哪个账号上才生效」—— 多个 owner 时
+     * 只有创建最早的那个生效，这件事 role 推不出来。
      */
-    platformKeyOwnerId: actorRole === "owner" ? await getPlatformKeyOwnerId() : null,
+    platformKeyOwnerId: await getPlatformKeyOwnerId(),
     currentUserId: guard.userId,
     /** 当前操作者的角色 —— 前端据此决定显示哪些按钮（真正的准入在 PATCH 那边） */
     currentUserRole: actorRole,

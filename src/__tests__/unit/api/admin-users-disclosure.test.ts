@@ -70,10 +70,20 @@ describe("用户列表的信息暴露", () => {
     expect(d.platformKeyOwnerId).toBe("u_owner");
   });
 
-  it("⚠️ 运营 admin 拿不到 platformKeyOwnerId", async () => {
+  /**
+   * 这条断言曾经是反过来的（「运营 admin 拿不到 platformKeyOwnerId」），
+   * 理由是不要向他指出上游密钥在谁手里。2026-09-10 复核后判定那是无效保护：
+   * 同一份响应里每个用户的 role 都在，界面上 owner 的徽章原文就写着「可配置密钥」；
+   * 就算去掉徽章，PATCH 到 owner 的专属报错、用量面板里唯一缺席的账号、
+   * 邀请码的 created_by 三条路照样能认出他。
+   *
+   * 而拦着密钥的是 isKeyOwner()、密钥与端点的同源不变量、以及 owner 自身的认证 ——
+   * 没有一层依赖「admin 不知道 owner 是谁」。**改回去之前先想清楚这三条路怎么堵。**
+   */
+  it("运营 admin 也拿得到 platformKeyOwnerId —— 藏它是无效保护", async () => {
     const d = await listAs("u_ops");
     expect(d.currentUserRole).toBe("admin");
-    expect(d.platformKeyOwnerId).toBeNull();
+    expect(d.platformKeyOwnerId).toBe("u_owner");
   });
 
   it("运营 admin 仍能看到完整用户列表和角色 —— 那是他停用账号所必需的", async () => {
