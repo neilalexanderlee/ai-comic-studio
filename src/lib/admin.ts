@@ -207,31 +207,54 @@ let platformOwnerCache: { at: number; userId: string | null } | null = null;
  * 归属人在请求之间飘移会让同一个 providerId 时而解析得到、时而解析不到。
  *
  * 规则：`PLATFORM_KEY_USERNAME` 指定 > 最早创建的、未停用的 **owner**。
- * 运营 admin 名下没有密钥，选中他会让全站解析不到 Key，所以这里只认 owner。
+ * 运营 admin 名下没有密钥，选中他会让全站解析不到 Key，所以这里只认 owner ——
+ * **指定的那个也要过这一关**，见下面的 role 限定。
  */
 export async function getPlatformKeyOwnerId(): Promise<string | null> {
   if (platformOwnerCache && Date.now() - platformOwnerCache.at < CACHE_TTL_MS) {
     return platformOwnerCache.userId;
   }
 
-  const pinned = process.env.PLATFORM_KEY_USERNAME?.trim();
-  let userId: string | null = null;
-
-  if (pinned) {
-    const [row] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.username, pinned), ne(users.status, "disabled")))
-      .limit(1);
-    userId = row?.id ?? null;
-  } else {
+  const earliestOwner = async (): Promise<string | null> => {
     const [row] = await db
       .select({ id: users.id })
       .from(users)
       .where(and(eq(users.role, "owner"), ne(users.status, "disabled")))
       .orderBy(asc(users.createdAt))
       .limit(1);
+    return row?.id ?? null;
+  };
+
+  const pinned = process.env.PLATFORM_KEY_USERNAME?.trim();
+  let userId: string | null = null;
+
+  if (pinned) {
+    // ⚠️ 必须同时限定 role='owner'。只按用户名找会选中一个**无权配置 Key** 的账号
+    // （`isKeyOwner` 只认 owner，运营 admin 的设置页根本没有密钥配置区），
+    // 于是它名下永远不会有密钥 —— 症状是全站解析不到 Key，而报错只会是
+    // 「未配置 Key」，完全看不出是这个环境变量指错了人。
+    const [row] = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(
+        and(eq(users.username, pinned), eq(users.role, "owner"), ne(users.status, "disabled"))
+      )
+      .limit(1);
     userId = row?.id ?? null;
+
+    if (!userId) {
+      // 回落到正常查找，而不是返回 null。与「认不出来的环境变量值回落到默认值
+      // 而不是 0」同一条原则：配错的失效方式应当是「没按你指定的那个来」，
+      // 不是「谁都用不了」。
+      userId = await earliestOwner();
+      console.warn(
+        `[admin] PLATFORM_KEY_USERNAME="${pinned}" 未匹配到未停用的 owner 账号，` +
+          `已回落到最早创建的 owner${userId ? "" : "（库里也没有可用的 owner）"}。` +
+          `请确认该用户名存在、未被停用、且角色是 owner —— 运营 admin 名下没有密钥。`
+      );
+    }
+  } else {
+    userId = await earliestOwner();
   }
 
   platformOwnerCache = { at: Date.now(), userId };

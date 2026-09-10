@@ -151,6 +151,74 @@ describe("三级权限：管理后台准入 ≠ 模型 Key 准入", () => {
     const { getPlatformKeyOwnerId } = await import("@/lib/admin");
     expect(await getPlatformKeyOwnerId()).toBeNull();
   });
+
+  /**
+   * PLATFORM_KEY_USERNAME 原先只按用户名找，不限定 role —— 于是它能指向一个
+   * **无权配置 Key** 的账号（isKeyOwner 只认 owner，运营 admin 的设置页根本
+   * 没有密钥配置区），那个账号名下永远不会有密钥。症状是全站解析不到 Key，
+   * 而报错只会是「未配置 Key」，完全看不出是这个环境变量指错了人。
+   */
+  describe("PLATFORM_KEY_USERNAME 指定", () => {
+    it("指向 owner 时生效 —— 可以越过「最早创建」这条默认规则", async () => {
+      seed("u_first", "first", "owner", 100);
+      seed("u_pick", "pick", "owner", 200);
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "pick");
+      const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+      expect(await getPlatformKeyOwnerId()).toBe("u_pick");
+    });
+
+    it("⚠️ 指向运营 admin 时不认，回落到最早创建的 owner", async () => {
+      seed("u_owner", "neil", "owner", 100);
+      seed("u_ops", "ops", "admin", 200);
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "ops");
+      const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+      expect(await getPlatformKeyOwnerId()).toBe("u_owner");
+    });
+
+    it("指向普通用户 / 不存在的用户名时，同样回落", async () => {
+      seed("u_owner", "neil", "owner", 100);
+      seed("u_bob", "bob", "user", 200);
+      const { getPlatformKeyOwnerId, __resetAdminCachesForTests } = await import("@/lib/admin");
+
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "bob");
+      expect(await getPlatformKeyOwnerId()).toBe("u_owner");
+
+      __resetAdminCachesForTests();
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "nobody");
+      expect(await getPlatformKeyOwnerId()).toBe("u_owner");
+    });
+
+    it("指向已停用的 owner 时回落 —— 停用的账号不该继续当 Key 来源", async () => {
+      seed("u_live", "live", "owner", 100);
+      seed("u_dead", "dead", "owner", 200, "disabled");
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "dead");
+      const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+      expect(await getPlatformKeyOwnerId()).toBe("u_live");
+    });
+
+    it("回落时要打告警 —— 配错了必须看得见，否则只会表现为「未配置 Key」", async () => {
+      seed("u_owner", "neil", "owner", 100);
+      seed("u_ops", "ops", "admin", 200);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "ops");
+      const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+      await getPlatformKeyOwnerId();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toContain("PLATFORM_KEY_USERNAME");
+      expect(warn.mock.calls[0][0]).toContain("ops");
+      warn.mockRestore();
+    });
+
+    it("指定为空白时按未设置处理，不打告警", async () => {
+      seed("u_owner", "neil", "owner", 100);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.stubEnv("PLATFORM_KEY_USERNAME", "   ");
+      const { getPlatformKeyOwnerId } = await import("@/lib/admin");
+      expect(await getPlatformKeyOwnerId()).toBe("u_owner");
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
 });
 
 describe("邀请制的引导死锁", () => {
