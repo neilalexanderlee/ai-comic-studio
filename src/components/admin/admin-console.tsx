@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Activity, ArrowLeft, Copy, Loader2, Plus, ShieldUser, Ticket, Users } from "lucide-react";
+import { UsagePanel } from "./usage-panel";
+import type { UsageSummary, UsageWindow } from "./usage-panel";
+import { ArrowLeft, Copy, Loader2, Plus, ShieldUser, Ticket, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,37 +20,6 @@ interface InviteCode {
   expiresAt: string | null;
   revokedAt: string | null;
   createdAt: string;
-}
-
-interface UsageRow {
-  userId: string;
-  username: string | null;
-  videoSeconds: number;
-  imageCount: number;
-  musicCount: number;
-  estimatedYuan: number;
-}
-
-type UsageWindow = "24h" | "30d";
-
-const USAGE_WINDOWS: Array<{ key: UsageWindow; label: string }> = [
-  { key: "24h", label: "最近 24 小时" },
-  { key: "30d", label: "最近 30 天" },
-];
-
-interface UsageSummary {
-  windowHours: number;
-  /** 长窗口下每人上限不适用（上限按 24 小时定义），前端据此隐藏分母 */
-  limitsApply: boolean;
-  limits: {
-    dailyVideoSeconds: number;
-    dailyImageCount: number;
-    dailyMusicCount: number;
-    maxInflight: number;
-  };
-  inflight: Array<{ protocol: string; count: number }>;
-  rows: UsageRow[];
-  totals: { videoSeconds: number; imageCount: number; musicCount: number; estimatedYuan: number };
 }
 
 interface AdminUser {
@@ -200,92 +171,12 @@ export function AdminConsole() {
             </div>
           ) : (
             <>
-              {/* 模型开销 —— 计费没开时，这是唯一能看出钱花在哪的地方 */}
               {usage && (
-                <div className="space-y-3 rounded-2xl border border-[--border-subtle] bg-white p-5">
-                  <div className="flex items-center justify-between">
-                    <h3 className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[--text-muted]">
-                      <Activity className="h-3.5 w-3.5" />
-                      模型用量
-                      <span className="inline-flex overflow-hidden rounded-lg border border-[--border-subtle]">
-                        {USAGE_WINDOWS.map((w) => (
-                          <button
-                            key={w.key}
-                            type="button"
-                            onClick={() => setUsageWindow(w.key)}
-                            className={`px-2 py-0.5 text-[10px] tracking-normal transition-colors ${
-                              usageWindow === w.key
-                                ? "bg-[--surface-strong] font-semibold text-[--text-strong]"
-                                : "text-[--text-muted] hover:bg-[--surface]"
-                            }`}
-                          >
-                            {w.label}
-                          </button>
-                        ))}
-                      </span>
-                    </h3>
-                    <span className="text-xs text-[--text-muted]">
-                      在飞{" "}
-                      {usage.inflight.length === 0
-                        ? "0"
-                        : usage.inflight.map((i) => `${i.protocol} ${i.count}`).join(" / ")}
-                      <span className="mx-1">·</span>上限 {usage.limits.maxInflight}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {[
-                      { label: "视频", value: `${usage.totals.videoSeconds} 秒` },
-                      { label: "图片", value: `${usage.totals.imageCount} 张` },
-                      { label: "音乐", value: `${usage.totals.musicCount} 条` },
-                      { label: "估算成本", value: `≈ ¥${usage.totals.estimatedYuan.toFixed(2)}` },
-                    ].map((s) => (
-                      <div key={s.label} className="rounded-xl bg-[--surface] px-3 py-2">
-                        <div className="text-[10px] uppercase tracking-wider text-[--text-muted]">
-                          {s.label}
-                        </div>
-                        <div className="font-display text-sm font-semibold">{s.value}</div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {usage.rows.length === 0 ? (
-                    <p className="py-4 text-center text-sm text-[--text-muted]">
-                      {USAGE_WINDOWS.find((w) => w.key === usageWindow)?.label}没有走平台 Key 的生成
-                    </p>
-                  ) : (
-                    <div className="divide-y divide-[--border-subtle]">
-                      {usage.rows.map((r) => {
-                        // 上限是按 24 小时定义的；30 天窗口里拿它当分母会显示
-                        // 「视频 640/120 秒（已达上限）」这种既不真也不可执行的数字
-                        const showLimit = usage.limitsApply && usage.limits.dailyVideoSeconds > 0;
-                        const over = showLimit && r.videoSeconds >= usage.limits.dailyVideoSeconds;
-                        return (
-                          <div key={r.userId} className="flex flex-wrap items-center gap-2 py-2 text-xs">
-                            <span className="font-medium">{r.username ?? r.userId.slice(0, 8)}</span>
-                            <span className={over ? "text-amber-600" : "text-[--text-muted]"}>
-                              视频 {r.videoSeconds}
-                              {showLimit && `/${usage.limits.dailyVideoSeconds}`} 秒
-                              {over && "（已达上限）"}
-                            </span>
-                            <span className="text-[--text-muted]">图 {r.imageCount}</span>
-                            <span className="text-[--text-muted]">乐 {r.musicCount}</span>
-                            <span className="ml-auto font-mono">≈ ¥{r.estimatedYuan.toFixed(2)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  <p className="text-[11px] text-[--text-muted]">
-                    金额按生成时的报价函数反推，是<strong>估算</strong>，真实账单以模型厂商控制台为准。
-                    这里统计<strong>全站所有人</strong>走平台 Key 的生成；自带密钥的不计入 —— 那不花平台的钱。
-                    <br />
-                    ⚠️ 平台 Key 的<strong>持有者本人</strong>（owner）不会出现在这里：Key 挂在他名下，
-                    他的请求走的是「自己的密钥」这条分支。也就是说本表看的是
-                    <strong>别人花了你多少钱</strong>，不是这把 Key 的全部开销 —— 后者以厂商控制台为准。
-                  </p>
-                </div>
+                <UsagePanel
+                  usage={usage}
+                  window={usageWindow}
+                  onWindowChange={setUsageWindow}
+                />
               )}
 
               {/* 邀请码 */}
