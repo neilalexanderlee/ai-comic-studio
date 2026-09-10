@@ -66,3 +66,7 @@ pnpm test src/__tests__/unit/lib/video src/__tests__/unit/lib/task-queue/queue.t
 同时比较了 `095d7dc` 至检查基准的文件内容：预览/合成核心实现和测试保留；相关页面/属性面板只有后续 Tailwind token 语法修正；迁移 journal 新增 0067，原有 0066 预览去重迁移仍在。未发现本轮代码丢失或被撤销，不需要 cherry-pick 或 force push 恢复。
 
 后续复查应重新 fetch，并执行 `git merge-base --is-ancestor <commit> <ref>`（ref 分别为 HEAD、local/main、origin/main），再审查后续文件差异和运行回归。若提交经历史重写导致哈希变化，需要对比等价补丁及当前行为，不能只按旧哈希缺失判断功能丢失。
+
+范围扩展记录：按用户最终指定，以 **2026-09-09 16:36（UTC+8）** 为起点、`2ea2fe6` 为检查基准，从现存全部引用及 reflog 去重得到 **21 个提交**（包含其他会话的工作），全部是 HEAD、local/main、origin/main 的祖先。最早现存记录为 `b3cdb65`（9 月 9 日 18:08:54）；当前完整回归为 73 个文件、957 项通过。
+
+这不等于证明改写前的所有工作均未丢失：工作库与 local 裸库的不可达对象检查虽均为空，但此前已清理 reflog 并运行 GC；当前本地 commit-map 为 158 项，不能当作昨天记载的 213 项改写的完整映射。缺少改写前镜像时，结论应限定为“全部现存可追溯提交在三端保留”，不得用“fsck 无不可达对象”替代旧历史完整性证明。
