@@ -26,3 +26,43 @@ Docker pins the verified Node base image digest, FFmpeg and CJK font package ver
 Real FFmpeg tests reproduce heterogeneous AAC failure and verify continuous audio, trim, silence, gaps, gain, every offered transition/effect, overlap ordering, duration and preserved fps. A production-pipeline test compares preview/export decoded frame hashes at equal resolution and checks preview does not publish a final video. SQLite tests cover concurrent deduplication, completion reuse and retry. Baseline/migration tests cover existing and new databases.
 
 Before upload the pipeline fully decodes video and audio, verifies video duration/frame count and decoded audio sample duration. Intentional black/silence are valid; decode failure is not. Browser release QA must include preview generation, cached reuse, playback, scrubbing, invalidation after an edit and export on production FFmpeg.
+
+## 剪辑器 Harness 维护约定
+
+### 自动回归
+
+以下测试不调用生成模型。媒体测试需要本机可用的 `ffmpeg`、`ffprobe`，使用临时合成素材；不能因为没有真实 API Key 而跳过。
+
+| 文件（相对于 `src/__tests__/unit/lib/`） | 锁定的行为 |
+|---|---|
+| `video/realtime-playback.test.ts` | 时间线到裁剪源时间的映射、显式 trimEnd、未使用尾段静音、片段×轨道音量、淡入淡出、静音及大于 1 的增益 |
+| `video/timeline-contract.test.ts` | 旧快照兼容、端点决定时长、剔除仅供 UI 使用的字段、合成变更影响规范化快照 |
+| `video/render-timeline.test.ts` | 真实异构 AAC 拼接失败对照；逐源解码后保留 24 fps、空隙、裁剪、静音和音量 |
+| `video/composition.test.ts` | 13 种转场、8 种特效、每种特效接像素转场、帧数与重叠轨道顺序；特效输出必须统一时间基准后再接转场 |
+| `video/episode-render.test.ts` | 生产合成路径、字幕/BGM、完整解码与保存；同尺寸精准预览/导出帧哈希一致；预览不发布最终成片；损坏素材不发布 |
+| `task-queue/queue.test.ts` | SQLite 并发去重、完成任务复用、失败释放去重键并允许重试 |
+| `db/baseline-schema.test.ts`、`db/migration-lock.test.ts` | 基线与增量迁移、迁移锁；包括预览去重列对应的 schema/journal 完整性 |
+
+```bash
+npx tsc --noEmit
+pnpm test src/__tests__/unit/lib/video src/__tests__/unit/lib/task-queue/queue.test.ts src/__tests__/unit/lib/db/baseline-schema.test.ts src/__tests__/unit/lib/db/migration-lock.test.ts
+```
+
+### 浏览器发布验收
+
+1. 使用两段以上带声音、含裁剪的素材，并叠加字幕/BGM。打开剪辑器默认即为实时模式；普通播放、跳转、字幕/音量修改不创建渲染任务。首次素材加载允许缓冲，但不能要求“先生成预览”。
+2. 播放跨镜头直至结束，确认音视频推进、片尾保留最后一帧；再次播放、快速暂停/拖动、切换标签页后回来，均检查媒体错误及声音是否重复。
+3. 修改字幕对齐/字号/位置后立即检查画面；属性面板必须显示实际继承或覆盖后的样式，不能回落到另一套默认值。实时字幕只叠加一次。
+4. 主动选择精准预览，检查实际转场/特效；切回实时再播放。精准预览使用烧录字幕，不叠加实时字幕。修改后自动回到实时模式，不播放过期的精准结果。
+5. 重复请求相同精准预览，检查任务复用；预览不能更改最终成片地址。正式导出另行检查解码、视频帧数、实际音频样本时长；文件带有音轨不等于音轨完整或有声音。
+6. 将服务器生成成功、浏览器播放成功、本机下载成功分别记录；浏览器拦截下载不能记作下载通过。实时模式的转场/画面特效提示必须保留，不能声称实时画面与最终输出逐像素一致。
+
+自动回归未覆盖完整浏览器交互，也未证明任意输入或任意 FFmpeg 版本均无缺陷。运行环境升级后应在实际生产版本复跑媒体回归与上述交互验收。
+
+### 并行会话后的提交核对（2026-09-10）
+
+本次检查基准为 `54db482`：本地 HEAD、`local/main`、`origin/main` 三者一致。以下提交逐一通过三端祖先检查：`b0f1c81`、`73f3fd5`、`642761d`、`da0070c`、`b122d58`、`18ec98d`、`d3caced`、`095d7dc`。
+
+同时比较了 `095d7dc` 至检查基准的文件内容：预览/合成核心实现和测试保留；相关页面/属性面板只有后续 Tailwind token 语法修正；迁移 journal 新增 0067，原有 0066 预览去重迁移仍在。未发现本轮代码丢失或被撤销，不需要 cherry-pick 或 force push 恢复。
+
+后续复查应重新 fetch，并执行 `git merge-base --is-ancestor <commit> <ref>`（ref 分别为 HEAD、local/main、origin/main），再审查后续文件差异和运行回归。若提交经历史重写导致哈希变化，需要对比等价补丁及当前行为，不能只按旧哈希缺失判断功能丢失。
