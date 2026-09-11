@@ -68,7 +68,12 @@ function PickerRow({
   );
 }
 
-export function DefaultModelPicker() {
+interface DefaultModelPickerProps {
+  /** 平台托管模式（模型由 owner 统一配置）—— 决定「一个模型都没有」时该怎么说 */
+  managed?: boolean;
+}
+
+export function DefaultModelPicker({ managed = false }: DefaultModelPickerProps) {
   const t = useTranslations("settings");
   const {
     providers,
@@ -102,6 +107,38 @@ export function DefaultModelPicker() {
       }
     }
     return result;
+  }
+
+  // 一个可选模型都没有时，四个空下拉框什么也没说明 ——
+  // 用户看到的是「--」，分不清是没配、没拉到、还是自己权限不够。
+  // 平台模式下这是「去找管理员」，自部署下是「自己往下配」，引导完全相反。
+  const hasAnyOption =
+    getOptions("text").length +
+      getOptions("image").length +
+      getOptions("video").length +
+      getOptions("music").length >
+    0;
+
+  if (!hasAnyOption) {
+    return (
+      <div className="rounded-xl border border-dashed border-(--border-subtle) bg-(--surface)/50 px-4 py-5 text-sm text-(--text-muted)">
+        {managed ? (
+          <>
+            平台还没有配置任何可用模型，请联系管理员。
+            <span className="block text-xs">
+              （模型由平台统一配置，你这边不需要、也无法填写 API Key）
+            </span>
+          </>
+        ) : (
+          <>
+            还没有可用的模型。
+            <span className="block text-xs">
+              在下方按能力分类添加模型服务商，并勾选要启用的模型后，这里就能选默认模型了。
+            </span>
+          </>
+        )}
+      </div>
+    );
   }
 
   return (

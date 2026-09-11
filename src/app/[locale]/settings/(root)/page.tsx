@@ -67,7 +67,7 @@ export default function SettingsPage() {
               <Zap className="h-3.5 w-3.5" />
               {t("defaultModels")}
             </h3>
-            <DefaultModelPicker />
+            <DefaultModelPicker managed={ready && managed} />
           </div>
 
           {/* Prompt Templates link */}
