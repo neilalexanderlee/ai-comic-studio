@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
@@ -38,7 +38,6 @@ const ROLE_LABEL: Record<string, string> = {
  *   2. SSR 通过之后 cookie 才过期的那一小段竞态 —— 此时提示去登录正是对的。
  */
 export function AuthSection() {
-  const router = useRouter();
   const params = useParams();
   const locale = typeof params?.locale === "string" ? params.locale : "zh";
   const [me, setMe] = useState<MeResponse | null>(null);
@@ -71,7 +70,12 @@ export function AuthSection() {
       markLoggedOut();
       setMe({ loggedIn: false });
       toast.success("已退出登录");
-      router.refresh();
+      // 与登录同理（见 `auth/auth-form.tsx` 那段长注释）：身份变了，
+      // 客户端在上一个身份下建立的内存状态（model-store 里的 provider 列表等）
+      // 全部作废，而 `router.refresh()` 只重取服务端组件、**不卸载客户端组件**。
+      // 整页跳到首页：开了 `REQUIRE_AUTH` 时那一层的闸会把人送到登录页，
+      // 没开时就是匿名可用的首页 —— 两种部署都落到正确的地方。
+      window.location.assign(`/${locale}`);
     } finally {
       setLoading(false);
     }

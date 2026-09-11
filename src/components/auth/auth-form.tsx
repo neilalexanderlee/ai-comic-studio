@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -30,7 +29,6 @@ interface Props {
  * 匿名数据迁移走 `lib/client/anon-session`，与设置页共用一份实现。
  */
 export function AuthForm({ mode, next, requireInviteCode = false }: Props) {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -53,6 +51,7 @@ export function AuthForm({ mode, next, requireInviteCode = false }: Props) {
     e.preventDefault();
     if (!username.trim() || !password) return;
     setLoading(true);
+    let redirecting = false;
     try {
       const res = await fetch(isRegister ? "/api/auth/register" : "/api/auth/login", {
         method: "POST",
@@ -75,14 +74,29 @@ export function AuthForm({ mode, next, requireInviteCode = false }: Props) {
         isRegister ? `账号创建成功，欢迎 ${data.username}！` : `欢迎回来，${data.username}！`
       );
 
-      // replace 而不是 push：登录/注册页不该留在后退历史里
-      router.replace(next);
-      // 首页是服务端组件、按 cookie 查项目；不 refresh 会拿到登录前那份空结果
-      router.refresh();
+      // ⚠️ **必须是整页跳转，不能用 `router.replace` + `router.refresh`。**
+      //
+      // 那两个都是客户端跳转：根 layout 里的客户端组件**不会卸载重挂**，
+      // 于是它们那些 `useEffect(..., [])` 里「每人一份」的拉取**永远停留在登录前
+      // 那次匿名调用的结果**上 —— 而登录前调用必然是 401。实测症状（2026-09-11）：
+      // 隐身窗口首次登录后，设置页四个默认模型下拉框只有一个「--」、
+      // 平台托管模式也判成 false（于是给运营 admin 渲染出本不该有的 Key 配置表单），
+      // **刷新一下就全好了**。
+      //
+      // 之所以一直没人发现：老浏览器的 localStorage 里有 zustand persist 留下的
+      // provider 列表，把空拉取的结果盖住了；只有全新 profile 才暴露。
+      //
+      // 身份变了，客户端在旧身份下建立的所有缓存（zustand store、SWR、
+      // 各组件自己的 useState）就全部作废 —— 这正是整页重载该出现的时刻。
+      // 修一处组件治不了根：以后任何一个新组件只要在 mount 时拉一次「属于我的」
+      // 数据，就会重新踩一遍。
+      redirecting = true;
+      window.location.assign(next);
     } catch {
       toast.error("网络错误，请重试");
     } finally {
-      setLoading(false);
+      // 整页跳转期间按钮保持禁用，避免卸载前闪一下可点击状态
+      if (!redirecting) setLoading(false);
     }
   }
 
